@@ -1,0 +1,163 @@
+package me.laumss.mosaic
+
+import android.util.Log
+import android.view.View
+import android.view.ViewGroup
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.UiThreadUtil
+import java.lang.ref.WeakReference
+
+class MosaicEinkRefreshModule(
+    reactContext: ReactApplicationContext,
+) : ReactContextBaseJavaModule(reactContext) {
+
+    companion object {
+        private const val TAG = "MosaicEinkRefresh"
+        const val MODE_DTH = 5
+        const val MODE_DEFAULT = 7
+        const val MODE_DUX = 11
+
+        @Volatile private var instance: WeakReference<MosaicEinkRefreshModule>? = null
+
+        
+        @JvmStatic
+        fun applyNative(mode: Int, owner: String) {
+            val module = instance?.get() ?: return
+            runOnUiImmediate { module.applyOwned(mode, owner) }
+        }
+
+        @JvmStatic
+        fun resetNative(owner: String) {
+            val module = instance?.get() ?: return
+            runOnUiImmediate { module.resetOwned(owner) }
+        }
+
+        
+        private fun runOnUiImmediate(block: () -> Unit) {
+            if (UiThreadUtil.isOnUiThread()) block() else UiThreadUtil.runOnUiThread(block)
+        }
+    }
+
+    private var activeMode: Int? = null
+    private var modeView: WeakReference<View>? = null
+    
+    private var modeOwner: String? = null
+
+    init {
+        instance = WeakReference(this)
+    }
+
+    private fun applyOwned(mode: Int, owner: String) {
+        modeOwner = owner
+        applyRefreshMode(mode)
+    }
+
+    private fun resetOwned(owner: String) {
+        if (modeOwner != owner) {
+            Log.i(TAG, "reset skipped owner=$owner current=${modeOwner ?: "none"}")
+            return
+        }
+        modeOwner = null
+        applyRefreshMode(null)
+    }
+
+    override fun getName(): String = "MosaicEinkRefresh"
+
+    @ReactMethod
+    fun setRefreshMode(mode: Int, promise: Promise) {
+        UiThreadUtil.runOnUiThread {
+            if (mode != MODE_DTH && mode != MODE_DEFAULT && mode != MODE_DUX) {
+                Log.w(TAG, "unsupported E-ink mode=$mode")
+                promise.resolve(false)
+                return@runOnUiThread
+            }
+            modeOwner = "js"
+            promise.resolve(applyRefreshMode(mode))
+        }
+    }
+
+    @ReactMethod
+    fun resetRefreshMode(promise: Promise) {
+        UiThreadUtil.runOnUiThread {
+            modeOwner = null
+            promise.resolve(applyRefreshMode(null))
+        }
+    }
+
+    private fun applyRefreshMode(mode: Int?): Boolean {
+        val reassert = mode != null && mode == activeMode
+
+        val target = if (mode != null) {
+            findPluginContainer()
+                ?: reactApplicationContext.currentActivity?.window?.decorView
+        } else {
+            modeView?.get()
+                ?: findPluginContainer()
+                ?: reactApplicationContext.currentActivity?.window?.decorView
+        }
+
+        if (target == null) {
+            Log.w(TAG, "E-ink target view unavailable mode=${mode ?: "reset"}")
+            return false
+        }
+
+        return try {
+            if (mode != null) {
+                View::class.java
+                    .getMethod("setEinkUpdateMode", Int::class.javaPrimitiveType)
+                    .invoke(target, mode)
+                modeView = WeakReference(target)
+            } else {
+                View::class.java
+                    .getMethod("resetEinkUpdateMode")
+                    .invoke(target)
+                target.postInvalidateOnAnimation()
+                modeView = null
+            }
+            activeMode = mode
+            Log.i(TAG, "refreshMode=${mode ?: "reset"} reassert=$reassert view=${target.javaClass.simpleName}")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "eink call failed mode=${mode ?: "reset"}: ${e.message}")
+            false
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun findPluginContainer(): ViewGroup? {
+        return try {
+            val manager = reactApplicationContext.catalystInstance
+                ?.getNativeModule("NativePluginManager") ?: return null
+            val pluginAppField = manager.javaClass.declaredFieldOrNull("pluginApp") ?: return null
+            pluginAppField.isAccessible = true
+            val pluginApp = pluginAppField.get(manager) ?: return null
+            val pluginViewField = pluginApp.javaClass.declaredFieldOrNull("pluginView") ?: return null
+            pluginViewField.isAccessible = true
+            pluginViewField.get(pluginApp) as? ViewGroup
+        } catch (e: Exception) {
+            Log.w(TAG, "plugin container lookup failed: ${e.message}")
+            null
+        }
+    }
+
+    private fun Class<*>.declaredFieldOrNull(name: String): java.lang.reflect.Field? {
+        var type: Class<*>? = this
+        while (type != null) {
+            type.declaredFields.firstOrNull { it.name == name }?.let { return it }
+            type = type.superclass
+        }
+        return null
+    }
+
+    override fun invalidate() {
+        if (instance?.get() === this) instance = null
+        UiThreadUtil.runOnUiThread {
+            modeOwner = null
+            applyRefreshMode(null)
+        }
+        super.invalidate()
+    }
+}

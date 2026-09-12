@@ -1,0 +1,30 @@
+{
+  "extends": "@react-native/typescript-config/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "App.tsx",
+    "boardStore.ts",
+    "boardCommands.ts",
+    "engineSync.ts",
+    "liquidNecks.ts",
+    "imageStore.ts",
+    "mosaicImportBridge.ts",
+    "MosaicBoardViewNative.ts",
+    "noteBridge.ts",
+    "i18n.ts",
+    "React/src/boardFormat.ts",
+    "React/src/utf8.ts",
+    "React/src/base64.ts",
+    "React/src/id.ts",
+    "React/src/cardGeometry.ts",
+    "React/src/spatialIndex.ts",
+    "React/src/syncProtocol.ts",
+    "React/src/rangeSelection.ts",
+    "React/src/crc32.ts",
+    "React/src/types.ts",
+    "React/src/liquidEffects.ts"
+  ]
+}
