@@ -11,7 +11,7 @@ class TransientInkView(context: Context) : View(context) {
 
     companion object {
         private const val CLEAR_DELAY_MS = 160L
-        private const val LASSO_DOT_RADIUS_DP = 3.2f
+        private const val LASSO_DOT_RADIUS_DP = 2.2f
         private const val LASSO_DOT_SPACING_DP = 10f
     }
 

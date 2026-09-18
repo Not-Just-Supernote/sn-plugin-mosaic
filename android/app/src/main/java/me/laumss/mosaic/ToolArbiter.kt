@@ -3,18 +3,20 @@ package me.laumss.mosaic
 
 class ToolArbiter {
 
-    enum class Tool { ERASER, LASSO }
+    
+    enum class Tool { ERASER, LASSO, SHAPE }
     enum class Source { PEN_BUTTON, SCREEN, SLIDEBAR }
     enum class Settle { ON_PEN_UP, ON_NEXT_PEN_DOWN }
     enum class Physical { STYLUS, RUBBER }
 
-    data class State(val eraser: Boolean, val lasso: Boolean) {
+    data class State(val eraser: Boolean, val lasso: Boolean, val shape: Boolean = false) {
         companion object {
             val NONE = State(eraser = false, lasso = false)
             fun of(tool: Tool?): State = when (tool) {
                 null -> NONE
                 Tool.ERASER -> State(eraser = true, lasso = false)
                 Tool.LASSO -> State(eraser = false, lasso = true)
+                Tool.SHAPE -> State(eraser = false, lasso = false, shape = true)
             }
         }
     }
@@ -65,6 +67,9 @@ class ToolArbiter {
     fun toggleBase(tool: Tool): Transition = transition("toggle-base:$tool", false) {
         base = if (base == tool) null else tool
     }
+
+    
+    fun clearBase(): Transition = transition("clear-base", false) { base = null }
 
     
     fun pushOverride(

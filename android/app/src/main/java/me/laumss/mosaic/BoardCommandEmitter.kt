@@ -47,6 +47,13 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
     }
 
     private fun send(ops: WritableArray) {
+        
+        
+        
+        if (!reactContext.hasActiveReactInstance()) {
+            Log.w(TAG, "emit skipped: react instance inactive ops=${ops.size()}")
+            return
+        }
         try {
             val payload = Arguments.createMap().apply { putArray("ops", ops) }
             reactContext
@@ -67,6 +74,8 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 putString("space", rec.space)
                 putDouble("width", rec.width.toDouble())
                 putDouble("color", (rec.color.toLong() and 0xffffffffL).toDouble())
+                putInt("pen", rec.penStyle)
+                putDouble("sampleScale", rec.sampleScale.toDouble())
                 putString("points", packPoints(rec.points, rec.pressures))
             },
         )
@@ -102,8 +111,10 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 putDouble("height", rec.height.toDouble())
                 putInt("zIndex", rec.zIndex)
                 putString("kind", rec.kind)
+                putString("noteRef", rec.noteRef)
                 putString("bgColor", rec.bgColor)
                 putString("textColor", rec.textColor)
+                putString("title", rec.title)
             },
         )
     }
@@ -165,13 +176,22 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
         )
     }
 
+    
+    var viewMetricsDp: (() -> FloatArray)? = null
+
     fun viewport(panX: Float, panY: Float, scale: Float) {
+        val metrics = viewMetricsDp?.invoke()
         op(
             Arguments.createMap().apply {
                 putString("type", "viewport")
                 putDouble("panX", panX.toDouble())
                 putDouble("panY", panY.toDouble())
                 putDouble("scale", scale.toDouble())
+                if (metrics != null && metrics.size >= 3) {
+                    putDouble("viewW", metrics[0].toDouble())
+                    putDouble("viewH", metrics[1].toDouble())
+                    putDouble("topInset", metrics[2].toDouble())
+                }
             },
         )
     }

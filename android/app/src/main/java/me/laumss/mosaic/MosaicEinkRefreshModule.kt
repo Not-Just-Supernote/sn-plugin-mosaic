@@ -18,7 +18,8 @@ class MosaicEinkRefreshModule(
         private const val TAG = "MosaicEinkRefresh"
         const val MODE_DTH = 5
         const val MODE_DEFAULT = 7
-        const val MODE_DUX = 11
+        
+        const val MODE_DUX = 4
 
         @Volatile private var instance: WeakReference<MosaicEinkRefreshModule>? = null
 

@@ -48,6 +48,10 @@ type NoteShotLink = {
   pngBasename: string;
   baselinePictureKeys: string[];
   elementKey?: string;
+  
+  insertedBasename?: string;
+  
+  insertedUuid?: string;
   meta: NoteShotMeta;
   createdAt: string;
 };
@@ -231,7 +235,7 @@ async function registerPendingLink(
   pngPath: string,
   baselinePictureKeys: string[],
   meta: NoteShotMeta,
-): Promise<void> {
+): Promise<string> {
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   await updateRegistry(registry => {
     registry.links.push({
@@ -245,6 +249,41 @@ async function registerPendingLink(
     });
   });
   console.log(`${LOG} registry pending id=${id} page=${page} baseline=${baselinePictureKeys.length} wb=${meta.wbId}`);
+  return id;
+}
+
+
+async function bindInsertedShot(
+  filePath: string,
+  page: number,
+  baselinePictureKeys: string[],
+  linkId: string,
+): Promise<void> {
+  try {
+    const res: any = await PluginFileAPI.getElements(page, filePath);
+    if (!res?.success) return;
+    const elements: any[] = res.result ?? [];
+    try {
+      const added = pictureRecords(elements).filter(picture => !baselinePictureKeys.includes(picture.key));
+      const chosen = added.length > 0 ? added[added.length - 1] : undefined;
+      if (chosen === undefined) return;
+      const uuid = typeof chosen.element?.uuid === 'string' ? chosen.element.uuid : undefined;
+      await updateRegistry(latest => {
+        const link = latest.links.find(candidate => candidate.id === linkId);
+        if (link === undefined) return;
+        link.insertedBasename = chosen.basename;
+        link.elementKey = chosen.key;
+        if (uuid !== undefined) link.insertedUuid = uuid;
+      });
+      console.log(`${LOG} registry bound-insert id=${linkId} basename=${chosen.basename} uuid=${uuid ?? 'n/a'}`);
+    } finally {
+      for (const element of elements) {
+        try { element.recycle?.(); } catch {  }
+      }
+    }
+  } catch (err) {
+    console.log(`${LOG} bind-insert failed: ${err}`);
+  }
 }
 
 async function registryMetaByPicture(
@@ -321,17 +360,120 @@ export async function insertCaptureIntoNote(pngPath: string, meta: NoteShotMeta)
     return false;
   }
 
+  let linkId: string;
   try {
-    await registerPendingLink(filePath, page, pngPath, baselinePictureKeys, meta);
+    linkId = await registerPendingLink(filePath, page, pngPath, baselinePictureKeys, meta);
   } catch (err) {
     console.log(`${LOG} registry pending write failed: ${err}`);
     return false;
   }
 
   await delay(300);
+  await bindInsertedShot(filePath, page, baselinePictureKeys, linkId);
   await logPageElements(filePath, page);
   console.log(`${LOG} insert ok in ${Date.now() - startedAt}ms wb=${meta.wbId}`);
   return true;
+}
+
+
+async function locateNoteShotPicture(
+  link: NoteShotLink,
+): Promise<{ page: number; numInPage: number } | null> {
+  const notePath = link.notePath;
+  const wantBasename = link.insertedBasename ?? link.pngBasename;
+  const wantUuid = link.insertedUuid;
+  let totalPages = 0;
+  try {
+    const res: any = await PluginFileAPI.getNoteTotalPageNum(notePath);
+    if (res?.success && typeof res.result === 'number') totalPages = res.result;
+  } catch (err) {
+    console.log(`${LOG} total pages read failed: ${err}`);
+  }
+  if (totalPages <= 0) return null;
+  for (let page = 0; page < totalPages; page++) {
+    let elements: any[] = [];
+    try {
+      const res: any = await PluginFileAPI.getElements(page, notePath);
+      if (!res?.success) continue;
+      elements = res.result ?? [];
+      for (const picture of pictureRecords(elements)) {
+        if (typeof picture.element?.numInPage !== 'number') continue;
+        const uuidHit = wantUuid !== undefined && picture.element?.uuid === wantUuid;
+        const basenameHit = picture.basename === wantBasename;
+        if (uuidHit || basenameHit) {
+          return { page, numInPage: picture.element.numInPage };
+        }
+      }
+    } catch (err) {
+      console.log(`${LOG} locate scan failed page=${page}: ${err}`);
+    } finally {
+      for (const element of elements) {
+        try { element.recycle?.(); } catch {  }
+      }
+    }
+  }
+  return null;
+}
+
+
+export async function removeCaptureFromNote(wbId: string): Promise<boolean> {
+  const granted = await ensureNoteShotPermissions();
+  if (!granted) {
+    console.log(`${LOG} removeClip paused while file permission awaits approval wb=${wbId}`);
+    return false;
+  }
+  const target = await currentFileAndPage();
+  const currentPath = target?.filePath ?? null;
+  const registry = await readRegistry();
+  const links = registry.links
+    .filter(link => link.meta.wbId === wbId && (currentPath === null || link.notePath === currentPath))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  if (links.length === 0) {
+    console.log(`${LOG} removeClip no link wb=${wbId} note=${currentPath}`);
+    return false;
+  }
+  let deletedAny = false;
+  const clearedIds = new Set<string>();
+  for (const link of links) {
+    const located = await locateNoteShotPicture(link);
+    if (located !== null) {
+      try {
+        const res: any = await PluginFileAPI.deleteElements(link.notePath, located.page, [located.numInPage]);
+        if (res?.success && res.result === true) {
+          deletedAny = true;
+          console.log(`${LOG} removeClip deleted wb=${wbId} note=${link.notePath} page=${located.page} num=${located.numInPage}`);
+        } else {
+          console.log(`${LOG} removeClip delete failed res=${JSON.stringify(res)}`);
+        }
+      } catch (err) {
+        console.log(`${LOG} removeClip delete error: ${err}`);
+      }
+    } else {
+      console.log(`${LOG} removeClip picture already gone wb=${wbId} basename=${link.pngBasename}`);
+    }
+    clearedIds.add(link.id);
+  }
+  if (clearedIds.size > 0) {
+    await updateRegistry(latest => {
+      latest.links = latest.links.filter(link => !clearedIds.has(link.id));
+    });
+  }
+  if (deletedAny) {
+    try { await PluginCommAPI.reloadFile(); } catch (err) { console.log(`${LOG} removeClip reload skipped: ${err}`); }
+  }
+  return deletedAny;
+}
+
+
+export async function clippedWhiteboardIds(): Promise<string[]> {
+  const target = await currentFileAndPage();
+  const currentPath = target?.filePath ?? null;
+  const registry = await readRegistry();
+  const ids = new Set<string>();
+  for (const link of registry.links) {
+    if (currentPath === null || link.notePath === currentPath) ids.add(link.meta.wbId);
+  }
+  return [...ids];
 }
 
 async function logPageElements(filePath: string, page: number): Promise<void> {

@@ -21,22 +21,21 @@ object CardImageCache {
     private var bytes = 0L
 
     
-    fun get(path: String, targetLongPx: Int): Bitmap? = synchronized(this) {
+    fun get(path: String, targetLongPx: Int, alpha: Boolean = false): Bitmap? = synchronized(this) {
         if (path.isEmpty()) return null
         val existing = cache[path]
         if (existing != null) {
-            if (existing.sampleSize == 1
+            val sharpEnough = existing.sampleSize == 1
                 || max(existing.bitmap.width, existing.bitmap.height) >= targetLongPx
-            ) {
-                return existing.bitmap
-            }
+            val alphaOk = !alpha || existing.bitmap.hasAlpha()
+            if (sharpEnough && alphaOk) return existing.bitmap
             cache.remove(path)
             bytes -= existing.bitmap.allocationByteCount
         }
         val now = System.currentTimeMillis()
         val lastFailure = failedAt[path]
         if (lastFailure != null && now - lastFailure < FAILURE_RETRY_MS) return null
-        val decoded = decode(path, targetLongPx)
+        val decoded = decode(path, targetLongPx, alpha)
         if (decoded == null) {
             failedAt[path] = now
             return null
@@ -54,6 +53,11 @@ object CardImageCache {
         bytes = 0L
     }
 
+    fun invalidate(path: String) = synchronized(this) {
+        cache.remove(path)?.let { bytes -= it.bitmap.allocationByteCount }
+        failedAt.remove(path)
+    }
+
     private fun evictLocked() {
         val iterator = cache.entries.iterator()
         while (bytes > BUDGET_BYTES && cache.size > 1 && iterator.hasNext()) {
@@ -63,7 +67,7 @@ object CardImageCache {
         }
     }
 
-    private fun decode(path: String, targetLongPx: Int): Entry? {
+    private fun decode(path: String, targetLongPx: Int, alpha: Boolean): Entry? {
         val file = File(path)
         if (!file.isFile) {
             Log.w(TAG, "missing image file: $path")
@@ -81,7 +85,7 @@ object CardImageCache {
         while (longSide / (sample * 2) >= target) sample *= 2
         val options = BitmapFactory.Options().apply {
             inSampleSize = sample
-            inPreferredConfig = Bitmap.Config.RGB_565
+            inPreferredConfig = if (alpha) Bitmap.Config.ARGB_8888 else Bitmap.Config.RGB_565
         }
         val bitmap = try {
             BitmapFactory.decodeFile(path, options)

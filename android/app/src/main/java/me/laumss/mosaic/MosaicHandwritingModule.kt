@@ -26,6 +26,11 @@ class MosaicHandwritingModule(
     fun attachInput(deviceType: Int, promise: Promise) {
         try {
             if (inputReader == null) {
+                
+                
+                
+                
+                InputArbiter.reset()
                 val reader = InputReader(reactApplicationContext)
                 reader.start()
                 inputReader = reader

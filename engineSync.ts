@@ -8,28 +8,34 @@ import { bytesToBase64 } from './React/src/base64';
 import { resolveCardSize } from './React/src/cardGeometry';
 import type { Card, Connection, Viewport } from './React/src/types';
 import { imagePathFor } from './imageStore';
-import type { NeckPath } from './liquidNecks';
+import { notePathFor } from './noteStore';
 
 
 
-const PROTOCOL_VERSION = 2;
+const PROTOCOL_VERSION = 3;
 
 const OP_ADD_STROKE = 1;
 const OP_REMOVE_STROKES = 2;
 const OP_UPSERT_CARD = 3;
 const OP_REMOVE_CARDS = 4;
-const OP_SET_NECKS = 5;
+
 const OP_SET_WHITEBOARDS = 6;
 const OP_SET_CONNECTIONS = 8;
 
 type EngineModule = {
   applyOps(base64: string): void;
   setViewport(panX: number, panY: number, scale: number): void;
+  
+  setViewportIfUnset(panX: number, panY: number, scale: number): void;
   clearScene(): void;
   
   documentReplaced(viewTag: number): void;
   undo(viewTag: number): void;
   redo(viewTag: number): void;
+  
+  selectCards(viewTag: number, ids: string[]): void;
+  
+  invalidateImages(paths: string[]): void;
 };
 
 const MosaicBoardEngine = NativeModules.MosaicBoardEngine as EngineModule | undefined;
@@ -154,11 +160,15 @@ function writeStroke(writer: OpsWriter, stroke: InkStroke) {
   writer.str(stroke.space);
   writer.f32(stroke.width);
   writer.u32(stroke.color);
+  
+  writer.u16(stroke.pen);
+  writer.f32(stroke.sampleScale);
   const points = unpackStrokePoints(stroke.points);
   writer.u32(points.length);
   for (const point of points) {
     writer.f32(point.x);
     writer.f32(point.y);
+    writer.f32(point.p);
   }
 }
 
@@ -175,10 +185,14 @@ function writeCard(writer: OpsWriter, card: Card) {
   writer.str(card.content ?? '');
   
   
-  writer.str(card.kind === 'image' ? imagePathFor(card.imageRef) : '');
+  
+  writer.str(card.kind === 'image' ? imagePathFor(card.imageRef) : card.kind === 'note' ? notePathFor(card.noteRef) : '');
+  writer.str(card.kind === 'note' ? (card.noteRef ?? '') : '');
   
   writer.str(card.bgColor ?? '');
   writer.str(card.textColor ?? '');
+  
+  writer.str(card.title ?? '');
 }
 
 function writeIdList(writer: OpsWriter, op: number, ids: string[]) {
@@ -190,7 +204,6 @@ function writeIdList(writer: OpsWriter, op: number, ids: string[]) {
 export class EngineSyncSession {
   private lastInk = new Map<string, InkStroke>();
   private lastCards = new Map<string, Card>();
-  private lastNecksSignature = '';
   private lastWhiteboardsSignature = '';
   private lastConnectionsSignature = '';
 
@@ -198,7 +211,6 @@ export class EngineSyncSession {
   reset() {
     this.lastInk = new Map();
     this.lastCards = new Map();
-    this.lastNecksSignature = '';
     this.lastWhiteboardsSignature = '';
     this.lastConnectionsSignature = '';
     MosaicBoardEngine?.clearScene();
@@ -208,8 +220,22 @@ export class EngineSyncSession {
     MosaicBoardEngine?.setViewport(viewport.panX, viewport.panY, viewport.scale || 1);
   }
 
+  
+  setViewportIfUnset(viewport: Viewport) {
+    MosaicBoardEngine?.setViewportIfUnset?.(viewport.panX, viewport.panY, viewport.scale || 1);
+  }
+
   documentReplaced(viewTag: number | null) {
     if (viewTag !== null) MosaicBoardEngine?.documentReplaced(viewTag);
+  }
+
+  selectCards(viewTag: number | null, ids: string[]) {
+    if (viewTag !== null && ids.length > 0) MosaicBoardEngine?.selectCards?.(viewTag, ids);
+  }
+
+  
+  invalidateImages(paths: string[]) {
+    if (paths.length > 0) MosaicBoardEngine?.invalidateImages?.(paths);
   }
 
   
@@ -281,22 +307,6 @@ export class EngineSyncSession {
       writer.str(c.id);
       writer.str(c.fromCardId);
       writer.str(c.toCardId);
-    }
-    MosaicBoardEngine.applyOps(writer.finish());
-  }
-
-  
-  syncNecks(necks: NeckPath[]) {
-    if (MosaicBoardEngine === undefined) return;
-    const signature = necks.map(neck => `${neck.id}:${neck.path}`).join(';');
-    if (signature === this.lastNecksSignature) return;
-    this.lastNecksSignature = signature;
-    const writer = new OpsWriter();
-    writer.beginOp(OP_SET_NECKS);
-    writer.u32(necks.length);
-    for (const neck of necks) {
-      writer.str(neck.id);
-      writer.str(neck.path);
     }
     MosaicBoardEngine.applyOps(writer.finish());
   }

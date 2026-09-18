@@ -78,6 +78,13 @@ class InputReader(
         fun setPluginViewVisible(visible: Boolean) {
             pluginViewVisible = visible
             Log.i(TAG, "plugin view visible=$visible")
+            
+            
+            
+            if (!visible) {
+                InputArbiter.onPenContact(false)
+                InputArbiter.onPenHover(false)
+            }
         }
 
         @JvmStatic
@@ -488,7 +495,9 @@ class InputReader(
             }
         }
         
-        return floatArrayOf(quadX.toFloat(), -quadY.toFloat())
+        
+        
+        return floatArrayOf(quadX.toFloat(), quadY.toFloat())
     }
 
     private fun signedTilt(value: Int): Int = if (value > 9000) value - 65535 else value

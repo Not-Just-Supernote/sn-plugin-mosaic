@@ -4,11 +4,11 @@ import { requireNativeComponent, StyleProp, ViewProps, ViewStyle } from 'react-n
 
 export type MosaicBoardViewProps = ViewProps & {
   
-  penWidth?: number;
-  
   deviceType?: number;
   
   touchEnabled?: boolean;
+  
+  notesDirectory?: string;
 };
 
 const NativeMosaicBoardView = requireNativeComponent<MosaicBoardViewProps>('MosaicBoardView');
@@ -20,9 +20,9 @@ function sameStyle(a: StyleProp<ViewStyle> | undefined, b: StyleProp<ViewStyle> 
 }
 
 const MosaicBoardViewNative = memo(NativeMosaicBoardView, (previous, next) => (
-  previous.penWidth === next.penWidth
-  && previous.deviceType === next.deviceType
+  previous.deviceType === next.deviceType
   && previous.touchEnabled === next.touchEnabled
+  && previous.notesDirectory === next.notesDirectory
   && sameStyle(previous.style, next.style)
 ));
 

@@ -16,17 +16,26 @@ import type { Card, Connection, Viewport } from './React/src/types';
 export const BOARD_COMMAND_EVENT = 'MosaicBoardCommand';
 
 export type BoardCommand =
-  | { type: 'strokeUpsert'; id: string; space: string; width: number; color: number; points: string }
+  | { type: 'strokeUpsert'; id: string; space: string; width: number; color: number; pen: number; sampleScale: number; points: string }
   | { type: 'strokesRemove'; ids: string[] }
-  | { type: 'cardUpsert'; id: string; x: number; y: number; width: number; height: number; zIndex: number; kind: string; bgColor?: string; textColor?: string }
+  | { type: 'cardUpsert'; id: string; x: number; y: number; width: number; height: number; zIndex: number; kind: string; noteRef?: string; bgColor?: string; textColor?: string; title?: string }
   | { type: 'cardsRemove'; ids: string[] }
   | { type: 'connectionAdd'; id: string; from: string; to: string }
   | { type: 'connectionsRemove'; ids: string[] }
   | { type: 'whiteboardUpsert'; id: string; name: string; x: number; y: number; width: number; height: number }
   | { type: 'whiteboardsRemove'; ids: string[] }
-  | { type: 'viewport'; panX: number; panY: number; scale: number }
-  | { type: 'action'; name: 'close' | 'sync' }
+  
+  | { type: 'viewport'; panX: number; panY: number; scale: number; viewW?: number; viewH?: number; topInset?: number }
+  
+  | { type: 'action'; name: 'close'; emittedAt?: number }
+  | { type: 'action'; name: 'sync' }
   | { type: 'action'; name: 'touchEnabled'; value: boolean }
+  
+  | { type: 'action'; name: 'insertTextCard'; text: string; x: number; y: number; width?: number; height?: number }
+  
+  | { type: 'action'; name: 'removeClip'; wbId: string }
+  
+  | { type: 'action'; name: 'recognizeLasso' }
   
   | {
       type: 'action';
@@ -52,12 +61,17 @@ export function subscribeBoardCommands(handler: (ops: BoardCommand[]) => void): 
 
 
 export function strokeFromCommand(op: Extract<BoardCommand, { type: 'strokeUpsert' }>): InkStroke {
+  if (![0, 14, 15, 17, 18].includes(op.pen) || !Number.isFinite(op.sampleScale) || op.sampleScale <= 0) {
+    throw new Error('Unsupported stroke command: pen and sampleScale are required')
+  }
   const points = base64ToBytes(op.points);
   return {
     id: op.id,
     space: op.space,
     width: op.width,
     color: op.color >>> 0,
+    pen: op.pen,
+    sampleScale: op.sampleScale,
     encoding: STROKE_ENCODING_F32X3,
     points,
     bounds: computeStrokeBounds(unpackStrokePoints(points)),
@@ -82,7 +96,17 @@ export function cardFromCommand(
     height: op.height,
     zIndex: op.zIndex,
   };
-  if (existing !== undefined) return { ...existing, ...geometry, ...colors };
+  if (!op.kind) throw new Error('Card command kind is required')
+  if (existing !== undefined) {
+    return {
+      ...existing,
+      ...geometry,
+      ...colors,
+      kind: op.kind as Card['kind'],
+      noteRef: op.noteRef || undefined,
+      title: op.title || undefined,
+    }
+  }
   const card: Card = {
     ...CARD_DEFAULTS,
     ...geometry,
@@ -93,7 +117,9 @@ export function cardFromCommand(
     sourceType: 'manual',
     createdAt: new Date().toISOString(),
   };
-  if (op.kind !== '' && op.kind !== 'text') card.kind = op.kind as Card['kind'];
+  card.kind = op.kind as Card['kind'];
+  if (op.noteRef) card.noteRef = op.noteRef;
+  if (op.title) card.title = op.title;
   return card;
 }
 

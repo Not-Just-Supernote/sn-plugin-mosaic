@@ -1,13 +1,10 @@
 package me.laumss.mosaic
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Rect
 import android.graphics.Typeface
-import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
@@ -18,8 +15,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import java.util.Locale
-
 
 class BoardChromeView(context: Context) : FrameLayout(context) {
 
@@ -28,35 +23,34 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         private const val MUTED = 0xFF555555.toInt()
         private const val REGION_JUMP_SIZE_DP = 72f
         private const val REGION_JUMP_MARGIN_DP = 24f
-        private const val MENU_SIZE_DP = 52f
-        private const val MENU_MARGIN_DP = 24f
         
-        private const val TOUCH_SIZE_DP = 52f
+        private const val TOP_PULL_START_PX = 120f
         
-        private const val FLOAT_ICON_STROKE = 3f
-
+        private const val TOP_PULL_STEAL_PX = 60f
         
-        private const val FINGER_VIEWBOX = 48f
-        private const val FINGER_HAND =
-            "m 19.7812,40.7711 c -5.723,-1.787 -10.5000276,-7.9 -12.8870276,-11.482 -0.23652,-0.3715 -0.3943,-0.7875 -0.46358,-1.2224 -0.06928,-0.4349 -0.04859,-0.8794 0.0608,-1.306 0.10939,-0.4266 0.30514,-0.8262 0.57515,-1.1741 0.27001,-0.3479 0.60853,-0.6367 0.99463,-0.8485 0.93179,-0.5997 2.0272276,-0.8945 3.1341276,-0.8432 1.107,0.0512 2.1705,0.4459 3.0429,1.1292 l 1.905,1.589 v -12.923 c 0,-1.4 1.356,-2.375 3.028,-2.375 0.6827,-0.0467 1.3598,0.1504 1.9108,0.5562 0.551,0.4058 0.9402,0.994 1.0982,1.6598 -0.021,-0.123 0,0 0.019,0.128 -0.006,-0.155 0,8.579 0,8.673 V 8.483106 c 0.0723,-0.7341972 0.4302,-1.4105948 0.9967,-1.8833444 0.5664,-0.47271 1.296,-0.70388 2.0313,-0.64366 0.7353,-0.06022 1.4648,0.17095 2.0312,0.64366 0.5665,0.4727496 0.9245,1.1491472 0.9968,1.8833444 V 23.0711 c 0,0 0,-10.216 0,-10.236 0.0789,-0.7294 0.4396,-1.399 1.0053,-1.8661 0.5657,-0.467 1.2916,-0.6945 2.0227,-0.6339 0.7353,-0.0602 1.4648,0.1709 2.0312,0.6437 0.5665,0.4727 0.9245,1.1491 0.9968,1.8833 v 11.449 c 0,-0.042 0,-4.8 0.032,-5.082 0.05,-1.094 1.374,-2.159 3,-2.159 0.7353,-0.0602 1.4648,0.1709 2.0312,0.6437 0.5665,0.4727 0.9245,1.1491 0.9968,1.8833 v 13.454 c 0.019,1.1072 -0.36,2.1845 -1.068,3.036 -1.6427,2.0541 -3.7744,3.6632 -6.2,4.68 -4.239,1.516 -8.03,1.652 -13.322,0.004 z"
-        private const val FINGER_SLASH = "M 9.3700024,13.955 43.37,41.955"
-
+        private const val TOOLBAR_H_DP = InkToolbar.CELL_H_DP
+        private const val TOOLBAR_CELL_W_DP = InkToolbar.CELL_W_DP
         
-        private const val COPY_TO_VIEWBOX = 48f
-        private const val COPY_TO_CARD_BACK =
-            "M43 14H15C14.4477 14 14 14.4477 14 15V43C14 43.5523 14.4477 44 15 44H43C43.5523 44 44 43.5523 44 43V15C44 14.4477 43.5523 14 43 14Z"
-        private const val COPY_TO_CARD_FRONT =
-            "M33 4H5C4.44772 4 4 4.44772 4 5V33C4 33.5523 4.44772 34 5 34H33C33.5523 34 34 33.5523 34 33V5C34 4.44772 33.5523 4 33 4Z"
-        private val COPY_TO_WHITEBOARD = arrayOf(
-            "M27 18.3V4L6 4V26H20.3182",
-            "M25 18H42V43H20V24",
-            "M14 32H6V43H14V32Z",
-            "M42 4H34V12H42V4Z",
-        )
+        private const val MENU_SCREEN_MARGIN_DP = 20f
+        
+        private const val CLOSE_RIGHT_MARGIN_DP = 28f
+        private const val CLOSE_BUTTON_SCALE = 0.65f * 1.10f
+        private const val CLOSE_STROKE_SCALE = 0.65f
+        
+        private const val WIDTH_POPUP_CELL_DP = 56f
+        private const val WIDTH_POPUP_PAD_DP = 8f
+        private const val WIDTH_POPUP_BORDER_DP = 2f
+        
+        private const val POPUP_TITLE_SP = 11f
+        
+        private const val POPUP_GAP_DP = 4f
+        private const val POPUP_ROW_TOP_DP = 5f
     }
 
     interface Listener {
         fun onOpenMenu()
+        
+        fun onSelectBelow()
         fun onSync()
         fun onToggleTranslucent()
         fun onZoomStep(direction: Int)
@@ -68,73 +62,235 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         fun onToggleCardAccent()
         fun onApplySizeLevel(level: BoardGeometry.SizeLevel)
         fun onDeleteLassoSelection()
+        
+        fun onRecognizeLasso()
         fun onClose()
         fun onJumpToRegion(region: SparseNavigation.Region)
         fun onNavigateWhiteboard(id: String)
         
         fun onCaptureWhiteboard(id: String)
+        
+        fun onRemoveClip(id: String)
+        
+        fun onOpenNoteCard(cardId: String)
+        
+        fun onLocateNoteCard(cardId: String)
         fun onSwitcherDismissed()
+        
+        fun onPenStyle(style: PenStyle, width: Float)
+        
+        fun onConvertCardToNote()
+        fun onToggleEraser()
+        fun onToggleLasso()
+        
+        fun onShapeSelected(kind: Shapes.Kind)
+        
+        fun onSelectWriteTool()
+        
+        fun onTemplateSelected(template: BackgroundTemplate)
+        fun onUndo()
+        fun onRedo()
+        
+        fun onPenBlockChanged()
     }
 
     var listener: Listener? = null
 
-    private val zh = Locale.getDefault().language.startsWith("zh")
-    private fun t(zhText: String, enText: String) = if (zh) zhText else enText
-
     private val density = resources.displayMetrics.density
     private fun dp(v: Float): Int = (v * density + 0.5f).toInt()
 
-    private val menuButton = ImageView(context).apply {
-        scaleType = ImageView.ScaleType.FIT_CENTER
-        imageTintList = null
-        clearColorFilter()
-        contentDescription = t("菜单", "Menu")
-        background = null
-        isClickable = true
-        isFocusable = true
-    }
     private val zoomOut = textButton("－", 22f, bordered = false)
     private val zoomReadout = textButton("100%", 15f, bordered = false)
     private val zoomIn = textButton("＋", 22f, bordered = false)
-    
-    private val touchButton = ImageView(context).apply {
-        scaleType = ImageView.ScaleType.FIT_CENTER
-        imageTintList = null
-        clearColorFilter()
-        contentDescription = t("手触", "Touch")
-        background = null
-        isClickable = true
-        isFocusable = true
-    }
-    private val setWhiteboardButton = textButton(t("设白板", "Set Board"), 17f)
-    private val deleteWhiteboardButton = textButton(t("删白板", "Delete Board"), 17f)
-    private val deleteCardButton = textButton(t("删除卡片", "Delete Card"), 17f)
-    private val accentCardButton = textButton(t("强调色", "Accent"), 17f)
+    private val setWhiteboardButton = textButton("", 17f)
+    private val deleteWhiteboardButton = textButton("", 17f)
+    private val deleteCardButton = textButton("", 17f)
+    private val convertToNoteButton = textButton("", 17f)
+    private val accentCardButton = textButton("", 17f)
     private val sizeLevelButtons = ArrayList<TextView>()
-    private val lassoEditButton = textButton(t("编辑", "Edit"), 17f).apply { alpha = 0.35f; isEnabled = false }
-    private val lassoDeleteButton = textButton(t("删除卡片", "Delete Card"), 17f)
-    private val closePluginButton = textButton(t("关闭插件", "Close"), 17f)
-    private val syncButton = textButton(t("同步", "Sync"), 17f)
+    private val lassoEditButton = textButton("", 17f).apply { alpha = 0.35f; isEnabled = false }
+    private val lassoDeleteButton = textButton("", 17f)
     
-    private val translucentButton = textButton(t("半透明", "Translucent"), 17f).apply { alpha = 0.5f }
+    private val recognizeLassoButton = textButton("", 17f)
+    private val syncButton = textButton("", 17f)
+    
+    private val translucentButton = textButton("", 17f).apply { alpha = 0.5f }
+    private val inkToolbar = InkToolbar(context)
+    private val inkToolbarScroll = HorizontalScrollView(context).apply {
+        isHorizontalScrollBarEnabled = false
+        isFillViewport = true
+        setBackgroundColor(Color.WHITE)
+    }
+    
+    private val toolbarBand = View(context).apply { setBackgroundColor(Color.WHITE) }
+
+    
+    private val noteTitleBar = TextView(context).apply {
+        textSize = 16f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(INK)
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(16f), dp(6f), dp(16f), dp(6f))
+        setBackgroundColor(Color.WHITE)
+        maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        visibility = View.GONE
+    }
+
+    
+    private val closeButton = GlyphButton(
+        context,
+        { c, s, p -> ToolIcons.close(c, s, p) },
+        { listener?.onClose() },
+        useToolbarGlyphSize = true,
+        strokeScale = CLOSE_STROKE_SCALE,
+        invertOnPress = false,
+    )
+    private val widthPopup = WidthPopupView(context)
+    
+    private val widthPopupRoot = FrameLayout(context).apply {
+        visibility = View.GONE
+        isClickable = true
+        setOnClickListener { hideWidthPopup() }
+    }
+    private val templatePopup = TemplatePopupView(context)
+    
+    private val templatePopupRoot = FrameLayout(context).apply {
+        visibility = View.GONE
+        isClickable = true
+        setOnClickListener { hideTemplatePopup() }
+    }
+    private val shapePopup = ShapePopupView(context)
+    
+    private val shapePopupRoot = FrameLayout(context).apply {
+        visibility = View.GONE
+        isClickable = true
+        setOnClickListener { hideShapePopup() }
+    }
 
     private val toolsRow = LinearLayout(context)
+    private val zoomBar = LinearLayout(context)
     private val regionJumpViews = HashMap<SparseNavigation.Direction, RegionJumpView>()
 
     private val switcherRoot = FrameLayout(context)
     private val switcherPanel = LinearLayout(context)
     private val switcherList = LinearLayout(context)
     private val switcherEmpty = TextView(context)
+    
+    private val switcherNotesTitle = TextView(context)
+    private val switcherNotesList = LinearLayout(context)
+    private val switcherNotesEmpty = TextView(context)
 
     private var touchEnabled = false
     private var translucentActive = false
 
+    
+    private var pullTrackStartY = Float.NaN
+    
+    private var pullStealing = false
+
     init {
-        buildMenuButton()
-        buildTouchButton()
         buildSwitcher()
+        
+        inkToolbar.onPenStyle = { style, width -> hidePopups(); listener?.onPenStyle(style, width) }
+        inkToolbar.onTool = { tool ->
+            hidePopups()
+            when (tool) {
+                "eraser" -> listener?.onToggleEraser()
+                "lasso" -> listener?.onToggleLasso()
+                else -> listener?.onSelectWriteTool()
+            }
+        }
+        inkToolbar.onUndo = { hidePopups(); listener?.onUndo() }
+        inkToolbar.onRedo = { hidePopups(); listener?.onRedo() }
+        inkToolbar.onToggleTouch = { hidePopups(); listener?.onToggleTouch() }
+        inkToolbar.onMore = { hidePopups(); listener?.onOpenMenu() }
+        inkToolbar.onSelectBelow = { hidePopups(); listener?.onSelectBelow() }
+        inkToolbar.onNibWidthRequest = { cellLeft, cellWidth -> hideTemplatePopup(); hideShapePopup(); showWidthPopup(cellLeft, cellWidth) }
+        inkToolbar.onShape = { cellLeft, cellWidth -> hideWidthPopup(); hideTemplatePopup(); showShapePopup(cellLeft, cellWidth) }
+        
+        
+        val barH = dp(TOOLBAR_H_DP)
+        inkToolbarScroll.addView(inkToolbar, ViewGroup.LayoutParams(LayoutParams.WRAP_CONTENT, barH))
+        
+        val closeW = dp(TOOLBAR_CELL_W_DP * CLOSE_BUTTON_SCALE)
+        val closeH = dp(TOOLBAR_H_DP * CLOSE_BUTTON_SCALE)
+        val closeTop = (barH - closeH) / 2
+        val closeReserve = TOOLBAR_CELL_W_DP * CLOSE_BUTTON_SCALE + CLOSE_RIGHT_MARGIN_DP
+        
+        addView(toolbarBand, LayoutParams(LayoutParams.MATCH_PARENT, barH, Gravity.TOP))
+        addView(inkToolbarScroll, LayoutParams(LayoutParams.MATCH_PARENT, barH, Gravity.TOP).apply {
+            rightMargin = dp(closeReserve)
+        })
+        addView(closeButton, LayoutParams(closeW, closeH, Gravity.TOP or Gravity.END).apply {
+            rightMargin = dp(CLOSE_RIGHT_MARGIN_DP)
+            topMargin = closeTop
+        })
+        
+        addView(noteTitleBar, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP).apply {
+            topMargin = barH
+        })
+        widthPopupRoot.addView(
+            widthPopup,
+            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START),
+        )
+        addView(widthPopupRoot, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.TOP).apply {
+            topMargin = barH
+        })
+        templatePopupRoot.addView(
+            templatePopup,
+            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START),
+        )
+        
+        addView(templatePopupRoot, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.TOP))
+        shapePopupRoot.addView(
+            shapePopup,
+            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START),
+        )
+        addView(shapePopupRoot, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.TOP).apply {
+            topMargin = barH
+        })
         isClickable = false
         setWillNotDraw(true)
+    }
+
+    
+    override fun onInterceptTouchEvent(ev: android.view.MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                pullStealing = false
+                
+                pullTrackStartY =
+                    if (!blocksPen && ev.getToolType(0) != android.view.MotionEvent.TOOL_TYPE_STYLUS
+                        && ev.getToolType(0) != android.view.MotionEvent.TOOL_TYPE_ERASER
+                        && ev.y < TOP_PULL_START_PX
+                    ) ev.y else Float.NaN
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val start = pullTrackStartY
+                if (!start.isNaN() && ev.y - start > TOP_PULL_STEAL_PX) {
+                    pullTrackStartY = Float.NaN
+                    pullStealing = true
+                    return true 
+                }
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL ->
+                pullTrackStartY = Float.NaN
+        }
+        return super.onInterceptTouchEvent(ev)
+    }
+
+    
+    
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(ev: android.view.MotionEvent): Boolean {
+        if (pullStealing) {
+            if (ev.actionMasked == android.view.MotionEvent.ACTION_UP
+                || ev.actionMasked == android.view.MotionEvent.ACTION_CANCEL
+            ) pullStealing = false
+            return true
+        }
+        return super.onTouchEvent(ev)
     }
 
     private fun textButton(text: String, sizeSp: Float, bordered: Boolean = true): TextView =
@@ -163,96 +319,55 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             cornerRadius = radiusDp * density
         }
 
-    private fun buildMenuButton() {
-        val size = dp(MENU_SIZE_DP)
-        menuButton.setImageDrawable(rasterizeCopyToIcon(size))
-        addView(menuButton, LayoutParams(size, size, Gravity.START or Gravity.BOTTOM).apply {
-            leftMargin = dp(MENU_MARGIN_DP)
-            bottomMargin = dp(MENU_MARGIN_DP)
-        })
-        menuButton.setOnClickListener { listener?.onOpenMenu() }
+    
+    private var toolbarHiddenByUser = false
+    
+    private var toolbarHiddenByMenu = false
+    
+    private var cachedSwitcherWidthPx = 0
+
+    
+    val toolbarShown: Boolean get() = !toolbarHiddenByUser && !toolbarHiddenByMenu
+
+    private fun applyToolbarVisibility() {
+        val vis = if (toolbarShown) View.VISIBLE else View.GONE
+        toolbarBand.visibility = vis
+        inkToolbarScroll.visibility = vis
+        closeButton.visibility = vis
     }
 
     
-    private fun buildTouchButton() {
-        val size = dp(TOUCH_SIZE_DP)
-        touchButton.setImageDrawable(rasterizeFingerIcon(size, touchEnabled))
-        addView(touchButton, LayoutParams(size, size, Gravity.START or Gravity.BOTTOM).apply {
-            leftMargin = dp(MENU_MARGIN_DP)
-            bottomMargin = dp(MENU_MARGIN_DP) + dp(MENU_SIZE_DP) + dp(12f)
-        })
-        touchButton.setOnClickListener { listener?.onToggleTouch() }
+    fun toggleToolbar() {
+        if (toolbarHiddenByMenu) return
+        toolbarHiddenByUser = !toolbarHiddenByUser
+        if (toolbarHiddenByUser) hidePopups()
+        applyToolbarVisibility()
+        listener?.onPenBlockChanged()
     }
 
     
-    private fun rasterizeFingerIcon(sizePx: Int, enabled: Boolean): BitmapDrawable {
-        val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bmp)
-        canvas.scale(sizePx / FINGER_VIEWBOX, sizePx / FINGER_VIEWBOX)
-        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            color = Color.WHITE
-        }
-        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            color = INK
-            strokeWidth = FLOAT_ICON_STROKE
-            strokeJoin = Paint.Join.ROUND
-            strokeCap = Paint.Cap.ROUND
-        }
-        val hand = SvgPathParser.parse(FINGER_HAND)
-        canvas.drawPath(hand, fill)
-        canvas.drawPath(hand, stroke)
-        if (!enabled) canvas.drawPath(SvgPathParser.parse(FINGER_SLASH), stroke)
-        return BitmapDrawable(resources, bmp)
-    }
+    fun toolbarHeightPx(): Int = if (toolbarShown) dp(TOOLBAR_H_DP) else 0
 
-    
-    private fun rasterizeCopyToIcon(sizePx: Int): BitmapDrawable {
-        val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bmp)
-        canvas.scale(sizePx / COPY_TO_VIEWBOX, sizePx / COPY_TO_VIEWBOX)
-        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            color = Color.WHITE
+    fun setNoteMode(active: Boolean, title: String? = null) {
+        
+        inkToolbar.setMoreVisible(!active)
+        if (active) { hideSwitcher(); regionJumpViews.values.forEach { it.visibility = View.GONE } }
+        else regionJumpViews.values.forEach { it.visibility = View.VISIBLE }
+        
+        if (active && !title.isNullOrBlank()) {
+            noteTitleBar.text = title
+            noteTitleBar.visibility = View.VISIBLE
+        } else {
+            noteTitleBar.visibility = View.GONE
         }
-        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            color = INK
-            strokeWidth = FLOAT_ICON_STROKE
-            strokeJoin = Paint.Join.ROUND
-            strokeCap = Paint.Cap.ROUND
-        }
-        val back = SvgPathParser.parse(COPY_TO_CARD_BACK)
-        val front = SvgPathParser.parse(COPY_TO_CARD_FRONT)
-        canvas.drawPath(back, fill)
-        canvas.drawPath(back, stroke)
-        canvas.drawPath(front, fill)
-        canvas.drawPath(front, stroke)
-        canvas.save()
-        canvas.translate(8f, 8f)
-        canvas.scale(0.4583f, 0.4583f)
-        for (data in COPY_TO_WHITEBOARD) {
-            canvas.drawPath(SvgPathParser.parse(data), stroke)
-        }
-        canvas.restore()
-        return BitmapDrawable(resources, bmp)
-    }
-
-    
-    fun toolbarHeightPx(): Int = 0
-
-    fun menuButtonRectPx(out: Rect): Rect {
-        val size = dp(MENU_SIZE_DP)
-        val margin = dp(MENU_MARGIN_DP)
-        val left = margin
-        val top = if (height > 0) height - margin - size else margin
-        out.set(left, top, left + size, top + size)
-        return out
+        hidePopups()
+        bringChromeToFront()
     }
 
     fun setZoom(scale: Float) {
-        zoomReadout.text = "${Math.round(BoardGeometry.zoomPercentForScale(scale))}%"
+        val text = "${Math.round(BoardGeometry.zoomPercentForScale(scale))}%"
+        
+        if (zoomReadout.text.toString() != text) zoomReadout.text = text
         val atMin = scale <= BoardGeometry.ZOOM_LEVELS.first() + 1e-6f
         val atMax = scale >= BoardGeometry.ZOOM_LEVELS.last() - 1e-6f
         zoomOut.alpha = if (atMin) 0.3f else 1f
@@ -261,10 +376,16 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         zoomIn.isEnabled = !atMax
     }
 
+    
+    fun setInkTool(eraser: Boolean, lasso: Boolean, shape: Boolean = false) = inkToolbar.setTool(eraser, lasso, shape)
+
+    
+    fun setSelectBelowActive(active: Boolean) = inkToolbar.setSelectBelowActive(active)
+
     fun setTouchEnabled(enabled: Boolean) {
         if (touchEnabled == enabled) return
         touchEnabled = enabled
-        touchButton.setImageDrawable(rasterizeFingerIcon(dp(TOUCH_SIZE_DP), enabled))
+        inkToolbar.setTouchEnabled(enabled)
     }
 
     
@@ -281,16 +402,28 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         selectedCardColored: Boolean,
         sizeLevels: List<BoardGeometry.SizeLevel>,
         lassoCards: Boolean,
+        selectedCardKind: String? = null,
+        lassoStrokes: Boolean = false,
     ) {
         val plain = !selectedCard && !lassoCards
+        val canConvertOrColor = selectedCard && selectedCardKind != "image" && selectedCardKind != "note"
+        
+        recognizeLassoButton.visibility = if (lassoStrokes && !selectedCard) View.VISIBLE else View.GONE
         setWhiteboardButton.visibility = if (plain && !currentWhiteboard) View.VISIBLE else View.GONE
         deleteWhiteboardButton.visibility = if (plain && currentWhiteboard) View.VISIBLE else View.GONE
         deleteCardButton.visibility = if (selectedCard) View.VISIBLE else View.GONE
-        accentCardButton.visibility = if (selectedCard) View.VISIBLE else View.GONE
-        
-        accentCardButton.text = if (selectedCardColored) t("默认卡", "Default") else t("强调色", "Accent")
+        accentCardButton.visibility = if (canConvertOrColor) View.VISIBLE else View.GONE
+        convertToNoteButton.visibility = if (canConvertOrColor) View.VISIBLE else View.GONE
+        accentCardButton.text = if (selectedCardColored) {
+            MosaicStrings.t(MosaicStrings.Key.defaultCard)
+        } else {
+            MosaicStrings.t(MosaicStrings.Key.accent)
+        }
         lassoEditButton.visibility = if (lassoCards) View.VISIBLE else View.GONE
         lassoDeleteButton.visibility = if (lassoCards) View.VISIBLE else View.GONE
+        val cardContextMenu = selectedCard
+        val showGlobalTools = !cardContextMenu
+        translucentButton.visibility = if (showGlobalTools) View.VISIBLE else View.GONE
 
         for (b in sizeLevelButtons) toolsRow.removeView(b)
         sizeLevelButtons.clear()
@@ -298,9 +431,9 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             val insertAt = toolsRow.indexOfChild(accentCardButton) + 1
             sizeLevels.forEachIndexed { index, level ->
                 val label = when {
-                    level.factor < 1f -> t("½ 邻卡", "½ neighbor")
-                    level.factor < 3f -> t("2× 邻卡", "2× neighbor")
-                    else -> t("4× 邻卡", "4× neighbor")
+                    level.factor < 1f -> MosaicStrings.t(MosaicStrings.Key.sizeLevelHalf)
+                    level.factor < 3f -> MosaicStrings.t(MosaicStrings.Key.sizeLevelDouble)
+                    else -> MosaicStrings.t(MosaicStrings.Key.sizeLevelQuad)
                 }
                 val b = textButton(label, 17f)
                 b.setOnClickListener { listener?.onApplySizeLevel(level) }
@@ -312,20 +445,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
                 sizeLevelButtons.add(b)
             }
         }
-    }
-
-    fun toolbarContains(xPx: Float, yPx: Float): Boolean = menuButtonContains(xPx, yPx)
-
-    private fun menuButtonContains(xPx: Float, yPx: Float): Boolean {
-        if (menuButton.visibility != View.VISIBLE || switcherOpen) return false
-        return xPx >= menuButton.left && xPx <= menuButton.right &&
-            yPx >= menuButton.top && yPx <= menuButton.bottom
-    }
-
-    private fun touchButtonContains(xPx: Float, yPx: Float): Boolean {
-        if (touchButton.visibility != View.VISIBLE || switcherOpen) return false
-        return xPx >= touchButton.left && xPx <= touchButton.right &&
-            yPx >= touchButton.top && yPx <= touchButton.bottom
     }
 
     
@@ -395,15 +514,12 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
     private fun regionJumpParams(dir: SparseNavigation.Direction): LayoutParams {
         val size = dp(REGION_JUMP_SIZE_DP)
         val margin = dp(REGION_JUMP_MARGIN_DP)
-        val menuReserve = dp(MENU_SIZE_DP) + dp(MENU_MARGIN_DP) * 2
         return when (dir) {
             SparseNavigation.Direction.LEFT -> LayoutParams(size, size, Gravity.START or Gravity.CENTER_VERTICAL).apply { leftMargin = margin }
             SparseNavigation.Direction.RIGHT -> LayoutParams(size, size, Gravity.END or Gravity.CENTER_VERTICAL).apply { rightMargin = margin }
-            SparseNavigation.Direction.UP -> LayoutParams(size, size, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = margin }
-            SparseNavigation.Direction.DOWN -> LayoutParams(size, size, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = margin }
-        }.also {
             
-            if (dir == SparseNavigation.Direction.DOWN) it.leftMargin = menuReserve
+            SparseNavigation.Direction.UP -> LayoutParams(size, size, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = toolbarHeightPx() + margin }
+            SparseNavigation.Direction.DOWN -> LayoutParams(size, size, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = margin }
         }
     }
 
@@ -417,7 +533,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
     
 
     private fun buildSwitcher() {
-        switcherRoot.setBackgroundColor(0x33000000)
+        switcherRoot.setBackgroundColor(Color.TRANSPARENT)
         switcherRoot.visibility = View.GONE
         switcherRoot.setOnClickListener { listener?.onSwitcherDismissed() }
         addView(switcherRoot, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -429,39 +545,19 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             setColor(Color.WHITE)
             setStroke(dp(2f), INK)
         }
+        
         switcherRoot.addView(
             switcherPanel,
-            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM),
-        )
-
-        val header = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        header.addView(
-            TextView(context).apply {
-                text = t("菜单", "Menu")
-                textSize = 22f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(INK)
+            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
+                leftMargin = dp(MENU_SCREEN_MARGIN_DP)
+                topMargin = dp(MENU_SCREEN_MARGIN_DP)
             },
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
         )
-        header.addView(
-            closePluginButton,
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48f)).apply { marginEnd = dp(10f) },
-        )
-        val dismiss = textButton(t("关闭", "Close"), 17f)
-        dismiss.setOnClickListener { listener?.onSwitcherDismissed() }
-        header.addView(dismiss, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48f)))
-        switcherPanel.addView(header)
 
-        val zoomBar = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = borderDrawable(Color.WHITE)
-            setPadding(dp(2f), 0, dp(2f), 0)
-        }
+        zoomBar.orientation = LinearLayout.HORIZONTAL
+        zoomBar.gravity = Gravity.CENTER_VERTICAL
+        zoomBar.background = borderDrawable(Color.WHITE)
+        zoomBar.setPadding(dp(2f), 0, dp(2f), 0)
         zoomReadout.minWidth = dp(58f)
         zoomBar.addView(zoomOut, LinearLayout.LayoutParams(dp(40f), dp(38f)))
         zoomBar.addView(zoomReadout, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(38f)))
@@ -470,36 +566,45 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         val toolsScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
         toolsRow.orientation = LinearLayout.HORIZONTAL
         toolsRow.gravity = Gravity.CENTER_VERTICAL
-        toolsRow.addView(zoomBar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(10f) })
-        for (button in listOf(syncButton, translucentButton, setWhiteboardButton, deleteWhiteboardButton, deleteCardButton, accentCardButton, lassoEditButton, lassoDeleteButton)) {
+        for (button in listOf(convertToNoteButton, translucentButton, setWhiteboardButton, deleteWhiteboardButton, deleteCardButton, accentCardButton, recognizeLassoButton, lassoEditButton, lassoDeleteButton)) {
             toolsRow.addView(button, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48f)).apply { marginEnd = dp(10f) })
         }
         toolsScroll.addView(toolsRow, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        switcherPanel.addView(toolsScroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = dp(12f)
-        })
 
         zoomOut.setOnClickListener { listener?.onZoomStep(-1) }
         zoomReadout.setOnClickListener { listener?.onZoomReset() }
         zoomIn.setOnClickListener { listener?.onZoomStep(1) }
-        syncButton.setOnClickListener { listener?.onSync() }
+        convertToNoteButton.setOnClickListener { listener?.onConvertCardToNote() }
         translucentButton.setOnClickListener { listener?.onToggleTranslucent() }
         setWhiteboardButton.setOnClickListener { listener?.onSetWhiteboard() }
         deleteWhiteboardButton.setOnClickListener { listener?.onDeleteWhiteboard() }
         deleteCardButton.setOnClickListener { listener?.onDeleteSelectedCard() }
         accentCardButton.setOnClickListener { listener?.onToggleCardAccent() }
         lassoDeleteButton.setOnClickListener { listener?.onDeleteLassoSelection() }
-        closePluginButton.setOnClickListener { listener?.onClose() }
+        recognizeLassoButton.setOnClickListener { listener?.onRecognizeLasso() }
 
-        switcherPanel.addView(TextView(context).apply {
-            text = t("白板", "Whiteboards")
-            textSize = 18f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(INK)
-            setPadding(0, dp(16f), 0, dp(8f))
-        })
+        
+        val whiteboardHeader = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8f), 0, dp(8f))
+        }
+        whiteboardHeader.addView(
+            zoomBar,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+        )
+        whiteboardHeader.addView(
+            View(context),
+            LinearLayout.LayoutParams(0, 0, 1f),
+        )
+        val templateMenuButton = textButton(MosaicStrings.t(MosaicStrings.Key.template), 15f)
+        templateMenuButton.setOnClickListener { toggleMenuTemplatePopup() }
+        whiteboardHeader.addView(
+            templateMenuButton,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)),
+        )
+        switcherPanel.addView(whiteboardHeader)
 
-        switcherEmpty.text = t("暂无白板，请先「设白板」", "No whiteboards yet. Use “Set Board” first.")
         switcherEmpty.textSize = 16f
         switcherEmpty.setTextColor(MUTED)
         switcherPanel.addView(switcherEmpty)
@@ -509,13 +614,60 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         scroll.addView(switcherList, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         switcherPanel.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0).apply { weight = 1f })
 
+        
+        switcherNotesTitle.textSize = 18f
+        switcherNotesTitle.typeface = Typeface.DEFAULT_BOLD
+        switcherNotesTitle.setTextColor(INK)
+        switcherNotesTitle.setPadding(0, dp(16f), 0, dp(8f))
+        switcherPanel.addView(switcherNotesTitle)
+
+        switcherNotesEmpty.textSize = 16f
+        switcherNotesEmpty.setTextColor(MUTED)
+        switcherPanel.addView(switcherNotesEmpty)
+
+        val notesScroll = ScrollView(context)
+        switcherNotesList.orientation = LinearLayout.VERTICAL
+        notesScroll.addView(switcherNotesList, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        switcherPanel.addView(notesScroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0).apply { weight = 1f })
+
+        switcherPanel.addView(
+            toolsScroll,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(12f)
+            },
+        )
+
+        applyMenuRowStrings()
         setMode(currentWhiteboard = false, selectedCard = false, selectedCardColored = false, sizeLevels = emptyList(), lassoCards = false)
         setZoom(BoardGeometry.DEFAULT_ZOOM)
     }
 
+    
+    private fun applyMenuRowStrings() {
+        syncButton.text = MosaicStrings.t(MosaicStrings.Key.sync)
+        convertToNoteButton.text = MosaicStrings.t(MosaicStrings.Key.convertToNote)
+        translucentButton.text = MosaicStrings.t(MosaicStrings.Key.translucent)
+        setWhiteboardButton.text = MosaicStrings.t(MosaicStrings.Key.setWhiteboard)
+        deleteWhiteboardButton.text = MosaicStrings.t(MosaicStrings.Key.deleteWhiteboard)
+        deleteCardButton.text = MosaicStrings.t(MosaicStrings.Key.deleteCard)
+        lassoEditButton.text = MosaicStrings.t(MosaicStrings.Key.edit)
+        lassoDeleteButton.text = MosaicStrings.t(MosaicStrings.Key.deleteCard)
+        recognizeLassoButton.text = MosaicStrings.t(MosaicStrings.Key.recognizeCard)
+        switcherEmpty.text = MosaicStrings.t(MosaicStrings.Key.whiteboardSwitcherEmpty)
+        switcherNotesTitle.text = MosaicStrings.t(MosaicStrings.Key.notes)
+        switcherNotesEmpty.text = MosaicStrings.t(MosaicStrings.Key.notesEmpty)
+        zoomOut.contentDescription = MosaicStrings.t(MosaicStrings.Key.zoomOut)
+        zoomIn.contentDescription = MosaicStrings.t(MosaicStrings.Key.zoomIn)
+        zoomReadout.contentDescription = MosaicStrings.t(MosaicStrings.Key.zoomDefault)
+    }
+
     val switcherOpen: Boolean get() = switcherRoot.visibility == View.VISIBLE
 
-    fun showSwitcher(whiteboards: List<BoardEngine.WhiteboardRec>) {
+    fun showSwitcher(
+        whiteboards: List<BoardEngine.WhiteboardRec>,
+        noteCards: List<BoardEngine.CardRec>,
+        clipped: Set<String>,
+    ) {
         switcherList.removeAllViews()
         switcherEmpty.visibility = if (whiteboards.isEmpty()) View.VISIBLE else View.GONE
         for (wb in whiteboards) {
@@ -549,45 +701,434 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
                 setTextColor(MUTED)
             })
             row.addView(meta, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            val capture = textButton(t("截图入笔记", "Snapshot to note"), 15f)
-            capture.contentDescription = t("截图入笔记", "Snapshot into note")
-            capture.setOnClickListener { listener?.onCaptureWhiteboard(wb.id) }
-            row.addView(capture, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48f)).apply { marginStart = dp(10f) })
+            
+            val removable = clipped.contains(wb.id)
+            val clip = GlyphButton(
+                context,
+                { c, s, p -> ToolIcons.clip(c, s, p, removable) },
+                { if (removable) listener?.onRemoveClip(wb.id) else listener?.onCaptureWhiteboard(wb.id) },
+            )
+            clip.contentDescription = MosaicStrings.t(
+                if (removable) MosaicStrings.Key.removeQuickAccess else MosaicStrings.Key.quickAccess,
+            )
+            row.addView(clip, LinearLayout.LayoutParams(dp(48f), dp(48f)).apply { marginStart = dp(10f) })
             switcherList.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
-        val maxHeight = (height * 0.72f).toInt().coerceAtLeast(dp(240f))
-        (switcherPanel.layoutParams as LayoutParams).height = maxHeight
-        menuButton.visibility = View.GONE
+        showNoteCards(noteCards)
+        applyMenuRowStrings()
+        hidePopups()
+        
+        cachedSwitcherWidthPx = switcherPanelWidthPx()
+        toolbarHiddenByMenu = true
+        applyToolbarVisibility()
         switcherRoot.visibility = View.VISIBLE
         bringChromeToFront()
+        post { layoutSwitcherPanel() }
+        listener?.onPenBlockChanged()
+    }
+
+    
+    private fun showNoteCards(noteCards: List<BoardEngine.CardRec>) {
+        switcherNotesList.removeAllViews()
+        switcherNotesEmpty.visibility = if (noteCards.isEmpty()) View.VISIBLE else View.GONE
+        val thumbSize = dp(56f)
+        noteCards.forEachIndexed { index, card ->
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(10f), 0, dp(10f))
+                isClickable = true
+                isLongClickable = true
+                setOnClickListener { listener?.onOpenNoteCard(card.id) }
+                setOnLongClickListener {
+                    listener?.onLocateNoteCard(card.id)
+                    true
+                }
+            }
+            val name = card.title.ifBlank { MosaicStrings.noteName(index + 1) }
+            val preview = if (card.imagePath.isNotEmpty()) CardImageCache.get(card.imagePath, thumbSize, alpha = true) else null
+            val thumbView: View = if (preview != null) {
+                ImageView(context).apply {
+                    setImageBitmap(preview)
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    background = borderDrawable(Color.WHITE, 2f, 6f)
+                }
+            } else {
+                TextView(context).apply {
+                    text = name.take(2)
+                    textSize = 18f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(INK)
+                    gravity = Gravity.CENTER
+                    background = borderDrawable(Color.WHITE, 2f, 6f)
+                }
+            }
+            row.addView(thumbView, LinearLayout.LayoutParams(thumbSize, thumbSize).apply { marginEnd = dp(14f) })
+            val meta = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+            meta.addView(TextView(context).apply {
+                text = name
+                textSize = 18f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(INK)
+            })
+            meta.addView(TextView(context).apply {
+                text = "(${Math.round(card.x)}, ${Math.round(card.y)})"
+                textSize = 13f
+                setTextColor(MUTED)
+            })
+            row.addView(meta, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            switcherNotesList.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (switcherOpen) layoutSwitcherPanel()
+    }
+
+    
+    private fun layoutSwitcherPanel() {
+        if (width <= 0 || height <= 0) return
+        val margin = dp(MENU_SCREEN_MARGIN_DP)
+        
+        val panelWidth = if (cachedSwitcherWidthPx > 0) cachedSwitcherWidthPx else switcherPanelWidthPx()
+        val panelHeight = (height - 2 * margin).coerceAtLeast(dp(160f))
+        val lp = switcherPanel.layoutParams as LayoutParams
+        lp.width = panelWidth
+        lp.height = panelHeight
+        lp.gravity = Gravity.TOP or Gravity.START
+        lp.leftMargin = margin
+        lp.topMargin = margin
+        switcherPanel.layoutParams = lp
+        switcherPanel.requestLayout()
+    }
+
+    private fun switcherPanelWidthPx(): Int {
+        val scrollX = inkToolbarScroll.scrollX
+        val base = inkToolbarScroll.left + inkToolbar.left - scrollX
+        
+        val lassoRight = base + inkToolbar.lassoCellRightPx()
+        val margin = dp(MENU_SCREEN_MARGIN_DP)
+        
+        return (lassoRight - margin).coerceIn(dp(160f), (width - 2 * margin).coerceAtLeast(dp(160f)))
     }
 
     fun hideSwitcher() {
         switcherRoot.visibility = View.GONE
-        menuButton.visibility = View.VISIBLE
+        hidePopups()
+        
+        if (toolbarHiddenByMenu) {
+            toolbarHiddenByMenu = false
+            applyToolbarVisibility()
+            listener?.onPenBlockChanged()
+        }
     }
 
     private fun bringChromeToFront() {
-        if (!switcherOpen) {
-            menuButton.bringToFront()
-            touchButton.bringToFront()
-        }
         if (switcherOpen && indexOfChild(switcherRoot) != childCount - 1) switcherRoot.bringToFront()
     }
 
     private fun displayName(name: String): String {
         val number = BoardGeometry.defaultWhiteboardNumber(name)
-        return if (number == null) name else t("白板 $number", "Whiteboard $number")
+        return if (number == null) name else MosaicStrings.whiteboardName(number)
     }
 
-    fun whiteboardDisplayName(name: String): String = displayName(name).ifEmpty { t("白板", "Whiteboard") }
+    fun whiteboardDisplayName(name: String): String =
+        displayName(name).ifEmpty { MosaicStrings.t(MosaicStrings.Key.whiteboard) }
 
     fun newWhiteboardName(existing: Collection<BoardEngine.WhiteboardRec>): String {
         val n = BoardGeometry.nextWhiteboardNumber(existing)
-        return t("白板 $n", "Whiteboard $n")
+        return MosaicStrings.whiteboardName(n)
     }
 
     
     fun consumesPoint(xPx: Float, yPx: Float): Boolean =
-        switcherOpen || menuButtonContains(xPx, yPx) || touchButtonContains(xPx, yPx) || regionJumpContains(xPx, yPx)
+        blocksPen || yPx < toolbarHeightPx() || regionJumpContains(xPx, yPx)
+
+    
+    val blocksPen: Boolean get() = switcherOpen || widthPopupRoot.visibility == View.VISIBLE ||
+        templatePopupRoot.visibility == View.VISIBLE || shapePopupRoot.visibility == View.VISIBLE
+
+    private fun hidePopups() { hideWidthPopup(); hideTemplatePopup(); hideShapePopup() }
+
+    
+    fun setCurrentTemplate(template: BackgroundTemplate) = templatePopup.setSelected(template)
+
+    
+    fun setCurrentShape(kind: Shapes.Kind?) = shapePopup.setSelected(kind)
+
+    private fun showShapePopup(cellLeft: Int, cellWidth: Int) {
+        if (shapePopupRoot.visibility == View.VISIBLE) { hideShapePopup(); return }
+        shapePopup.measure(
+            MeasureSpec.makeMeasureSpec(width.coerceAtLeast(1), MeasureSpec.AT_MOST),
+            MeasureSpec.makeMeasureSpec(height.coerceAtLeast(1), MeasureSpec.AT_MOST),
+        )
+        val popupWidth = shapePopup.measuredWidth
+        val anchorLeft = cellLeft - inkToolbarScroll.scrollX
+        val left = anchorLeft.coerceIn(0, (width - popupWidth).coerceAtLeast(0))
+        (shapePopup.layoutParams as LayoutParams).leftMargin = left
+        shapePopupRoot.visibility = View.VISIBLE
+        shapePopupRoot.bringToFront()
+        shapePopup.requestLayout()
+        listener?.onPenBlockChanged()
+    }
+
+    private fun hideShapePopup() {
+        if (shapePopupRoot.visibility != View.VISIBLE) return
+        shapePopupRoot.visibility = View.GONE
+        listener?.onPenBlockChanged()
+    }
+
+    
+    private fun toggleMenuTemplatePopup() {
+        if (templatePopupRoot.visibility == View.VISIBLE) { hideTemplatePopup(); return }
+        templatePopup.measure(
+            MeasureSpec.makeMeasureSpec(width.coerceAtLeast(1), MeasureSpec.AT_MOST),
+            MeasureSpec.makeMeasureSpec(height.coerceAtLeast(1), MeasureSpec.AT_MOST),
+        )
+        val popupWidth = templatePopup.measuredWidth
+        val margin = dp(MENU_SCREEN_MARGIN_DP)
+        val panelWidth = if (cachedSwitcherWidthPx > 0) cachedSwitcherWidthPx else switcherPanelWidthPx()
+        
+        val border = dp(WIDTH_POPUP_BORDER_DP)
+        val left = (margin + panelWidth - border).coerceIn(0, (width - popupWidth).coerceAtLeast(0))
+        val lp = templatePopup.layoutParams as LayoutParams
+        lp.leftMargin = left
+        lp.topMargin = margin
+        templatePopup.layoutParams = lp
+        templatePopupRoot.visibility = View.VISIBLE
+        templatePopupRoot.bringToFront()
+        templatePopup.requestLayout()
+        listener?.onPenBlockChanged()
+    }
+
+    private fun hideTemplatePopup() {
+        if (templatePopupRoot.visibility != View.VISIBLE) return
+        templatePopupRoot.visibility = View.GONE
+        listener?.onPenBlockChanged()
+    }
+
+    private fun showWidthPopup(cellLeft: Int, cellWidth: Int) {
+        if (widthPopupRoot.visibility == View.VISIBLE) { hideWidthPopup(); return }
+        widthPopup.setSelected(inkToolbar.widthIndex)
+        widthPopup.measure(
+            MeasureSpec.makeMeasureSpec(width.coerceAtLeast(1), MeasureSpec.AT_MOST),
+            MeasureSpec.makeMeasureSpec(height.coerceAtLeast(1), MeasureSpec.AT_MOST),
+        )
+        
+        val popupWidth = widthPopup.measuredWidth
+        val anchorLeft = cellLeft - inkToolbarScroll.scrollX
+        val left = anchorLeft.coerceIn(0, (width - popupWidth).coerceAtLeast(0))
+        (widthPopup.layoutParams as LayoutParams).leftMargin = left
+        widthPopupRoot.visibility = View.VISIBLE
+        widthPopupRoot.bringToFront()
+        widthPopup.requestLayout()
+        listener?.onPenBlockChanged()
+    }
+
+    private fun hideWidthPopup() {
+        if (widthPopupRoot.visibility != View.VISIBLE) return
+        widthPopupRoot.visibility = View.GONE
+        listener?.onPenBlockChanged()
+    }
+
+    
+    private class GlyphButton(
+        context: android.content.Context,
+        private val glyph: (Canvas, Float, Paint) -> Unit,
+        private val click: () -> Unit,
+        private val useToolbarGlyphSize: Boolean = false,
+        private val strokeScale: Float = 1f,
+        
+        private val invertOnPress: Boolean = true,
+    ) : View(context) {
+        var active = false
+            set(value) { if (field != value) { field = value; invalidate() } }
+        private var down = false
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+
+        private fun strokePx(): Float =
+            InkToolbar.iconStrokePx(resources.displayMetrics.density) * strokeScale
+
+        override fun onDraw(c: Canvas) {
+            val inverted = active || (down && invertOnPress)
+            c.drawColor(if (inverted) Color.BLACK else Color.WHITE)
+            paint.strokeWidth = strokePx()
+            paint.color = if (inverted) Color.WHITE else Color.BLACK
+            val s = if (useToolbarGlyphSize) {
+                InkToolbar.glyphSizeInCell(width, height)
+            } else {
+                width * 0.72f
+            }
+            c.save(); c.translate((width - s) / 2f, (height - s) / 2f); glyph(c, s, paint); c.restore()
+        }
+
+        override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> { down = true; invalidate() }
+                android.view.MotionEvent.ACTION_UP -> {
+                    down = false; invalidate()
+                    if (e.x >= 0 && e.y >= 0 && e.x < width && e.y < height) click()
+                }
+                android.view.MotionEvent.ACTION_CANCEL -> { down = false; invalidate() }
+            }
+            return true
+        }
+    }
+
+    
+    private inner class WidthPopupView(context: android.content.Context) : LinearLayout(context) {
+        private val cells = ArrayList<GlyphButton>()
+
+        init {
+            orientation = VERTICAL
+            isClickable = true
+            val pad = dp(WIDTH_POPUP_PAD_DP)
+            setPadding(pad, pad, pad, pad)
+            background = borderDrawable(fill = Color.WHITE, strokeDp = WIDTH_POPUP_BORDER_DP)
+            addView(TextView(context).apply {
+                text = MosaicStrings.t(MosaicStrings.Key.thick)
+                textSize = POPUP_TITLE_SP
+                setTextColor(INK)
+                typeface = Typeface.DEFAULT_BOLD
+                includeFontPadding = false
+            })
+            val row = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val cellPx = dp(WIDTH_POPUP_CELL_DP)
+            PenPopup.WIDTHS.indices.forEach { i ->
+                
+                val radiusU = 1.7f + i * 1.5f
+                val cell = GlyphButton(
+                    context,
+                    { c, s, p -> ToolIcons.nibDot(c, s, p, radiusU) },
+                    click = {
+                        inkToolbar.setWidthIndex(i)
+                        hideWidthPopup()
+                    },
+                )
+                cells.add(cell)
+                row.addView(cell, LinearLayout.LayoutParams(cellPx, cellPx).apply { marginStart = if (i == 0) 0 else dp(POPUP_GAP_DP) })
+            }
+            addView(row, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = dp(POPUP_ROW_TOP_DP) })
+        }
+
+        fun setSelected(index: Int) = cells.forEachIndexed { i, cell -> cell.active = i == index }
+    }
+
+    
+    private inner class TemplatePopupView(context: android.content.Context) : LinearLayout(context) {
+        private val styleCells = LinkedHashMap<TemplateStyle, GlyphButton>()
+        private val spacingCells = LinkedHashMap<TemplateSpacing, GlyphButton>()
+        private var current = BackgroundTemplate.BLANK
+
+        init {
+            orientation = VERTICAL
+            isClickable = true
+            val pad = dp(WIDTH_POPUP_PAD_DP)
+            setPadding(pad, pad, pad, pad)
+            background = borderDrawable(fill = Color.WHITE, strokeDp = WIDTH_POPUP_BORDER_DP)
+            addView(title("模板"))
+            addView(buildStyleRow(), rowParams(POPUP_ROW_TOP_DP))
+            addView(title("间距"), rowParams(POPUP_ROW_TOP_DP * 1.5f))
+            addView(buildSpacingRow(), rowParams(POPUP_ROW_TOP_DP))
+        }
+
+        private fun title(text: String) = TextView(context).apply {
+            this.text = text; textSize = POPUP_TITLE_SP; setTextColor(INK)
+            typeface = Typeface.DEFAULT_BOLD; includeFontPadding = false
+        }
+
+        private fun rowParams(topDp: Float) =
+            LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = dp(topDp) }
+
+        private fun buildStyleRow(): LinearLayout {
+            val row = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val cellPx = dp(WIDTH_POPUP_CELL_DP)
+            val entries = listOf<Pair<TemplateStyle, (Canvas, Float, Paint) -> Unit>>(
+                TemplateStyle.NONE to { c, s, p -> ToolIcons.templateNone(c, s, p) },
+                TemplateStyle.DOTS to { c, s, p -> ToolIcons.templateDots(c, s, p) },
+                TemplateStyle.LINES to { c, s, p -> ToolIcons.templateLines(c, s, p) },
+                TemplateStyle.CROSS to { c, s, p -> ToolIcons.templateCross(c, s, p) },
+            )
+            entries.forEachIndexed { i, (style, glyph) ->
+                val cell = GlyphButton(context, glyph, click = { selectStyle(style) })
+                styleCells[style] = cell
+                row.addView(cell, LinearLayout.LayoutParams(cellPx, cellPx).apply { marginStart = if (i == 0) 0 else dp(POPUP_GAP_DP) })
+            }
+            return row
+        }
+
+        private fun buildSpacingRow(): LinearLayout {
+            val row = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val cellPx = dp(WIDTH_POPUP_CELL_DP)
+            val entries = listOf(
+                TemplateSpacing.NARROW to 3f,
+                TemplateSpacing.MEDIUM to 5f,
+                TemplateSpacing.WIDE to 8f,
+            )
+            entries.forEachIndexed { i, (spacing, gapU) ->
+                val cell = GlyphButton(context, { c, s, p -> ToolIcons.templateSpacing(c, s, p, gapU) }, click = { selectSpacing(spacing) })
+                spacingCells[spacing] = cell
+                row.addView(cell, LinearLayout.LayoutParams(cellPx, cellPx).apply { marginStart = if (i == 0) 0 else dp(POPUP_GAP_DP) })
+            }
+            return row
+        }
+
+        private fun selectStyle(style: TemplateStyle) {
+            current = current.copy(style = style); refresh(); listener?.onTemplateSelected(current)
+        }
+
+        private fun selectSpacing(spacing: TemplateSpacing) {
+            current = current.copy(spacing = spacing); refresh(); listener?.onTemplateSelected(current)
+        }
+
+        fun setSelected(template: BackgroundTemplate) { current = template; refresh() }
+
+        private fun refresh() {
+            styleCells.forEach { (style, cell) -> cell.active = style == current.style }
+            spacingCells.forEach { (spacing, cell) -> cell.active = spacing == current.spacing }
+        }
+    }
+
+    
+    private inner class ShapePopupView(context: android.content.Context) : LinearLayout(context) {
+        private val cells = LinkedHashMap<Shapes.Kind, GlyphButton>()
+        private var current: Shapes.Kind? = null
+
+        init {
+            orientation = VERTICAL
+            isClickable = true
+            val pad = dp(WIDTH_POPUP_PAD_DP)
+            setPadding(pad, pad, pad, pad)
+            background = borderDrawable(fill = Color.WHITE, strokeDp = WIDTH_POPUP_BORDER_DP)
+            addView(TextView(context).apply {
+                text = MosaicStrings.t(MosaicStrings.Key.shape)
+                textSize = POPUP_TITLE_SP; setTextColor(INK)
+                typeface = Typeface.DEFAULT_BOLD; includeFontPadding = false
+            })
+            val row = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val cellPx = dp(WIDTH_POPUP_CELL_DP)
+            val entries = listOf<Pair<Shapes.Kind, (Canvas, Float, Paint) -> Unit>>(
+                Shapes.Kind.LINE to { c, s, p -> ToolIcons.shapeLine(c, s, p) },
+                Shapes.Kind.RECT to { c, s, p -> ToolIcons.shapeRect(c, s, p) },
+                Shapes.Kind.TRIANGLE to { c, s, p -> ToolIcons.shapeTriangle(c, s, p) },
+                Shapes.Kind.ELLIPSE to { c, s, p -> ToolIcons.shapeEllipse(c, s, p) },
+            )
+            entries.forEachIndexed { i, (kind, glyph) ->
+                val cell = GlyphButton(context, glyph, click = { hideShapePopup(); listener?.onShapeSelected(kind) })
+                cells[kind] = cell
+                row.addView(cell, LinearLayout.LayoutParams(cellPx, cellPx).apply { marginStart = if (i == 0) 0 else dp(POPUP_GAP_DP) })
+            }
+            addView(row, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { topMargin = dp(POPUP_ROW_TOP_DP) })
+        }
+
+        fun setSelected(kind: Shapes.Kind?) {
+            current = kind
+            cells.forEach { (k, cell) -> cell.active = k == current }
+        }
+    }
 }

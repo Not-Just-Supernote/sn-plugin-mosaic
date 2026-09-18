@@ -12,6 +12,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.SystemClock
 import android.text.TextPaint
 import android.util.Log
 import android.view.View
@@ -29,22 +30,98 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         private const val CACHE_BUDGET_BYTES = 64L * 1024 * 1024
         
         private const val PERF_LOG_INTERVAL_MS = 1000L
+        
+        private const val GESTURE_FRAME_MIN_MS = 70L
 
         
-        private const val CARD_FILL_COLOR = 0xFFDBDBDB.toInt()
-        private const val CARD_OUTLINE_COLOR = 0xFFC9C9C9.toInt()
+        
+        private const val CARD_FILL_COLOR = 0xFFD9D9D9.toInt()
         
         private const val CARD_COLORED_FILL_COLOR = 0xFF000000.toInt()
-        private const val CARD_OUTLINE_WIDTH = 2f
+        
+        private const val CARD_SHADOW_COLOR = 0xFF77838D.toInt()
+        private const val CARD_SHADOW_EDGE_COLOR = 0xFF9BA5B1.toInt()
+        private const val CARD_SHADOW_OFFSET = 8f
+        private const val CARD_SHADOW_EDGE = 3f
+        private const val CARD_SHADOW_EXTENT = CARD_SHADOW_OFFSET + CARD_SHADOW_EDGE
+        
+        private const val CARD_OUTLINE_WIDTH = 3f
+        private const val CARD_PLACEHOLDER_COLOR = 0xFF8A8A8A.toInt()
+        
+        private const val CARD_OUTLINE_EMPHASIS_COLOR = Color.BLACK
         private const val CARD_SELECTED_COLOR = Color.BLACK
         private const val CARD_SELECTED_WIDTH = 2f
         private const val CARD_RADIUS = 0f
         private const val CARD_HANDLE_SIZE = 18f
         private const val TITLE_COLOR = 0xFF111111.toInt()
         private const val CARD_TEXT_SIZE = 16f
+        private const val CARD_TEXT_LINE_MUL = 1.28f
         private const val CARD_TEXT_COLOR = Color.BLACK
         private const val CARD_PADDING_X = 16f
         private const val CARD_PADDING_Y = 14f
+        private val textMeasurePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = CARD_TEXT_SIZE
+            isSubpixelText = true
+        }
+
+        
+        fun measureTextCardSize(raw: String, maxWidth: Float = BoardGeometry.DEFAULT_CARD_WIDTH): android.graphics.PointF {
+            val innerMax = (maxWidth - CARD_PADDING_X * 2f).coerceAtLeast(1f)
+            var contentW = 0f
+            var y = CARD_PADDING_Y
+            forEachTextRun(raw, innerMax, textMeasurePaint) { _, lineWidth, lineHeight ->
+                if (lineWidth > contentW) contentW = lineWidth
+                y += lineHeight
+            }
+            return android.graphics.PointF(
+                (contentW + CARD_PADDING_X * 2f).coerceIn(BoardGeometry.MIN_CARD_SIZE, maxWidth),
+                (y + CARD_PADDING_Y).coerceIn(BoardGeometry.MIN_CARD_SIZE, BoardGeometry.MAX_CARD_SIZE),
+            )
+        }
+
+        private fun forEachTextRun(
+            raw: String,
+            innerMax: Float,
+            paint: TextPaint,
+            emit: (text: String, width: Float, height: Float) -> Unit,
+        ) {
+            for (paragraph in raw.replace("\r\n", "\n").split('\n')) {
+                val heading = paragraph.trimStart().takeWhile { it == '#' }.length
+                val text = paragraph.trimStart().removePrefix("#".repeat(heading)).trimStart()
+                if (text.isEmpty()) {
+                    emit("", 0f, CARD_TEXT_SIZE * 0.7f)
+                    continue
+                }
+                paint.textSize = when (heading) { 1 -> 22f; 2 -> 19f; 3 -> 17f; else -> CARD_TEXT_SIZE }
+                paint.isFakeBoldText = heading > 0
+                val lineH = paint.textSize * CARD_TEXT_LINE_MUL
+                val words = text.split(Regex("\\s+"))
+                var line = ""
+                fun flush(chunk: String) {
+                    if (chunk.isEmpty()) return
+                    var start = 0
+                    while (start < chunk.length) {
+                        val count = paint.breakText(chunk, start, chunk.length, true, innerMax, null)
+                        val n = if (count > 0) count else 1
+                        val piece = chunk.substring(start, start + n)
+                        emit(piece, paint.measureText(piece), lineH)
+                        start += n
+                    }
+                }
+                for (word in words) {
+                    val candidate = if (line.isEmpty()) word else "$line $word"
+                    if (line.isNotEmpty() && paint.measureText(candidate) > innerMax) {
+                        flush(line)
+                        line = word
+                    } else {
+                        line = candidate
+                    }
+                }
+                if (line.isNotEmpty()) flush(line)
+            }
+            paint.textSize = CARD_TEXT_SIZE
+            paint.isFakeBoldText = false
+        }
 
         
         private const val WB_CORNER_LEN = 44f
@@ -54,7 +131,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         private const val WB_NAME_COLOR = 0xFF555555.toInt()
 
         
-        private const val TRANSLUCENT_BG_COLOR = 0xD0000000.toInt()
+        private const val TRANSLUCENT_BG_COLOR = 0xD0FFFFFF.toInt()
     }
 
     private data class TileKey(val ix: Int, val iy: Int, val scaleBits: Int)
@@ -95,6 +172,67 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     
     private val rasterScale: Float
         get() = rasterScaleOverride ?: BoardEngine.scale
+
+    
+    @Volatile
+    private var gestureFreezeTiles = false
+
+    fun setGestureFreezeTiles(active: Boolean) {
+        if (gestureFreezeTiles == active) return
+        gestureFreezeTiles = active
+        if (!active) {
+            
+            
+            synchronized(cacheLock) {
+                forEachVisibleTileLocked { key ->
+                    val entry = cache[key]
+                    if (entry == null || entry.dirty) pending.add(key)
+                }
+                if (pending.isNotEmpty()) {
+                    invalidateWhenFresh = true
+                    scheduleRasterLocked()
+                }
+            }
+        }
+        postInvalidateOnAnimation()
+    }
+
+    
+
+    @Volatile
+    private var gestureThrottle = false
+    private var lastGestureFrameAt = 0L
+    private var gestureFramePosted = false
+    private val gestureFrameTask = Runnable {
+        gestureFramePosted = false
+        postInvalidateOnAnimation()
+    }
+
+    
+    fun setGestureThrottle(active: Boolean) {
+        if (gestureThrottle == active) return
+        gestureThrottle = active
+        if (!active) {
+            removeCallbacks(gestureFrameTask)
+            gestureFramePosted = false
+            postInvalidateOnAnimation()
+        }
+    }
+
+    private fun requestViewportFrame() {
+        if (!gestureThrottle) {
+            postInvalidateOnAnimation()
+            return
+        }
+        if (gestureFramePosted) return
+        val elapsed = SystemClock.uptimeMillis() - lastGestureFrameAt
+        if (elapsed >= GESTURE_FRAME_MIN_MS) {
+            postInvalidateOnAnimation()
+            return
+        }
+        gestureFramePosted = true
+        postDelayed(gestureFrameTask, GESTURE_FRAME_MIN_MS - elapsed)
+    }
 
     
     fun setZoomPreview(active: Boolean) {
@@ -155,7 +293,9 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         get() = resources.displayMetrics.density.coerceAtLeast(1f)
 
     
-    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    
+    private val strokePaint = Paint().apply {
+        isAntiAlias = false
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
@@ -164,20 +304,21 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         style = Paint.Style.FILL
         color = CARD_FILL_COLOR
     }
-    private val neckStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        color = CARD_OUTLINE_COLOR
-        strokeWidth = CARD_OUTLINE_WIDTH
-    }
     private val cardFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = CARD_FILL_COLOR
     }
-    private val cardStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        color = CARD_OUTLINE_COLOR
-        strokeWidth = CARD_OUTLINE_WIDTH
+    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = CARD_SHADOW_COLOR
     }
+    private val shadowEdgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = CARD_SHADOW_EDGE_COLOR
+    }
+    
+    private val shadowPathNear = Path()
+    private val shadowPathFar = Path()
     private val wbCornerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = TITLE_COLOR
@@ -207,22 +348,13 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private val handleBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = CARD_SELECTED_COLOR
-        strokeWidth = CARD_OUTLINE_WIDTH
-    }
-    private val accentPreviewFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = Color.WHITE
+        strokeWidth = CARD_SELECTED_WIDTH
     }
     
-    private val overlayTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = CARD_TEXT_COLOR
-        textSize = CARD_TEXT_SIZE
-        isSubpixelText = true
-    }
-    
-    private val overlayBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val emphasisStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        color = CARD_OUTLINE_COLOR
+        color = CARD_OUTLINE_EMPHASIS_COLOR
+        strokeWidth = CARD_OUTLINE_WIDTH
     }
     private val tilePaint = Paint().apply { isFilterBitmap = false }
     
@@ -256,6 +388,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             releaseFallbackLocked()
         }
         rasterScaleOverride = null
+        removeCallbacks(gestureFrameTask)
+        gestureFramePosted = false
         super.onDetachedFromWindow()
     }
 
@@ -284,12 +418,56 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     }
 
     
+    
+    @Volatile
+    private var translucentOverlay = false
+
+    fun setTranslucentOverlay(enabled: Boolean) {
+        if (translucentOverlay == enabled) return
+        translucentOverlay = enabled
+        if (enabled && !suspendTranslucent) {
+            setBackgroundColor(Color.TRANSPARENT)
+        } else if (!enabled && !translucentBackground) {
+            setBackgroundColor(Color.WHITE)
+        }
+        markAllCachedTilesDirtyLocked()
+        postInvalidateOnAnimation()
+    }
+
+    
+    private fun translucentFogActive(): Boolean =
+        (translucentOverlay || translucentBackground) && !suspendTranslucent
+
+    
+    @Volatile
+    private var backgroundTemplate = BackgroundTemplate.BLANK
+
+    
+    @Volatile
+    private var templatePageWidth = 0f
+
+    
+    fun setBackgroundTemplate(template: BackgroundTemplate, pageWidth: Float) {
+        if (backgroundTemplate == template && templatePageWidth == pageWidth) return
+        backgroundTemplate = template
+        templatePageWidth = pageWidth
+        synchronized(cacheLock) {
+            for (entry in cache.values) entry.bitmap.recycle()
+            cache.clear()
+            pending.clear()
+            cacheBytes = 0L
+            if (rasteringKey != null) rasteringDirty = true
+            releaseFallbackLocked()
+        }
+        postInvalidateOnAnimation()
+    }
+
     @Volatile
     private var translucentBackground = false
-
     fun setTranslucentBackground(translucent: Boolean) {
         if (translucentBackground == translucent) return
         translucentBackground = translucent
+        setBackgroundColor(if (translucent) Color.TRANSPARENT else Color.WHITE)
         synchronized(cacheLock) {
             for (entry in cache.values) entry.bitmap.recycle()
             cache.clear()
@@ -358,11 +536,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     
     @Volatile
-    var previewCardsWhite = false
-        private set
-
-    
-    @Volatile
     var suspendTranslucent = false
         private set
 
@@ -371,17 +544,26 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     @Volatile
     private var settleRequested = false
 
-    fun setPreviewCardsWhite(white: Boolean) {
-        if (previewCardsWhite == white) return
-        previewCardsWhite = white
-        val dirty = coloredCardDirtyBounds()
-        if (dirty != null) onSceneChanged(dirty, false)
-        postInvalidateOnAnimation()
+    
+    @Volatile
+    var holdPaint = false
+        private set
+
+    fun setHoldPaint(hold: Boolean) {
+        if (holdPaint == hold) return
+        holdPaint = hold
+        if (!hold) postInvalidateOnAnimation()
     }
+
 
     fun setSuspendTranslucent(suspend: Boolean) {
         if (suspendTranslucent == suspend) return
         suspendTranslucent = suspend
+        
+        
+        if (translucentOverlay || translucentBackground) {
+            setBackgroundColor(if (suspend) Color.WHITE else Color.TRANSPARENT)
+        }
         postInvalidateOnAnimation()
     }
 
@@ -395,20 +577,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         settleWaiters.clear()
     }
 
-    private fun coloredCardDirtyBounds(): RectF? {
-        var out: RectF? = null
-        synchronized(BoardEngine.lock) {
-            for (card in BoardEngine.cards.values) {
-                if (!card.colored) continue
-                val bounds = BoardEngine.cardDirtyBounds(card)
-                if (out == null) out = RectF(bounds) else out!!.union(bounds)
-            }
-        }
-        return out
-    }
-
-    private fun showsAccent(card: BoardEngine.CardRec): Boolean =
-        card.colored && !previewCardsWhite
+    private fun showsAccent(card: BoardEngine.CardRec): Boolean = card.colored
 
     
     fun markSettleRequested() {
@@ -459,7 +628,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             lastScaleBits = scaleBits
             if (previous != 0) onScaleChanged(previous, scaleBits)
         }
-        postInvalidateOnAnimation()
+        requestViewportFrame()
     }
 
     override fun onSelectionChanged() {
@@ -470,7 +639,9 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        if (holdPaint) return
         val startedAt = System.nanoTime()
+        if (gestureThrottle) lastGestureFrameAt = SystemClock.uptimeMillis()
         val scale = BoardEngine.scale
         val densityValue = density
         val scalePx = scale * densityValue
@@ -479,7 +650,9 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val tilePx = TILE_WORLD * scalePx
         if (width == 0 || height == 0 || tilePx <= 0f) return
 
-        if (translucentBackground && !suspendTranslucent) {
+        if (translucentFogActive()) {
+            
+            
             
             canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
             canvas.drawColor(TRANSLUCENT_BG_COLOR)
@@ -500,6 +673,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         var stale = 0
         val src = Rect()
         val dst = RectF()
+        
+        val freeze = gestureFreezeTiles
         synchronized(cacheLock) {
             tilePaint.isFilterBitmap = previewing || fallbackTiles.isNotEmpty()
             for (iy in minIy..maxIy) {
@@ -515,7 +690,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
                         if (entry.dirty) {
                             stale += 1
                             
-                            if (!deferRefresh && pending.add(key)) scheduleRasterLocked()
+                            if (!deferRefresh && !freeze && pending.add(key)) scheduleRasterLocked()
                         }
                     } else {
                         missing += 1
@@ -525,14 +700,14 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
                             canvas.drawBitmap(fallback, src, dst, tilePaint)
                         }
                         
-                        if (pending.add(key)) scheduleRasterLocked()
+                        
+                        if (!freeze && pending.add(key)) scheduleRasterLocked()
                     }
                 }
             }
             if (missing == 0 && !previewing) releaseFallbackLocked()
         }
 
-        drawAccentCardsWhite(canvas, panXPx, panYPx, scalePx)
         drawSelection(canvas, panXPx, panYPx, scalePx)
 
         if (settleRequested && missing == 0 && stale == 0 && !deferRefresh) {
@@ -556,59 +731,31 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     }
 
     
-    private fun drawAccentCardsWhite(canvas: Canvas, panXPx: Float, panYPx: Float, scalePx: Float) {
-        if (!previewCardsWhite) return
-        overlayBorderPaint.strokeWidth = CARD_OUTLINE_WIDTH * scalePx
-        synchronized(BoardEngine.lock) {
-            val hidden = BoardEngine.hiddenCardId
-            for (card in BoardEngine.cardsByZ) {
-                if (!card.colored || card.id == hidden) continue
-                val left = panXPx + card.x * scalePx
-                val top = panYPx + card.y * scalePx
-                val right = left + card.width * scalePx
-                val bottom = top + card.height * scalePx
-                canvas.drawRect(left, top, right, bottom, accentPreviewFill)
-                canvas.drawRect(left, top, right, bottom, overlayBorderPaint)
-                
-                if (card.kind != "image" && card.content.isNotBlank()) {
-                    val save = canvas.save()
-                    canvas.clipRect(left, top, right, bottom)
-                    canvas.translate(left, top)
-                    canvas.scale(scalePx, scalePx)
-                    drawOverlayTextBlock(canvas, card.content, card.width)
-                    canvas.restoreToCount(save)
-                }
-            }
-        }
-    }
+    @Volatile
+    private var outlineEmphasis = false
 
-    
-    private fun drawOverlayTextBlock(canvas: Canvas, raw: String, width: Float) {
-        val maxWidth = (width - CARD_PADDING_X * 2f).coerceAtLeast(1f)
-        var y = CARD_PADDING_Y - overlayTextPaint.ascent()
-        for (paragraph in raw.replace("\r\n", "\n").split('\n')) {
-            val heading = paragraph.trimStart().takeWhile { it == '#' }.length
-            val text = paragraph.trimStart().removePrefix("#".repeat(heading)).trimStart()
-            if (text.isEmpty()) { y += CARD_TEXT_SIZE * 0.7f; continue }
-            overlayTextPaint.textSize = when (heading) { 1 -> 22f; 2 -> 19f; 3 -> 17f; else -> CARD_TEXT_SIZE }
-            overlayTextPaint.isFakeBoldText = heading > 0
-            val words = text.split(Regex("\\s+"))
-            var line = ""
-            for (word in words) {
-                val candidate = if (line.isEmpty()) word else "$line $word"
-                if (line.isNotEmpty() && overlayTextPaint.measureText(candidate) > maxWidth) {
-                    canvas.drawText(line, CARD_PADDING_X, y, overlayTextPaint); y += overlayTextPaint.textSize * 1.28f; line = word
-                } else line = candidate
+    fun setOutlineEmphasis(active: Boolean) {
+        if (outlineEmphasis == active) return
+        outlineEmphasis = active
+        synchronized(cacheLock) {
+            for (entry in cache.values) entry.dirty = true
+            if (rasteringKey != null) rasteringDirty = true
+            forEachVisibleTileLocked { key ->
+                val entry = cache[key]
+                if (entry == null || entry.dirty) pending.add(key)
             }
-            if (line.isNotEmpty()) { canvas.drawText(line, CARD_PADDING_X, y, overlayTextPaint); y += overlayTextPaint.textSize * 1.28f }
+            if (pending.isNotEmpty()) scheduleRasterLocked()
         }
+        postInvalidateOnAnimation()
     }
 
     private fun drawSelection(canvas: Canvas, panXPx: Float, panYPx: Float, scalePx: Float) {
         val selected = BoardEngine.selectedCardIds
         if (selected.isEmpty()) return
+        val hidden = BoardEngine.hiddenCardId
         synchronized(BoardEngine.lock) {
             for (id in selected) {
+                if (id == hidden) continue
                 val card = BoardEngine.cards[id] ?: continue
                 val left = panXPx + card.x * scalePx
                 val top = panYPx + card.y * scalePx
@@ -617,7 +764,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
                 selectionBorderPaint.strokeWidth = CARD_SELECTED_WIDTH * scalePx
                 canvas.drawRect(left, top, right, bottom, selectionBorderPaint)
                 val half = CARD_HANDLE_SIZE * scalePx / 2f
-                handleBorderPaint.strokeWidth = CARD_OUTLINE_WIDTH * scalePx
+                handleBorderPaint.strokeWidth = CARD_SELECTED_WIDTH * scalePx
                 val centerX = (left + right) / 2f
                 val centerY = (top + bottom) / 2f
                 val anchors = floatArrayOf(
@@ -716,6 +863,14 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         }
     }
 
+    
+    private fun markAllCachedTilesDirtyLocked() {
+        synchronized(cacheLock) {
+            for (entry in cache.values) entry.dirty = true
+            if (rasteringKey != null) rasteringDirty = true
+        }
+    }
+
     private fun evictLocked() {
         val iterator = cache.entries.iterator()
         while (cacheBytes > CACHE_BUDGET_BYTES && iterator.hasNext()) {
@@ -756,12 +911,14 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             return null
         }
         val canvas = Canvas(bitmap)
-        if (!translucentBackground) canvas.drawColor(Color.WHITE)
+        
+        
         canvas.scale(scalePx, scalePx)
         val worldRect = tileWorldRect(key)
         canvas.translate(-worldRect.left, -worldRect.top)
 
         synchronized(BoardEngine.lock) {
+            TemplatePaper.draw(canvas, worldRect, backgroundTemplate, templatePageWidth)
             drawWhiteboardFrames(canvas, worldRect)
             drawCanvasStrokes(canvas, worldRect)
             drawLiquidAndCards(canvas, worldRect)
@@ -864,64 +1021,154 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         strokeQueryScratch.clear()
         BoardEngine.queryCanvasStrokes(world, strokeQueryScratch)
         for (stroke in strokeQueryScratch) {
-            strokePaint.color = stroke.color
-            strokePaint.strokeWidth = stroke.width
-            canvas.drawPath(stroke.path, strokePaint)
+            TchRaster.draw(canvas, stroke, strokePaint)
         }
+    }
+
+    
+    private fun neckTouchesHidden(neck: BoardEngine.NeckRec, hidden: String?): Boolean {
+        val hiddenId = hidden ?: return false
+        val connection = BoardEngine.connections[neck.id] ?: return false
+        return connection.fromId == hiddenId || connection.toId == hiddenId
+    }
+
+    
+    private fun shadowedIntersects(bounds: RectF, world: RectF): Boolean =
+        bounds.left < world.right && bounds.top < world.bottom &&
+            bounds.right + CARD_SHADOW_EXTENT > world.left && bounds.bottom + CARD_SHADOW_EXTENT > world.top
+
+    
+    private val shadowFarUnion = Path()
+
+    
+    private fun shadowCopiesOf(rect: RectF?, path: Path?) {
+        val off = CARD_SHADOW_OFFSET
+        val far = CARD_SHADOW_OFFSET + CARD_SHADOW_EDGE
+        if (rect != null) {
+            shadowPathNear.rewind()
+            shadowPathNear.addRect(rect.left + off, rect.top + off, rect.right + off, rect.bottom + off, Path.Direction.CW)
+            shadowPathFar.rewind()
+            shadowPathFar.addRect(rect.left + far, rect.top + far, rect.right + far, rect.bottom + far, Path.Direction.CW)
+        } else if (path != null) {
+            path.offset(off, off, shadowPathNear)
+            path.offset(far, far, shadowPathFar)
+        }
+    }
+
+    
+    private fun drawSilhouetteShadow(canvas: Canvas, world: RectF, hidden: String?) {
+        val cardRect = RectF()
+        shadowFarUnion.rewind()
+        var any = false
+        var unionOk = true
+        
+        for (neck in BoardEngine.necks.values) {
+            if (neckTouchesHidden(neck, hidden)) continue
+            if (!shadowedIntersects(neck.bounds, world)) continue
+            shadowCopiesOf(null, neck.path)
+            canvas.drawPath(shadowPathNear, shadowEdgePaint)
+            canvas.drawPath(shadowPathFar, shadowEdgePaint)
+            if (unionOk) unionOk = shadowFarUnion.op(shadowPathFar, Path.Op.UNION)
+            any = true
+        }
+        for (card in BoardEngine.cardsByZ) {
+            if (card.id == hidden) continue
+            card.rect(cardRect)
+            if (!shadowedIntersects(cardRect, world)) continue
+            shadowCopiesOf(cardRect, null)
+            canvas.drawPath(shadowPathNear, shadowEdgePaint)
+            canvas.drawPath(shadowPathFar, shadowEdgePaint)
+            if (unionOk) unionOk = shadowFarUnion.op(shadowPathFar, Path.Op.UNION)
+            any = true
+        }
+        if (!any) return
+        
+        
+        val save = canvas.save()
+        if (unionOk) canvas.clipPath(shadowFarUnion)
+        for (neck in BoardEngine.necks.values) {
+            if (neckTouchesHidden(neck, hidden)) continue
+            if (!shadowedIntersects(neck.bounds, world)) continue
+            shadowCopiesOf(null, neck.path)
+            canvas.drawPath(shadowPathNear, shadowPaint)
+        }
+        val off = CARD_SHADOW_OFFSET
+        for (card in BoardEngine.cardsByZ) {
+            if (card.id == hidden) continue
+            card.rect(cardRect)
+            if (!shadowedIntersects(cardRect, world)) continue
+            canvas.drawRect(cardRect.left + off, cardRect.top + off, cardRect.right + off, cardRect.bottom + off, shadowPaint)
+        }
+        canvas.restoreToCount(save)
     }
 
     private fun drawLiquidAndCards(canvas: Canvas, world: RectF) {
         val hidden = BoardEngine.hiddenCardId
-        
-        var anyNeck = false
-        for (neck in BoardEngine.necks.values) {
-            if (!RectF.intersects(neck.bounds, world)) continue
-            canvas.drawPath(neck.path, neckFillPaint)
-            canvas.drawPath(neck.path, neckStrokePaint)
-            anyNeck = true
-        }
+        val emphasis = outlineEmphasis
         val cardRect = RectF()
-        for (card in BoardEngine.cardsByZ) {
-            if (card.id == hidden) continue
-            card.rect(cardRect)
-            val padded = RectF(cardRect).apply { inset(-CARD_OUTLINE_WIDTH, -CARD_OUTLINE_WIDTH) }
-            if (!RectF.intersects(padded, world)) continue
+        
+        
+        if (!emphasis) {
+            drawSilhouetteShadow(canvas, world, hidden)
             
-            
-            val preview = card.colored && previewCardsWhite
-            val fill = when {
-                showsAccent(card) -> CARD_COLORED_FILL_COLOR
-                preview -> Color.WHITE
-                else -> CARD_FILL_COLOR
-            }
-            cardFillPaint.color = fill
-            cardStrokePaint.color = if (preview) CARD_OUTLINE_COLOR else fill
-            canvas.drawRoundRect(cardRect, CARD_RADIUS, CARD_RADIUS, cardFillPaint)
-            canvas.drawRoundRect(cardRect, CARD_RADIUS, CARD_RADIUS, cardStrokePaint)
-        }
-        if (anyNeck) {
             for (neck in BoardEngine.necks.values) {
+                if (neckTouchesHidden(neck, hidden)) continue
                 if (!RectF.intersects(neck.bounds, world)) continue
+                neckFillPaint.color = if (neck.dark) CARD_COLORED_FILL_COLOR else CARD_FILL_COLOR
                 canvas.drawPath(neck.path, neckFillPaint)
             }
         }
+        for (card in BoardEngine.cardsByZ) {
+            if (card.id == hidden) continue
+            card.rect(cardRect)
+            if (!RectF.intersects(cardRect, world)) continue
+            
+            cardFillPaint.color = when {
+                emphasis -> Color.WHITE
+                showsAccent(card) -> CARD_COLORED_FILL_COLOR
+                else -> CARD_FILL_COLOR
+            }
+            canvas.drawRoundRect(cardRect, CARD_RADIUS, CARD_RADIUS, cardFillPaint)
+        }
+        
+        if (emphasis) drawCardOutlines(canvas, world, hidden)
         
         for (card in BoardEngine.cardsByZ) {
             if (card.id == hidden) continue
             card.rect(cardRect)
             if (!RectF.intersects(cardRect, world)) continue
-            drawCardContent(canvas, card, cardRect)
+            drawCardContent(canvas, card, cardRect, emphasis)
         }
     }
 
-    private fun drawCardContent(canvas: Canvas, card: BoardEngine.CardRec, rect: RectF) {
+    private val outlineOccluders = Path()
+
+    
+    private fun drawCardOutlines(canvas: Canvas, world: RectF, hidden: String?) {
+        outlineOccluders.rewind()
+        val cardRect = RectF()
+        val cards = BoardEngine.cardsByZ
+        for (index in cards.indices.reversed()) {
+            val card = cards[index]
+            if (card.id == hidden) continue
+            card.rect(cardRect)
+            if (!RectF.intersects(cardRect, world)) continue
+            val save = canvas.save()
+            if (!outlineOccluders.isEmpty) canvas.clipOutPath(outlineOccluders)
+            canvas.drawRoundRect(cardRect, CARD_RADIUS, CARD_RADIUS, emphasisStrokePaint)
+            canvas.restoreToCount(save)
+            outlineOccluders.addRect(cardRect, Path.Direction.CW)
+        }
+    }
+
+    private fun drawCardContent(canvas: Canvas, card: BoardEngine.CardRec, rect: RectF, emphasis: Boolean) {
         val save = canvas.save()
         canvas.clipRect(rect)
         canvas.translate(card.x, card.y)
 
-        if (card.kind == "image") {
+        if (card.kind == "image" || card.kind == "note") {
             val bitmap = if (card.imagePath.isEmpty()) null
-            else CardImageCache.get(card.imagePath, (rect.width() * BoardEngine.scale).toInt())
+            else CardImageCache.get(card.imagePath, (rect.width() * BoardEngine.scale).toInt(), alpha = card.kind == "note")
             if (bitmap != null) {
                 drawCardImage(canvas, bitmap, rect.width(), rect.height())
             } else {
@@ -929,17 +1176,19 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
                 drawImagePlaceholder(canvas, rect.width(), rect.height())
             }
         } else if (card.content.isNotBlank()) {
-            cardTextPaint.color = if (showsAccent(card)) Color.WHITE else CARD_TEXT_COLOR
+            
+            cardTextPaint.color = if (showsAccent(card) && !emphasis) Color.WHITE else CARD_TEXT_COLOR
             drawTextBlock(canvas, card.content, rect.width())
         }
 
         
         val attached = BoardEngine.cardStrokes[card.id]
         if (attached != null) {
+            
+            val invert = emphasis && showsAccent(card)
             for (stroke in attached) {
-                strokePaint.color = stroke.color
-                strokePaint.strokeWidth = stroke.width
-                canvas.drawPath(stroke.path, strokePaint)
+                val c = if (invert) BoardEngine.StrokeRec.contrastInk(stroke.color, null) else stroke.color
+                TchRaster.draw(canvas, stroke, strokePaint, c)
             }
         }
         canvas.restoreToCount(save)
@@ -953,15 +1202,13 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val fit = minOf(width / bw, height / bh)
         val dw = bw * fit
         val dh = bh * fit
-        val left = (width - dw) / 2f
-        val top = (height - dh) / 2f
-        canvas.drawBitmap(bitmap, null, RectF(left, top, left + dw, top + dh), cardImagePaint)
+        canvas.drawBitmap(bitmap, null, RectF(0f, 0f, dw, dh), cardImagePaint)
     }
 
     private fun drawImagePlaceholder(canvas: Canvas, width: Float, height: Float) {
         val inset = CARD_PADDING_X
         val box = RectF(inset, inset, (width - inset).coerceAtLeast(inset + 1f), (height - inset).coerceAtLeast(inset + 1f))
-        strokePaint.color = CARD_OUTLINE_COLOR
+        strokePaint.color = CARD_PLACEHOLDER_COLOR
         strokePaint.strokeWidth = CARD_OUTLINE_WIDTH
         canvas.drawRect(box, strokePaint)
         canvas.drawLine(box.left, box.top, box.right, box.bottom, strokePaint)
@@ -969,24 +1216,11 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     }
 
     private fun drawTextBlock(canvas: Canvas, raw: String, width: Float) {
-        val maxWidth = (width - CARD_PADDING_X * 2f).coerceAtLeast(1f)
+        val innerMax = (width - CARD_PADDING_X * 2f).coerceAtLeast(1f)
         var y = CARD_PADDING_Y - cardTextPaint.ascent()
-        for (paragraph in raw.replace("\r\n", "\n").split('\n')) {
-            val heading = paragraph.trimStart().takeWhile { it == '#' }.length
-            val text = paragraph.trimStart().removePrefix("#".repeat(heading)).trimStart()
-            if (text.isEmpty()) { y += CARD_TEXT_SIZE * 0.7f; continue }
-            cardTextPaint.textSize = when (heading) { 1 -> 22f; 2 -> 19f; 3 -> 17f; else -> CARD_TEXT_SIZE }
-            cardTextPaint.isFakeBoldText = heading > 0
-            val words = text.split(Regex("\\s+"))
-            var line = ""
-            for (word in words) {
-                val candidate = if (line.isEmpty()) word else "$line $word"
-                if (line.isNotEmpty() && cardTextPaint.measureText(candidate) > maxWidth) {
-                    canvas.drawText(line, CARD_PADDING_X, y, cardTextPaint); y += cardTextPaint.textSize * 1.28f; line = word
-                } else line = candidate
-            }
-            if (line.isNotEmpty()) { canvas.drawText(line, CARD_PADDING_X, y, cardTextPaint); y += cardTextPaint.textSize * 1.28f }
+        forEachTextRun(raw, innerMax, cardTextPaint) { text, _, lineHeight ->
+            if (text.isNotEmpty()) canvas.drawText(text, CARD_PADDING_X, y, cardTextPaint)
+            y += lineHeight
         }
     }
 }
-

@@ -51,10 +51,15 @@ const STRINGS = {
   splitChildren: { zh: '拆出 {count} 张子卡', en: 'Create {count} Child Cards' },
   whiteboardSwitcher: { zh: '白板切换', en: 'Whiteboard Switcher' },
   captureToNote: { zh: '截图插入笔记', en: 'Snapshot into note' },
+  notes: { zh: '笔记卡片', en: 'Note cards' },
+  notesEmpty: { zh: '暂无笔记卡片', en: 'No note cards yet.' },
+  quickAccess: { zh: '快速访问', en: 'Quick access' },
+  removeQuickAccess: { zh: '移除快速访问', en: 'Remove quick access' },
+  noteName: { zh: '笔记 {number}', en: 'Note {number}' },
   whiteboardSwitcherEmpty: { zh: '暂无白板，请先在画布上「设白板」', en: 'No whiteboards yet. Select “Set Board” on the canvas first.' },
   mosaicPermissionNeeded: {
-    zh: 'Mosaic 需要文件读写权限才能接收 Inkling 截图，请在权限弹窗中允许后重试。',
-    en: 'Mosaic needs file read/write permission to receive Inkling captures. Allow it in the permission dialog, then retry.',
+    zh: 'Mosaic 需要文件读写和删除权限才能启动，请在权限弹窗中允许后重试。',
+    en: 'Mosaic needs file read, write, and delete permission to start. Allow it in the permission dialog, then retry.',
   },
   acknowledge: { zh: '知道了', en: 'OK' },
   syncImportAsk: {
@@ -63,6 +68,15 @@ const STRINGS = {
   },
   syncImportYes: { zh: '是', en: 'Yes' },
   syncImportNo: { zh: '否', en: 'No' },
+  sync: { zh: '同步', en: 'Sync' },
+  translucent: { zh: '半透明', en: 'Translucent' },
+  accent: { zh: '强调色', en: 'Accent' },
+  defaultCard: { zh: '默认卡', en: 'Default' },
+  convertToNote: { zh: '转为笔记', en: 'Convert to note' },
+  recognizeCard: { zh: '识别为文字卡', en: 'Recognize to card' },
+  thick: { zh: '粗细', en: 'Thick' },
+  template: { zh: '模板', en: 'Template' },
+  shape: { zh: '图形', en: 'Shape' },
 } as const;
 
 type StringKey = keyof typeof STRINGS;

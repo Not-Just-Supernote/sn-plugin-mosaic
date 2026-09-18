@@ -16,18 +16,17 @@ class MosaicBoardViewManager : SimpleViewManager<MosaicBoardView>() {
     override fun createViewInstance(reactContext: ThemedReactContext): MosaicBoardView =
         MosaicBoardView(reactContext as ReactContext)
 
-    @ReactProp(name = "penWidth")
-    fun setPenWidth(view: MosaicBoardView, value: Int) {
-        if (view.penWidth == value) return
-        view.penWidth = value
-        view.onPropsChanged()
-    }
+    
+    
 
     
     @ReactProp(name = "deviceType", defaultInt = -1)
     fun setDeviceType(view: MosaicBoardView, value: Int) {
         view.deviceType = value
     }
+
+    @ReactProp(name = "notesDirectory")
+    fun setNotesDirectory(view: MosaicBoardView, value: String?) { view.notesDirectory = value ?: "" }
 
     
     @ReactProp(name = "touchEnabled", defaultBoolean = true)

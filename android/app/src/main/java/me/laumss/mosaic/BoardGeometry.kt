@@ -33,7 +33,9 @@ object BoardGeometry {
     const val LASSO_MIN_BOX_PX = 50f
 
     
-    const val MIN_ZOOM_SCALE = 0.2f
+    
+    
+    const val MIN_ZOOM_SCALE = 0.36666667f
     const val NORMAL_ZOOM_SCALE = 0.7f
     const val MAX_ZOOM_SCALE = 1.4f
     val UI_ZOOM_LEVELS = intArrayOf(10, 25, 50, 75, 100, 125, 150, 175, 200)
@@ -55,7 +57,10 @@ object BoardGeometry {
         TOP(false, false, true, false),
         RIGHT(false, true, false, false),
         BOTTOM(false, false, false, true),
-        LEFT(true, false, false, false),
+        LEFT(true, false, false, false);
+
+        
+        val isCorner: Boolean get() = (movesLeft || movesRight) && (movesTop || movesBottom)
     }
 
     class SnapResult(val x: Float, val y: Float, val targetId: String?)
@@ -139,6 +144,53 @@ object BoardGeometry {
     }
 
     
+    fun resizeProportional(handle: Handle, startX: Float, startY: Float, start: RectF, worldX: Float, worldY: Float, kind: String?, out: RectF): RectF {
+        val oldCornerX = if (handle.movesLeft) start.left else start.right
+        val oldCornerY = if (handle.movesTop) start.top else start.bottom
+        val ax = if (handle.movesLeft) start.right else start.left
+        val ay = if (handle.movesTop) start.bottom else start.top
+        val ox = oldCornerX - ax
+        val oy = oldCornerY - ay
+        val curX = oldCornerX + (worldX - startX)
+        val curY = oldCornerY + (worldY - startY)
+        val denom = ox * ox + oy * oy
+        var f = if (denom > 0f) ((curX - ax) * ox + (curY - ay) * oy) / denom else 1f
+        f = f.coerceIn(0.1f, 10f)
+        val aspect = if (start.width() > 0f) start.height() / start.width() else 1f
+        applyAspectSize(start.width() * f, aspect, kind, handle, start, out)
+        return out
+    }
+
+    
+    fun resizeWidthKeepAspect(handle: Handle, startX: Float, startY: Float, start: RectF, worldX: Float, worldY: Float, kind: String?, out: RectF): RectF {
+        val dx = worldX - startX
+        val requestedW = start.width() + (if (handle.movesRight) dx else 0f) - (if (handle.movesLeft) dx else 0f)
+        val aspect = if (start.width() > 0f) start.height() / start.width() else 1f
+        applyAspectSize(requestedW, aspect, kind, handle, start, out)
+        val w = out.width()
+        val h = out.height()
+        val x = if (handle.movesLeft) start.right - w else start.left
+        out.set(x, start.top, x + w, start.top + h)
+        return out
+    }
+
+    private fun applyAspectSize(requestedW: Float, aspect: Float, kind: String?, handle: Handle, start: RectF, out: RectF) {
+        val lo = minCardSize(kind)
+        val a = if (aspect > 0f) aspect else 1f
+        var w = max(lo, min(MAX_CARD_SIZE, requestedW))
+        var h = w * a
+        if (h > MAX_CARD_SIZE) { h = MAX_CARD_SIZE; w = h / a }
+        if (h < lo) { h = lo; w = h / a }
+        if (w > MAX_CARD_SIZE) { w = MAX_CARD_SIZE; h = w * a }
+        if (w < lo) { w = lo; h = w * a }
+        w = w.roundToInt().toFloat()
+        h = h.roundToInt().toFloat()
+        val x = if (handle.movesLeft) start.right - w else start.left
+        val y = if (handle.movesTop) start.bottom - h else start.top
+        out.set(x, y, x + w, y + h)
+    }
+
+    
 
     private fun overlap(a0: Float, a1: Float, b0: Float, b1: Float): Float = max(0f, min(a1, b1) - max(a0, b0))
 
@@ -151,18 +203,23 @@ object BoardGeometry {
     fun edgeDistance(a: BoardEngine.CardRec, b: BoardEngine.CardRec): Float =
         edgeDistance(a.x, a.y, a.width, a.height, b)
 
+    
+    fun canConnect(a: BoardEngine.CardRec, b: BoardEngine.CardRec): Boolean =
+        a.id != b.id && a.colored == b.colored
+
+    
     fun findSnap(
         others: Iterable<BoardEngine.CardRec>,
-        excludeId: String?,
+        card: BoardEngine.CardRec,
         x: Float,
         y: Float,
-        w: Float,
-        h: Float,
     ): SnapResult {
+        val w = card.width
+        val h = card.height
         var nearest: BoardEngine.CardRec? = null
         var nearestDist = Float.MAX_VALUE
         for (other in others) {
-            if (other.id == excludeId) continue
+            if (!canConnect(card, other)) continue
             val d = edgeDistance(x, y, w, h, other)
             if (d >= CONNECT_DISTANCE) continue
             if (d < nearestDist) {
@@ -279,11 +336,16 @@ object BoardGeometry {
         for (factor in SIZE_LEVEL_FACTORS) {
             val grow = factor > 1f
             val rawW = neighbor.width * factor
-            val rawH = neighbor.height * factor
+            val rawH = if (card.kind == "note" && card.width > 0f) rawW * (card.height / card.width)
+                       else neighbor.height * factor
             if (!grow && (rawW < minSide * SIZE_LEVEL_SHRINK_NEAR_RATIO || rawH < minSide * SIZE_LEVEL_SHRINK_NEAR_RATIO)) continue
             if (grow && (rawW > MAX_CARD_SIZE || rawH > MAX_CARD_SIZE)) continue
             val clamped = clampCardSize(rawW, rawH, card.kind)
-            levels.add(SizeLevel(factor, neighbor.id, sizeLevelRect(card, neighbor, clamped.x, clamped.y)))
+            val width = clamped.x
+            val height = if (card.kind == "note" && card.width > 0f) {
+                (width * (card.height / card.width)).coerceIn(MIN_CARD_SIZE, MAX_CARD_SIZE)
+            } else clamped.y
+            levels.add(SizeLevel(factor, neighbor.id, sizeLevelRect(card, neighbor, width, height)))
         }
         return levels
     }

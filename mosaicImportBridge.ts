@@ -6,8 +6,10 @@ export const MOSAIC_INBOX_DIR = '/sdcard/EXPORT/mosaic/inbox';
 
 const FILE_READ_PERMISSION = 'plugin.permission.FILE:READ';
 const FILE_WRITE_PERMISSION = 'plugin.permission.FILE:WRITE';
+const FILE_DELETE_PERMISSION = 'plugin.permission.FILE:DELETE';
 const INTERNET_PERMISSION = 'plugin.permission.INTERNET';
-const GRANTED_PERMISSION_STATUSES = new Set([1, 2]);
+
+const PERMISSION_STATUS_GRANTED = 2;
 
 let importPermissionFlow: Promise<boolean> | null = null;
 
@@ -15,9 +17,9 @@ async function ensurePermission(permission: string, description: string): Promis
   try {
     const current = await PluginManager.hasPermission(permission);
     console.log(`[MosaicImport] permission has ${permission} status=${current}`);
-    if (GRANTED_PERMISSION_STATUSES.has(current)) return true;
+    if (Number(current) === PERMISSION_STATUS_GRANTED) return true;
     const requested = await PluginManager.requestPermission(permission, description);
-    const granted = GRANTED_PERMISSION_STATUSES.has(requested);
+    const granted = Number(requested) === PERMISSION_STATUS_GRANTED;
     console.log(`[MosaicImport] permission request ${permission} status=${requested} granted=${granted}`);
     return granted;
   } catch (error) {
@@ -37,9 +39,13 @@ export function ensureMosaicImportPermissions(): Promise<boolean> {
     if (!readGranted) return false;
     const writeGranted = await ensurePermission(
       FILE_WRITE_PERMISSION,
-      '完成 Mosaic 卡片导入并清理截图文件',
+      '完成 Mosaic 卡片导入并写入共享目录',
     );
-    return writeGranted;
+    if (!writeGranted) return false;
+    return ensurePermission(
+      FILE_DELETE_PERMISSION,
+      '清理 Mosaic 共享目录中的临时截图与选区文件',
+    );
   })().finally(() => {
     importPermissionFlow = null;
   });
@@ -96,12 +102,20 @@ export async function claimPendingMosaicImageCard(): Promise<PendingMosaicImageC
 
   for (const entry of candidates) {
     const claimPath = `${entry.path}.processing`;
+    
+    
+    const ageMs = entry.mtime ? Date.now() - entry.mtime.getTime() : Number.POSITIVE_INFINITY;
+    if (Number(entry.size) === 0 && ageMs > STALE_MARKER_MS) {
+      await quarantineMarker(entry.path, 'empty marker');
+      continue;
+    }
     try {
       await RNFS.moveFile(entry.path, claimPath);
       const raw = await RNFS.readFile(claimPath, 'utf8');
       const parsed = JSON.parse(raw) as Partial<PendingMosaicImageCard>;
       if (typeof parsed.imagePath !== 'string' || parsed.imagePath.length === 0) {
         await RNFS.moveFile(claimPath, entry.path);
+        if (ageMs > STALE_MARKER_MS) await quarantineMarker(entry.path, 'missing imagePath');
         continue;
       }
       return {
@@ -115,16 +129,34 @@ export async function claimPendingMosaicImageCard(): Promise<PendingMosaicImageC
         claimPath,
         originalPath: entry.path,
       };
-    } catch {
+    } catch (error) {
       
       try {
         if (await RNFS.exists(claimPath)) await RNFS.moveFile(claimPath, entry.path);
       } catch {
         
       }
+      if (!reportedBadMarkers.has(entry.name)) {
+        reportedBadMarkers.add(entry.name);
+        console.log(`[MosaicImport] marker unreadable name=${entry.name} size=${entry.size} ageMs=${Math.round(ageMs)} err=${String(error)}`);
+      }
+      if (ageMs > STALE_MARKER_MS) await quarantineMarker(entry.path, 'unreadable');
     }
   }
   return null;
+}
+
+
+const STALE_MARKER_MS = 5000;
+const reportedBadMarkers = new Set<string>();
+
+async function quarantineMarker(path: string, reason: string): Promise<void> {
+  try {
+    await RNFS.moveFile(path, `${path}.bad`);
+    console.log(`[MosaicImport] marker quarantined path=${path} reason=${reason}`);
+  } catch (error) {
+    console.log(`[MosaicImport] marker quarantine failed path=${path}: ${String(error)}`);
+  }
 }
 
 export async function completePendingMosaicImageCard(

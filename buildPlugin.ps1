@@ -1,18 +1,19 @@
-
 param(
     [switch]$WithLogs
 )
 
-
 if ($args -contains '--with-logs') { $WithLogs = $true }
 
+if ($WithLogs) {
+    $env:WITH_LOGS = '1'
+}
 
 function Write-ColorOutput {
     param(
         [string]$Message,
         [string]$Color = 'White'
     )
-    
+
     switch ($Color) {
         'Red' { Write-Host $Message -ForegroundColor Red }
         'Green' { Write-Host $Message -ForegroundColor Green }
@@ -21,7 +22,6 @@ function Write-ColorOutput {
         default { Write-Host $Message }
     }
 }
-
 
 function Test-OperatingSystem {
     Write-ColorOutput 'Running on Windows' 'Blue'
@@ -130,35 +130,33 @@ function Test-HasAndroidNativeCode {
     return $hasNative
 }
 
-
 function New-RandomString {
     param([int]$Length = 16)
-    
+
     $chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
     $randomString = ''
-    
+
     for ($i = 0; $i -lt $Length; $i++) {
         $randomIndex = Get-Random -Maximum $chars.Length
         $randomString += $chars[$randomIndex]
     }
-    
+
     return $randomString
 }
 
-
 function Get-PackageInfo {
     param([string]$ProjectRoot)
-    
+
     $packageJsonPath = Join-Path $ProjectRoot 'package.json'
-    
+
     if (Test-Path $packageJsonPath) {
         try {
             $packageJson = Get-Content $packageJsonPath -Raw | ConvertFrom-Json
-            
+
             $name = $packageJson.name
             $description = if ($packageJson.description) { $packageJson.description } else { '' }
             $version = if ($packageJson.version) { $packageJson.version } else { '0.0.1' }
-            
+
             return @{
                 Name = $name
                 Description = $description
@@ -176,18 +174,17 @@ function Get-PackageInfo {
     }
 }
 
-
 function New-PluginConfig {
     param(
         [string]$PluginId,
         [hashtable]$PackageInfo,
         [string]$ProjectRoot
     )
-    
+
     $configFile = Join-Path $ProjectRoot 'PluginConfig.json'
-    
+
     Write-ColorOutput 'Creating PluginConfig.json file...' 'Blue'
-    
+
     $config = @{
         name = $PackageInfo.Name
         desc = $PackageInfo.Description
@@ -198,7 +195,7 @@ function New-PluginConfig {
         pluginKey = $PackageInfo.Name
         jsMainPath = 'index'
     }
-    
+
     try {
         $config | ConvertTo-Json -Depth 10 | Set-Content $configFile -Encoding UTF8
         Write-ColorOutput "PluginConfig.json file created: $configFile" 'Green'
@@ -209,28 +206,24 @@ function New-PluginConfig {
     }
 }
 
-
 function Update-PluginConfigPackages {
     param(
         [string]$ProjectRoot,
         [array]$FoundPackages,
         [string]$BuildGeneratedDir
     )
-    
 
     $configFile = Join-Path $BuildGeneratedDir 'PluginConfig.json'
-    
+
     if ($FoundPackages.Count -eq 0) {
         Write-ColorOutput 'No ReactPackage implementations found, skipping PluginConfig.json update' 'Yellow'
         return
     }
-    
+
     Write-ColorOutput 'Updating reactPackages field in build/generated folder''s PluginConfig.json...' 'Blue'
-    
+
     try {
-
         if (-not (Test-Path $configFile)) {
-
             $rootConfigFile = Join-Path $ProjectRoot 'PluginConfig.json'
             if (Test-Path $rootConfigFile) {
                 Copy-Item $rootConfigFile $configFile -Force
@@ -241,21 +234,17 @@ function Update-PluginConfigPackages {
                 return
             }
         }
-        
+
         $config = Get-Content $configFile -Raw | ConvertFrom-Json
-        
 
         $configHash = @{}
         $config.PSObject.Properties | ForEach-Object { $configHash[$_.Name] = $_.Value }
-        
 
         if ($FoundPackages.Count -eq 1) {
-
             $configHash.reactPackages = @($FoundPackages)
         } else {
             $configHash.reactPackages = $FoundPackages
         }
-        
 
         $configHash | ConvertTo-Json -Depth 10 | Set-Content $configFile -Encoding UTF8
         Write-ColorOutput 'PluginConfig.json in build/generated folder updated with reactPackages field' 'Green'
@@ -265,18 +254,16 @@ function Update-PluginConfigPackages {
     }
 }
 
-
 function Find-PackagesInDirectory {
     param(
         [string]$SearchDir,
         [string]$ResultFile,
         [ref]$FoundPackages
     )
-    
+
     if (-not (Test-Path $SearchDir)) {
         return
     }
-    
 
     $javaFiles = Get-ChildItem -Path $SearchDir -Recurse -Filter '*.java' -File -ErrorAction SilentlyContinue
     $ktFiles = Get-ChildItem -Path $SearchDir -Recurse -Filter '*.kt' -File -ErrorAction SilentlyContinue
@@ -447,7 +434,6 @@ function Find-ManualReactPackagesFromApplication {
         foreach ($f in $files) {
             try {
                 $text = Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue
-
                 $text = ($text -replace '(?m)^\s*//.*$', '')
                 $text = ($text -replace '(?s)/\*.*?\*/', '')
                 $packageName = $null
@@ -501,7 +487,6 @@ function Find-ManualReactPackagesFromApplication {
                     }
                 }
 
-
                 $matchesKotlin = [System.Text.RegularExpressions.Regex]::Matches($text, '\badd\(\s*([A-Za-z0-9_\.]+)\s*\(')
                 foreach ($m in $matchesKotlin) {
                     $name = $m.Groups[1].Value
@@ -517,7 +502,6 @@ function Find-ManualReactPackagesFromApplication {
                         if ($fqcn -match 'Package$') { $found += $fqcn }
                     }
                 }
-
 
                 $matchesJava = [System.Text.RegularExpressions.Regex]::Matches($text, '\b(?:packages\.)?add\(\s*new\s+([A-Za-z0-9_\.]+)\s*\(')
                 foreach ($m in $matchesJava) {
@@ -556,7 +540,6 @@ function Get-ReactPackagesFromAutolinkingSource {
 
     try {
         $text = Get-Content $srcFile -Raw
-
         $imports = @{}
         foreach ($line in ($text -split "`r?`n")) {
             if ($line -match '^\s*import\s+([^\s;]+)') {
@@ -565,7 +548,6 @@ function Get-ReactPackagesFromAutolinkingSource {
                 $imports[$short] = $fq
             }
         }
-
         $matchesNew = [System.Text.RegularExpressions.Regex]::Matches($text, 'new\s+([A-Za-z0-9_\.]+)\s*\(')
         $pkgs = @()
         foreach ($m in $matchesNew) {
@@ -588,41 +570,36 @@ function Get-ReactPackagesFromAutolinkingSource {
     }
 }
 
-
 function Find-ReactPackages {
     param([string]$ProjectRoot)
-    
+
     Write-ColorOutput 'Starting to find and process dependencies with Android native code...' 'Green'
-    
+
     $resultFile = Join-Path $ProjectRoot 'android_native_deps.txt'
     'List of dependencies with Android native code:' | Set-Content $resultFile -Encoding UTF8
-    
 
     $foundPackages = @()
-    
 
     $androidDir = Join-Path $ProjectRoot 'android'
     if (Test-Path $androidDir) {
         Write-ColorOutput 'Finding ReactPackage implementations in current project...' 'Blue'
         '' | Add-Content $resultFile
         'ReactPackage implementations in current project:' | Add-Content $resultFile
-        
+
         Find-PackagesInDirectory -SearchDir $androidDir -ResultFile $resultFile -FoundPackages ([ref]$foundPackages)
-        
 
         $appAndroidDir = Join-Path $ProjectRoot 'app\android'
         if (Test-Path $appAndroidDir) {
             Find-PackagesInDirectory -SearchDir $appAndroidDir -ResultFile $resultFile -FoundPackages ([ref]$foundPackages)
         }
     }
-    
 
     $nodeModulesDir = Join-Path $ProjectRoot 'node_modules'
     if (Test-Path $nodeModulesDir) {
         Write-ColorOutput 'Finding ReactPackage implementations in node_modules...' 'Blue'
         '' | Add-Content $resultFile
         'ReactPackage implementations in node_modules:' | Add-Content $resultFile
-        
+
         $candidateModules = Get-ChildItem -Path $nodeModulesDir -Directory
         foreach ($moduleDir in $candidateModules) {
             $moduleName = $moduleDir.Name
@@ -654,15 +631,14 @@ function Find-ReactPackages {
             }
         }
     }
-    
+
     Write-ColorOutput 'All dependencies processed!' 'Blue'
     Write-ColorOutput "Results saved to: $resultFile" 'Blue'
     Write-ColorOutput 'Final results:' 'Yellow'
     Get-Content $resultFile | Write-Host
-    
+
     return $foundPackages
 }
-
 
 function Build-AndroidApk {
     param(
@@ -686,33 +662,29 @@ function Build-AndroidApk {
     }
 
     Write-ColorOutput 'Starting gradle build script to generate APK...' 'Blue'
-    
 
     $androidDir = Join-Path $ProjectRoot 'android'
     if (-not (Test-Path $androidDir)) {
         Write-ColorOutput 'Cannot find android directory' 'Red'
         return $false
     }
-    
+
     $currentDir = Get-Location
     try {
         Set-Location $androidDir
-        
 
         $gradleTask = if ($env:WITH_LOGS -eq '1') { 'buildCustomApkDebug' } else { 'buildCustomApkRelease' }
         $gradlewPath = Join-Path $androidDir 'gradlew.bat'
         if (Test-Path $gradlewPath) {
             Write-ColorOutput "Using gradlew.bat to execute $gradleTask task..." 'Green'
-            
 
             if (-not $env:JAVA_HOME) {
                 Write-ColorOutput 'JAVA_HOME environment variable not set, trying to find Java installation...' 'Yellow'
-
-                $javaPath = Get-ChildItem 'C:\Program Files\Java' -Directory -ErrorAction SilentlyContinue | 
-                           Where-Object { $_.Name -like 'jdk*' } | 
-                           Sort-Object Name -Descending | 
+                $javaPath = Get-ChildItem 'C:\Program Files\Java' -Directory -ErrorAction SilentlyContinue |
+                           Where-Object { $_.Name -like 'jdk*' } |
+                           Sort-Object Name -Descending |
                            Select-Object -First 1
-                
+
                 if ($javaPath) {
                     $env:JAVA_HOME = $javaPath.FullName
                     Write-ColorOutput "Set JAVA_HOME to: $($env:JAVA_HOME)" 'Green'
@@ -722,14 +694,6 @@ function Build-AndroidApk {
                     return $false
                 }
             }
-            
-
-
-
-
-
-
-
 
             Write-ColorOutput 'Cleaning previous build...' 'Blue'
             & cmd.exe /c "$gradlewPath clean --no-daemon"
@@ -752,7 +716,7 @@ function Build-AndroidApk {
             Write-ColorOutput 'Neither gradle nor gradlew.bat found, cannot build APK' 'Red'
             return $false
         }
-        
+
         if ($buildResult -eq 0) {
             Write-ColorOutput 'APK build successful' 'Green'
             return $true
@@ -767,19 +731,14 @@ function Build-AndroidApk {
     }
 }
 
-
 function Copy-ApkAndUpdateConfig {
     param([string]$ProjectRoot, [string]$BuildGeneratedDir, [string]$BuildGeneratedConfigFile)
-    
 
     $apkSearchPath = Join-Path $ProjectRoot 'android\app\build\outputs\apk'
-    
-
 
     $buildType = if ($env:WITH_LOGS -eq '1') { 'debug' } else { 'release' }
     $variantPath = Join-Path $apkSearchPath $buildType
     $apkPath = $null
-
 
     $customApkFiles = Get-ChildItem -Path $variantPath -Recurse -Filter '*custom*.apk' -ErrorAction SilentlyContinue
     if ($customApkFiles) {
@@ -787,19 +746,17 @@ function Copy-ApkAndUpdateConfig {
         Write-ColorOutput "Found custom APK file: $apkPath" 'Green'
     }
     else {
-
         $apkFiles = Get-ChildItem -Path $variantPath -Recurse -Filter '*.apk' -ErrorAction SilentlyContinue
         if ($apkFiles) {
             $apkPath = $apkFiles[0].FullName
             Write-ColorOutput "Found APK file: $apkPath" 'Green'
         }
     }
-    
+
     if (-not $apkPath -or -not (Test-Path $apkPath)) {
         Write-ColorOutput 'Generated APK file not found' 'Red'
         return $false
     }
-
 
     $apkInfo = Get-Item -LiteralPath $apkPath
     $apkAgeMin = [math]::Round(((Get-Date) - $apkInfo.LastWriteTime).TotalMinutes, 1)
@@ -808,17 +765,14 @@ function Copy-ApkAndUpdateConfig {
         Write-ColorOutput "WARNING: APK is $apkAgeMin minutes old - likely a STALE artifact, not this build's output" 'Red'
     }
 
-
     $newApkFileName = 'app.npk'
     $targetApkPath = Join-Path $BuildGeneratedDir $newApkFileName
-    
+
     try {
         Copy-Item $apkPath $targetApkPath -Force
         Write-ColorOutput "APK file copied and renamed to build/generated folder: $targetApkPath" 'Green'
-        
 
         if (-not (Test-Path $BuildGeneratedConfigFile)) {
-
             $rootConfigFile = Join-Path $ProjectRoot 'PluginConfig.json'
             if (Test-Path $rootConfigFile) {
                 Copy-Item $rootConfigFile $BuildGeneratedConfigFile -Force
@@ -829,21 +783,17 @@ function Copy-ApkAndUpdateConfig {
                 return $false
             }
         }
-        
 
         $config = Get-Content $BuildGeneratedConfigFile -Raw | ConvertFrom-Json
-        
 
         $configHash = @{}
         $config.PSObject.Properties | ForEach-Object { $configHash[$_.Name] = $_.Value }
-        
 
         $configHash.nativeCodePackage = "/$newApkFileName"
-        
 
         $configHash | ConvertTo-Json -Depth 10 | Set-Content $BuildGeneratedConfigFile -Encoding UTF8
         Write-ColorOutput "PluginConfig.json in build/generated folder updated with nativeCodePackage field: /$newApkFileName" 'Green'
-        
+
         return $true
     }
     catch {
@@ -852,18 +802,13 @@ function Copy-ApkAndUpdateConfig {
     }
 }
 
-
 function Build-ReactNativeBundle {
     param([string]$ProjectRoot, [string]$ProjectName, [string]$OutputDir)
-    
+
     Write-ColorOutput 'Starting React Native bundling...' 'Blue'
-    
 
     $bundleOutput = Join-Path $OutputDir "$ProjectName.bundle"
     $assetsDir = $OutputDir
-
-
-
 
     $existingBundles = Get-ChildItem -LiteralPath $OutputDir -Filter '*.bundle' -File -ErrorAction SilentlyContinue
     foreach ($existingBundle in $existingBundles) {
@@ -872,15 +817,10 @@ function Build-ReactNativeBundle {
             Write-ColorOutput "Removed stale bundle: $($existingBundle.Name)" 'Yellow'
         }
     }
-    
 
     $bundleCommand = "npx react-native bundle --entry-file index.js --bundle-output `"$bundleOutput`" --platform android --assets-dest `"$assetsDir`" --dev false"
-    
+
     Write-ColorOutput "Executing command: $bundleCommand" 'Yellow'
-
-
-
-
 
     $existingBundle = Get-Item -LiteralPath $bundleOutput -ErrorAction SilentlyContinue
     if ($null -ne $existingBundle -and $existingBundle.Length -gt 0 -and (
@@ -889,11 +829,10 @@ function Build-ReactNativeBundle {
         Write-ColorOutput "npx is unavailable; using existing bundle: $bundleOutput" 'Yellow'
         return $true
     }
-    
-    try {
 
+    try {
         $process = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $bundleCommand -Wait -PassThru -NoNewWindow -WorkingDirectory $ProjectRoot
-        
+
         if ($process.ExitCode -eq 0) {
             Write-ColorOutput 'React Native bundling successful' 'Green'
             Write-ColorOutput "Bundle file generated: $bundleOutput" 'Green'
@@ -908,8 +847,6 @@ function Build-ReactNativeBundle {
         return $false
     }
 }
-
-
 
 
 function Get-ReactPackagesFromPackageListClass {
@@ -985,49 +922,38 @@ function Find-ReactPackagesInClassesDir {
     return $found
 }
 
-
 function Copy-IconAndUpdatePath {
     param([string]$ProjectRoot, [string]$BuildGeneratedDir, [string]$BuildGeneratedConfigFile)
-    
-    Write-ColorOutput 'Checking and copying icon file...' 'Blue'
-    
-    try {
 
+    Write-ColorOutput 'Checking and copying icon file...' 'Blue'
+
+    try {
         $rootConfigFile = Join-Path $ProjectRoot 'PluginConfig.json'
         $rootConfig = Get-Content $rootConfigFile -Raw | ConvertFrom-Json
-        
+
         if ($rootConfig.iconPath -and $rootConfig.iconPath -ne '') {
             $iconPath = $rootConfig.iconPath
             Write-ColorOutput "Detected icon path: $iconPath" 'Yellow'
-            
 
             if ([System.IO.Path]::IsPathRooted($iconPath)) {
-
                 $sourceIconPath = $iconPath
             } else {
-
                 $sourceIconPath = Join-Path $ProjectRoot $iconPath
             }
-            
-            if (Test-Path $sourceIconPath) {
 
+            if (Test-Path $sourceIconPath) {
                 $iconFileName = Split-Path $sourceIconPath -Leaf
                 $targetIconPath = Join-Path $BuildGeneratedDir $iconFileName
-                
 
                 Copy-Item $sourceIconPath $targetIconPath -Force
                 Write-ColorOutput "Icon file copied to: $targetIconPath" 'Green'
-                
 
                 $config = Get-Content $BuildGeneratedConfigFile -Raw | ConvertFrom-Json
-                
 
                 $configHash = @{}
                 $config.PSObject.Properties | ForEach-Object { $configHash[$_.Name] = $_.Value }
-                
 
                 $configHash.iconPath = "/$iconFileName"
-                
 
                 $configHash | ConvertTo-Json -Depth 10 | Set-Content $BuildGeneratedConfigFile -Encoding UTF8
                 Write-ColorOutput "Updated iconPath field in build/generated folder's PluginConfig.json: $iconFileName" 'Green'
@@ -1043,12 +969,11 @@ function Copy-IconAndUpdatePath {
     }
 }
 
-
 function New-BuildOutputsDirectory {
     param([string]$ProjectRoot)
-    
+
     $buildOutputsDir = Join-Path $ProjectRoot 'build\outputs'
-    
+
     try {
         if (-not (Test-Path $buildOutputsDir)) {
             New-Item -ItemType Directory -Path $buildOutputsDir -Force | Out-Null
@@ -1065,35 +990,30 @@ function New-BuildOutputsDirectory {
     }
 }
 
-
 function New-ZipPackage {
     param(
         [string]$SourceDir,
         [string]$DestinationPath
     )
-    
+
     Write-ColorOutput 'Starting to package build/generated directory...' 'Blue'
-    
+
     if (-not (Test-Path $SourceDir)) {
         Write-ColorOutput "Source directory does not exist: $SourceDir" 'Red'
         return $false
     }
-    
+
     try {
-
         if (Get-Command 'Compress-Archive' -ErrorAction SilentlyContinue) {
-
             if (Test-Path $DestinationPath) {
                 Remove-Item $DestinationPath -Force
             }
-            
 
             $sourceItems = Get-ChildItem -Path $SourceDir -Recurse
             if ($sourceItems.Count -eq 0) {
                 Write-ColorOutput 'Source directory is empty, cannot create zip file' 'Yellow'
                 return $false
             }
-            
 
             Compress-Archive -Path "$SourceDir\*" -DestinationPath $DestinationPath -Force
             Write-ColorOutput "Zip file created successfully: $DestinationPath" 'Green'
@@ -1110,30 +1030,27 @@ function New-ZipPackage {
     }
 }
 
-
 function Rename-ToSnplgFile {
     param(
         [string]$ZipFilePath,
         [string]$ProjectName,
         [string]$OutputDir
     )
-    
+
     Write-ColorOutput 'Renaming zip file to .snplg format...' 'Blue'
-    
+
     if (-not (Test-Path $ZipFilePath)) {
         Write-ColorOutput "Zip file does not exist: $ZipFilePath" 'Red'
         return $null
     }
-    
+
     try {
         $snplgFileName = "$ProjectName.snplg"
         $snplgFilePath = Join-Path $OutputDir $snplgFileName
-        
 
         if (Test-Path $snplgFilePath) {
             Remove-Item $snplgFilePath -Force
         }
-        
 
         Move-Item $ZipFilePath $snplgFilePath -Force
         Write-ColorOutput "File renamed to: $snplgFilePath" 'Green'
@@ -1145,13 +1062,8 @@ function Rename-ToSnplgFile {
     }
 }
 
-
 function Main {
-
     Test-OperatingSystem
-
-
-
 
     if ($script:WithLogs) {
         $env:WITH_LOGS = '1'
@@ -1164,25 +1076,21 @@ function Main {
 
     $selfCheckOk = Self-CheckScriptIntegrity -ScriptPath $PSCommandPath
     if (-not $selfCheckOk) { return }
-    
 
     $projectRoot = Split-Path -Parent $PSCommandPath
     Write-ColorOutput "Project root directory: $projectRoot" 'Green'
-    
 
     Write-ColorOutput '=== Step 1: Check build/generated directory ===' 'Blue'
     $packageInfo = Get-PackageInfo -ProjectRoot $projectRoot
     $projectName = $packageInfo.name
     $buildGeneratedDir = Join-Path $projectRoot 'build\generated'
-    
+
     if (Test-Path $buildGeneratedDir) {
         Write-ColorOutput "Detected build/generated directory already exists: $buildGeneratedDir" 'Yellow'
     } else {
         New-Item -ItemType Directory -Path $buildGeneratedDir -Force | Out-Null
         Write-ColorOutput "Created build/generated directory: $buildGeneratedDir" 'Green'
     }
-    
-
 
     Write-ColorOutput '=== Step 2: Execute React Native bundling ===' 'Blue'
     $bundleSuccess = Build-ReactNativeBundle -ProjectRoot $projectRoot -ProjectName $projectName -OutputDir $buildGeneratedDir
@@ -1190,30 +1098,25 @@ function Main {
         Write-ColorOutput 'React Native bundling failed, script terminated' 'Red'
         return
     }
-    
 
     Write-ColorOutput '=== Step 3: Check root directory PluginConfig.json ===' 'Blue'
     $rootConfigFile = Join-Path $projectRoot 'PluginConfig.json'
-    
+
     if (Test-Path $rootConfigFile) {
         Write-ColorOutput 'Detected root directory PluginConfig.json file already exists, skipping generation step' 'Yellow'
     } else {
-
         Write-ColorOutput '=== Step 4: Generate random pluginID ===' 'Blue'
         $pluginId = New-RandomString
         Write-ColorOutput "Generated pluginID: $pluginId" 'Blue'
-        
 
         Write-ColorOutput '=== Step 5: Generate root directory PluginConfig.json ===' 'Blue'
         New-PluginConfig -PluginId $pluginId -PackageInfo $packageInfo -ProjectRoot $projectRoot
     }
-    
 
     Write-ColorOutput '=== Step 6: Copy PluginConfig.json to build/generated folder and handle icon ===' 'Blue'
     $buildGeneratedConfigFile = Join-Path $buildGeneratedDir 'PluginConfig.json'
     Copy-Item $rootConfigFile $buildGeneratedConfigFile -Force
     Write-ColorOutput 'Copied root directory PluginConfig.json to build/generated folder' 'Green'
-
 
     if ($env:WITH_LOGS -eq '1') {
         $cfgObj = Get-Content -LiteralPath $buildGeneratedConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -1222,25 +1125,18 @@ function Main {
         Write-ColorOutput "Dev build: name set to '$($cfgObj.name)'" 'Yellow'
     }
 
-
     Copy-IconAndUpdatePath -ProjectRoot $projectRoot -BuildGeneratedDir $buildGeneratedDir -BuildGeneratedConfigFile $buildGeneratedConfigFile
-    
 
     Write-ColorOutput '=== Step 7: Parse Application.getPackages (manually added packages) ===' 'Blue'
     $projectReactPkgs = Find-ManualReactPackagesFromApplication -ProjectRoot $projectRoot
 
-
     Write-ColorOutput '=== Step 8: Scan node_modules for Android sources ===' 'Blue'
     $thirdPartyNativeMods = Scan-NodeModulesNativeCode -ProjectRoot $projectRoot
-
 
     Write-ColorOutput '=== Step 9: Build condition check ===' 'Blue'
     $shouldBuildNative = ($projectReactPkgs.Count -gt 0) -or ($thirdPartyNativeMods.Count -gt 0)
     if ($shouldBuildNative) {
         Write-ColorOutput "Build conditions met: project packages=$($projectReactPkgs.Count), third-party native modules=$($thirdPartyNativeMods.Count)" 'Green'
-
-
-
 
         $staleNpk = Join-Path $buildGeneratedDir 'app.npk'
         if (Test-Path $staleNpk) {
@@ -1248,10 +1144,8 @@ function Main {
             Write-ColorOutput 'Removed previous app.npk from build/generated (stale-guard)' 'Yellow'
         }
 
-
         Write-ColorOutput '=== Step 10: Invoke Gradle to build APK ===' 'Blue'
         $buildSuccess = Build-AndroidApk -ProjectRoot $projectRoot -BuildGeneratedConfigFile $buildGeneratedConfigFile -RequireReactPackagesCheck:$false
-
 
         if ($buildSuccess) {
             Write-ColorOutput '=== Step 11: Copy APK and update nativeCodePackage ===' 'Blue'
@@ -1265,7 +1159,6 @@ function Main {
             return
         }
 
-
         Write-ColorOutput '=== Step 12: Parse Autolinking PackageList.java and merge lists ===' 'Blue'
         $excludePkgs = @('com.facebook.react.shell.MainReactPackage', 'com.ratta.supernote.pluginlib.PluginPackage')
         $pkgFromAutolinking = Get-ReactPackagesFromAutolinkingSource -ProjectRoot $projectRoot -Exclude $excludePkgs
@@ -1275,14 +1168,11 @@ function Main {
         $allPkgs += $pkgFromAutolinking
         $dedupPkgs = $allPkgs | Sort-Object -Unique
 
-
         Write-ColorOutput '=== Step 13: Write reactPackages field ===' 'Blue'
         foreach ($p in $dedupPkgs) { Write-ColorOutput "  - write: $p" 'Green' }
         Update-PluginConfigPackages -ProjectRoot $projectRoot -FoundPackages $dedupPkgs -BuildGeneratedDir $buildGeneratedDir
     }
     else {
-
-
         $ktProbe = Get-ChildItem -Path (Join-Path $projectRoot 'android') -Recurse -Filter '*.kt' -File -ErrorAction SilentlyContinue
         if ($ktProbe -and $ktProbe.Count -gt 0) {
             Write-ColorOutput 'Native .kt sources exist but build conditions not met - scan failure; ABORTING to avoid packaging a stale app.npk' 'Red'
@@ -1291,49 +1181,41 @@ function Main {
         Write-ColorOutput 'Build conditions not met; skipping steps 10-13 and proceeding to packaging' 'Yellow'
     }
 
-
     Write-ColorOutput 'Step 14: Package build/generated directory and generate .snplg file...' 'Green'
-    
 
     $buildOutputsDir = New-BuildOutputsDirectory -ProjectRoot $projectRoot
     if (-not $buildOutputsDir) {
         Write-ColorOutput 'Unable to create build/outputs directory, skipping packaging step' 'Red'
         return
     }
-    
 
     if (-not (Test-Path $buildGeneratedDir)) {
         Write-ColorOutput 'build/generated directory does not exist, cannot package' 'Red'
         return
     }
-    
+
     $generatedItems = Get-ChildItem -Path $buildGeneratedDir -Recurse
     if ($generatedItems.Count -eq 0) {
         Write-ColorOutput 'build/generated directory is empty, cannot package' 'Yellow'
         return
     }
-    
 
     $tempZipFileName = 'temp_package.zip'
     $tempZipPath = Join-Path $buildOutputsDir $tempZipFileName
-    
 
     $zipResult = New-ZipPackage -SourceDir $buildGeneratedDir -DestinationPath $tempZipPath
     if (-not $zipResult) {
         Write-ColorOutput 'Packaging failed, unable to create zip file' 'Red'
         return
     }
-    
 
     $devSuffix = if ($env:WITH_LOGS -eq '1') { '-dev' } else { '' }
-
     $outputName = "Mosaic$devSuffix"
     $snplgFileName = "$outputName.snplg"
     $finalSnplgPath = Join-Path $buildOutputsDir $snplgFileName
     $null = Rename-ToSnplgFile -ZipFilePath $tempZipPath -ProjectName $outputName -OutputDir $buildOutputsDir
     if (Test-Path $finalSnplgPath) {
         Write-ColorOutput "Plugin package successfully generated: $finalSnplgPath" 'Green'
-        
 
         $fileInfo = Get-Item -LiteralPath $finalSnplgPath
         $fileSizeMB = [math]::Round($fileInfo.Length / 1MB, 2)
@@ -1342,7 +1224,6 @@ function Main {
         Write-ColorOutput 'Failed to rename to .snplg file' 'Red'
     }
 }
-
 
 
 function Resolve-ClassesDir {
@@ -1358,6 +1239,5 @@ function Resolve-ClassesDir {
     if ($candidates -and $candidates.Count -gt 0) { return $candidates[0].FullName }
     return ''
 }
-
 
 Main

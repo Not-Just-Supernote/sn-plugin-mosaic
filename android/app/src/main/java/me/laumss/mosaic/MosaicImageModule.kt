@@ -193,7 +193,7 @@ class MosaicImageModule(
         writeChunk(out, "IHDR", ihdr)
 
         val deflated = ByteArrayOutputStream(gray.size / 2 + 64)
-        val deflater = Deflater(Deflater.BEST_COMPRESSION)
+        val deflater = Deflater(Deflater.DEFAULT_COMPRESSION)
         DeflaterOutputStream(deflated, deflater, 64 * 1024).use { stream ->
             val previous = ByteArray(width)
             val current = ByteArray(width)

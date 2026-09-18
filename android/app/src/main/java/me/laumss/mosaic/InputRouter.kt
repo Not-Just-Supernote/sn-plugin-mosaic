@@ -42,9 +42,35 @@ object InputRouter {
     @Volatile
     var sink: Sink? = null
 
+    
+    private class QueuedTouch(val target: Sink, val frame: TouchFrame)
+
+    private val touchLock = Any()
+    private val touchQueue = ArrayList<QueuedTouch>(8)
+    private var touchDrainPosted = false
+    private val drainTouch = Runnable {
+        val batch: List<QueuedTouch>
+        synchronized(touchLock) {
+            batch = ArrayList(touchQueue)
+            touchQueue.clear()
+            touchDrainPosted = false
+        }
+        for (q in batch) if (sink === q.target) q.target.onTouch(q.frame)
+    }
+
     fun postTouch(frame: TouchFrame) {
         val target = sink ?: return
-        main.post { if (sink === target) target.onTouch(frame) }
+        synchronized(touchLock) {
+            val last = touchQueue.lastOrNull()
+            if (frame.action == ACTION_MOVE && last != null && last.frame.action == ACTION_MOVE && last.target === target) {
+                touchQueue[touchQueue.size - 1] = QueuedTouch(target, frame)
+            } else {
+                touchQueue.add(QueuedTouch(target, frame))
+            }
+            if (touchDrainPosted) return
+            touchDrainPosted = true
+        }
+        main.post(drainTouch)
     }
 
     fun postPenState(state: PenState, value: Boolean) {

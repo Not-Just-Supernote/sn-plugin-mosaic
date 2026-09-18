@@ -5,6 +5,7 @@ import android.os.Looper
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.uimanager.UIManagerModule
 
 
@@ -17,19 +18,38 @@ class MosaicBoardEngineModule(
     
     @ReactMethod
     fun applyOps(base64: String) {
-        BoardEngine.applyOps(base64)
+        WhiteboardSceneGate.dispatch { BoardEngine.applyOps(base64) }
     }
 
     
     @ReactMethod
     fun setViewport(panX: Double, panY: Double, scale: Double) {
-        BoardEngine.setViewport(panX.toFloat(), panY.toFloat(), scale.toFloat())
+        WhiteboardSceneGate.dispatch { BoardEngine.setViewport(panX.toFloat(), panY.toFloat(), scale.toFloat()) }
+    }
+
+    
+    @ReactMethod
+    fun setViewportIfUnset(panX: Double, panY: Double, scale: Double) {
+        val ctx = reactApplicationContext
+        if (MosaicSession.savedViewport(ctx) != null) return
+        WhiteboardSceneGate.dispatch {
+            BoardEngine.setViewport(panX.toFloat(), panY.toFloat(), scale.toFloat())
+            MosaicSession.saveViewport(ctx, BoardEngine.panX, BoardEngine.panY, BoardEngine.scale)
+        }
+    }
+
+    
+    @ReactMethod
+    fun selectCards(viewTag: Int, ids: ReadableArray) {
+        val list = ArrayList<String>()
+        for (i in 0 until ids.size()) ids.getString(i)?.let { list.add(it) }
+        withView(viewTag) { it.controller.selectCards(list) }
     }
 
     
     @ReactMethod
     fun clearScene() {
-        BoardEngine.clearScene()
+        WhiteboardSceneGate.dispatch { BoardEngine.clearScene() }
     }
 
     
@@ -51,6 +71,28 @@ class MosaicBoardEngineModule(
 
     
     @ReactMethod
+    fun setClippedWhiteboards(viewTag: Int, ids: ReadableArray) {
+        val set = HashSet<String>()
+        for (i in 0 until ids.size()) ids.getString(i)?.let { set.add(it) }
+        withView(viewTag) { it.controller.setClippedWhiteboards(set) }
+    }
+
+    
+    @ReactMethod
+    fun createRecognizedTextCard(viewTag: Int, text: String) {
+        withView(viewTag) { it.controller.createRecognizedTextCard(text) }
+    }
+
+    
+    @ReactMethod
+    fun invalidateImages(paths: ReadableArray) {
+        val list = ArrayList<String>()
+        for (i in 0 until paths.size()) paths.getString(i)?.let { list.add(it) }
+        WhiteboardSceneGate.dispatch { BoardEngine.invalidateImages(list) }
+    }
+
+    
+    @ReactMethod
     fun addListener(eventName: String) = Unit
 
     @ReactMethod
@@ -61,7 +103,7 @@ class MosaicBoardEngineModule(
             val view = try {
                 reactApplicationContext.getNativeModule(UIManagerModule::class.java)?.resolveView(viewTag)
             } catch (_: Throwable) { null }
-            (view as? MosaicBoardView)?.let(block)
+            (view as? MosaicBoardView)?.let { WhiteboardSceneGate.dispatch { block(it) } }
         }
     }
 }

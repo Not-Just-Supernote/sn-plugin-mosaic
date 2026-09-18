@@ -31,7 +31,9 @@ object DrawPathClient {
 
     
     const val PEN_TYPE_TECHNICAL = 10
+    
     const val PEN_COLOR_BLACK = 0
+    const val PEN_COLOR_WHITE = 0xfe
 
     data class DisableArea(
         val left: Int,
