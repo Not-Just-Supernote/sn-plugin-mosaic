@@ -16,6 +16,7 @@ import MosaicBoardViewNative from './MosaicBoardViewNative';
 import { loadBoard, saveBoard } from './boardStore';
 import {
   clippedWhiteboardIds,
+  ensureArchivePermissions,
   ensureNoteShotPermissions,
   insertCaptureIntoNote,
   removeCaptureFromNote,
@@ -30,6 +31,7 @@ import {
   cardFromCommand,
   connectionFromCommand,
   strokeFromCommand,
+  strokesFromBatch,
   subscribeBoardCommands,
   viewportFromCommand,
   whiteboardFromCommand,
@@ -65,17 +67,27 @@ import {
 import { generateId } from './React/src/id';
 import { resolveCardSize } from './React/src/cardGeometry';
 import { viewportWorldRect } from './React/src/spatialIndex';
-import { SYNC_SITE, createSharedBoard } from './React/src/sharedBoard';
+import {
+  LOCAL_ROOM_ID,
+  SYNC_SITE,
+  createSharedBoard,
+  localSyncSite,
+  sharedBoardLink,
+  siteSyncEndpoint,
+} from './React/src/sharedBoard';
 import { AssetSync } from './assetSync';
 import { loadSyncConfig, saveSyncConfig } from './syncConfig';
 import { SIZE_PRESETS, type Card, type CanvasData, type Connection, type Viewport } from './React/src/types';
 import type { BoardMutationDomain } from './React/src/syncProtocol';
 import { ensureNoteDir } from './noteStore';
-import { BOARD_SYNC_ENABLED, BoardSyncClient } from './React/src/boardSyncClient';
+import { BOARD_SYNC_ENABLED, BoardSyncClient, type SyncConnectionState } from './React/src/boardSyncClient';
+import { plainSocketFactory } from './rawNet';
+import { restoreMosaicArchive, saveMosaicArchive } from './archiveStore';
 
 
 
 const SAVE_DEBOUNCE_MS = 800;
+const LARGE_INK_PERSIST_DEBOUNCE_MS = 1200;
 const PEN_WIDTH_PX = 2;
 const INBOX_POLL_MS = 800;
 
@@ -83,7 +95,7 @@ const CLOSE_SAVE_TIMEOUT_MS = 2000;
 
 const CLOSE_LOCK_STALE_MS = 2500;
 
-const DEFAULT_ZOOM = 0.7 + (1.4 - 0.7) * (150 - 100) / 100;
+const DEFAULT_ZOOM = 0.36666667 + ((75 - 10) / 90) * (0.8 - 0.36666667);
 
 const LEGACY_SAMPLE_CARD_IDS = new Set([
   'test-center',
@@ -150,13 +162,18 @@ function nextZIndex(cards: Card[]): number {
   return cards.reduce((highest, card) => Math.max(highest, card.zIndex), 0) + 1;
 }
 
-export default function App(): React.JSX.Element | null {
-  const [pluginPermissionsReady, setPluginPermissionsReady] = useState<boolean | null>(null);
+export default function App(): React.JSX.Element {
+  
+  const [importPermissionsReady, setImportPermissionsReady] = useState(false);
   
   const [deviceType, setDeviceType] = useState<number | null>(null);
   const [touchEnabled, setTouchEnabled] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [notesDirectory, setNotesDirectory] = useState('');
+  
+  const [syncAddress, setSyncAddress] = useState<string | null>(null);
+  
+  const lastLocalAddressRef = useRef('');
 
   const boardRef = useRef<React.ComponentRef<typeof MosaicBoardViewNative>>(null);
   const modelRef = useRef<BoardModel>(emptyModel());
@@ -164,9 +181,13 @@ export default function App(): React.JSX.Element | null {
   const extrasRef = useRef<Pick<BoardDoc, 'blobs' | 'ext'>>({ blobs: {} });
   const loadedRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deferredInkPersistenceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const importBusyRef = useRef(false);
   const captureInsertBusyRef = useRef(false);
   const recognizeBusyRef = useRef(false);
+  
+  const mosaicSurfaceRef = useRef<'board' | 'note'>('board');
+  const mosaicVisibleRef = useRef(false);
   
   const pendingDocTextRef = useRef<string | null>(null);
   
@@ -180,6 +201,8 @@ export default function App(): React.JSX.Element | null {
   const syncImportBusyRef = useRef(false);
   const pendingSyncImportRef = useRef<BoardDoc | null>(null);
   const syncBoardIdRef = useRef('');
+  
+  const syncAnnounceRef = useRef(false);
   const engineSyncRef = useRef<EngineSyncSession | null>(null);
   if (engineSyncRef.current === null) engineSyncRef.current = new EngineSyncSession();
   const engineSync = engineSyncRef.current;
@@ -190,6 +213,17 @@ export default function App(): React.JSX.Element | null {
   if (assetSyncRef.current === null) {
     assetSyncRef.current = new AssetSync(SYNC_SITE, paths => engineSync.invalidateImages(paths));
   }
+  const isMosaicBoardSurface = useCallback(() => {
+    
+    
+    try {
+      const native = (NativeModules.MosaicBoardEngine as any)?.isBoardSurface;
+      if (typeof native === 'function') return native() === true;
+      const current = (NativeModules.MosaicBoardEngine as any)?.getCurrentSurface?.();
+      if (current === 'board' || current === 'note') mosaicSurfaceRef.current = current;
+    } catch (_) {}
+    return mosaicVisibleRef.current && mosaicSurfaceRef.current === 'board';
+  }, []);
   const scheduleAssetSync = useCallback(() => {
     const boardId = syncBoardIdRef.current;
     if (!boardId) return;
@@ -235,6 +269,27 @@ export default function App(): React.JSX.Element | null {
       void flushSave();
     }, SAVE_DEBOUNCE_MS);
   }, [flushSave]);
+
+  
+  const deferInkPersistence = useCallback((domain: BoardMutationDomain) => {
+    if (saveTimerRef.current !== null) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    if (deferredInkPersistenceRef.current !== null) {
+      clearTimeout(deferredInkPersistenceRef.current);
+    }
+    deferredInkPersistenceRef.current = setTimeout(() => {
+      deferredInkPersistenceRef.current = null;
+      void (async () => {
+        if (!loadedRef.current) return;
+        await flushSave();
+        if (!applyingRemoteRef.current) {
+          syncClientRef.current?.publish(domain, currentDocument());
+        }
+      })();
+    }, LARGE_INK_PERSIST_DEBOUNCE_MS);
+  }, [currentDocument, flushSave]);
 
   
   const pushFullScene = useCallback(() => {
@@ -334,6 +389,34 @@ export default function App(): React.JSX.Element | null {
   }, [applyRemoteDocument, currentDocument]);
 
   
+  const pushSyncState = useCallback((enabled: boolean, state: SyncConnectionState | 'off') => {
+    const viewTag = findNodeHandle(boardRef.current);
+    const engine = NativeModules.MosaicBoardEngine as
+      | { setSyncState?: (tag: number, enabled: boolean, state: string, address: string) => void }
+      | undefined;
+    if (viewTag !== null && engine?.setSyncState) engine.setSyncState(viewTag, enabled, state, lastLocalAddressRef.current);
+  }, []);
+
+  
+  const setSyncTarget = useCallback(async (enable: boolean, address: string) => {
+    const localAddress = address.trim();
+    if (enable && localAddress) {
+      try {
+        localSyncSite(localAddress);
+      } catch (error) {
+        Alert.alert(t('sync'), error instanceof Error ? error.message : String(error));
+        return;
+      }
+    }
+    const config = await loadSyncConfig();
+    if (enable) lastLocalAddressRef.current = localAddress;
+    await saveSyncConfig({ ...config, enabled: enable, localAddress: lastLocalAddressRef.current });
+    syncAnnounceRef.current = enable && !localAddress;
+    console.log(`[MosaicSync] target enable=${enable} address=${localAddress || 'remote'}`);
+    setSyncAddress(enable ? localAddress : null);
+  }, []);
+
+  
 
   
   const closeBoard = useCallback((source: string) => {
@@ -354,7 +437,12 @@ export default function App(): React.JSX.Element | null {
     closingSinceRef.current = startedAt;
     
     
-    const dirty = saveTimerRef.current !== null;
+    const deferredInk = deferredInkPersistenceRef.current !== null;
+    if (deferredInk && deferredInkPersistenceRef.current !== null) {
+      clearTimeout(deferredInkPersistenceRef.current);
+      deferredInkPersistenceRef.current = null;
+    }
+    const dirty = saveTimerRef.current !== null || deferredInk;
     console.log(`[MosaicBoard] close source=${source} dirty=${dirty}`);
     MosaicHandwriting?.detachInput().catch(() => {});
     MosaicHandwriting?.lockStatusBar(false).catch(() => {});
@@ -418,7 +506,25 @@ export default function App(): React.JSX.Element | null {
   const insertTextCard = useCallback((rawText: string) => {
     const text = rawText.trim();
     if (!text) return;
+    if (!isMosaicBoardSurface()) {
+      
+      
+      pendingDocTextRef.current = text;
+      if (loadedRef.current) consumePendingDocText();
+      console.log('[MosaicDocText] deferred while surface=note');
+      return;
+    }
     if (!loadedRef.current) { pendingDocTextRef.current = text; return; }
+    
+    const viewTag = findNodeHandle(boardRef.current);
+    const engine = NativeModules.MosaicBoardEngine as
+      | { insertDocTextCard?: (tag: number, text: string) => void }
+      | undefined;
+    if (viewTag !== null && engine?.insertDocTextCard) {
+      engine.insertDocTextCard(viewTag, text);
+      console.log(`[MosaicDocText] sent to native chars=${text.length}`);
+      return;
+    }
     const model = modelRef.current;
     const viewport = model.viewport;
     const { width: screenW, height: screenH } = Dimensions.get('window');
@@ -443,7 +549,7 @@ export default function App(): React.JSX.Element | null {
     scheduleSave();
     if (!applyingRemoteRef.current) syncClientRef.current?.publish('structure', currentDocument());
     console.log(`[MosaicDocText] inserted text card=${created.id} chars=${text.length}`);
-  }, [currentDocument, engineSync, scheduleSave]);
+  }, [currentDocument, engineSync, isMosaicBoardSurface, scheduleSave]);
 
   const insertCapturedShot = useCallback(async (op: Extract<BoardCommand, { name: 'captureReady' }>) => {
     if (captureInsertBusyRef.current) return;
@@ -486,23 +592,55 @@ export default function App(): React.JSX.Element | null {
     
     let inkChanged = false;
     let anchorsChanged = false;
+    const inkIndex = new Map<string, number>();
+    model.ink.forEach((stroke, index) => inkIndex.set(stroke.id, index));
+    
+    
+    const removedInkIds = new Set<string>();
+    let removedInkRequested = 0;
     
     
     let closeRequested = false;
+    let batchStrokeCount = 0;
     for (const op of ops) {
       switch (op.type) {
         case 'strokeUpsert': {
+          batchStrokeCount += 1;
           const stroke = strokeFromCommand(op);
-          const index = model.ink.findIndex(s => s.id === stroke.id);
-          if (index >= 0) model.ink[index] = stroke; else model.ink.push(stroke);
+          const index = inkIndex.get(stroke.id);
+          if (index !== undefined) model.ink[index] = stroke;
+          else {
+            inkIndex.set(stroke.id, model.ink.length);
+            model.ink.push(stroke);
+          }
+          removedInkIds.delete(stroke.id);
           engineSync.acknowledgeStroke(stroke);
           changed = true;
           inkChanged = true;
           break;
         }
+        case 'strokeBatch': {
+          batchStrokeCount += op.ids.length;
+          const strokes = strokesFromBatch(op);
+          for (const stroke of strokes) {
+            const index = inkIndex.get(stroke.id);
+            if (index !== undefined) model.ink[index] = stroke;
+            else {
+              inkIndex.set(stroke.id, model.ink.length);
+              model.ink.push(stroke);
+            }
+            removedInkIds.delete(stroke.id);
+          }
+          engineSync.acknowledgeStrokes(strokes);
+          if (strokes.length > 0) {
+            changed = true;
+            inkChanged = true;
+          }
+          break;
+        }
         case 'strokesRemove': {
-          const ids = new Set(op.ids);
-          model.ink = model.ink.filter(s => !ids.has(s.id));
+          removedInkRequested += op.ids.length;
+          for (const id of op.ids) removedInkIds.add(id);
           engineSync.acknowledgeStrokesRemoved(op.ids);
           changed = true;
           inkChanged = true;
@@ -518,10 +656,18 @@ export default function App(): React.JSX.Element | null {
         }
         case 'cardsRemove': {
           const ids = new Set(op.ids);
+          const removedConnectionIds = new Set(model.connections
+            .filter(connection => ids.has(connection.fromCardId) || ids.has(connection.toCardId))
+            .map(connection => connection.id));
           model.cards = model.cards.filter(c => !ids.has(c.id));
           model.connections = model.connections.filter(c => !ids.has(c.fromCardId) && !ids.has(c.toCardId));
           const inkBefore = model.ink.length;
-          model.ink = model.ink.filter(s => !(s.space.startsWith('card:') && ids.has(s.space.slice(5))));
+          model.ink = model.ink.filter(s =>
+            !(s.space.startsWith('card:') && ids.has(s.space.slice(5))) &&
+            !(s.space.startsWith('connection:') && removedConnectionIds.has(s.space.slice('connection:'.length))),
+          );
+          inkIndex.clear();
+          model.ink.forEach((stroke, index) => inkIndex.set(stroke.id, index));
           
           if (model.ink.length !== inkBefore) inkChanged = true;
           engineSync.acknowledgeCardsRemoved(op.ids);
@@ -529,7 +675,10 @@ export default function App(): React.JSX.Element | null {
           break;
         }
         case 'connectionAdd': {
-          if (!model.connections.some(c => c.id === op.id)) model.connections.push(connectionFromCommand(op));
+          const index = model.connections.findIndex(c => c.id === op.id)
+          const connection = connectionFromCommand(op)
+          if (index >= 0) model.connections[index] = { ...model.connections[index], locked: connection.locked === true || model.connections[index].locked === true }
+          else model.connections.push(connection)
           structureChanged = true;
           break;
         }
@@ -577,7 +726,61 @@ export default function App(): React.JSX.Element | null {
               .finally(() => { void pushClippedWhiteboards(); });
           }
           else if (op.name === 'recognizeLasso') void recognizeLassoToCard();
+          else if (op.name === 'saveArchive') {
+            void (async () => {
+              if (!(await ensureArchivePermissions(t('archivePermissionRead'), t('archivePermissionWrite')))) {
+                throw new Error(t('archivePermissionDenied'));
+              }
+              await flushSave();
+              return saveMosaicArchive();
+            })()
+              .then(path => ToastAndroid.show(t('archiveSaved', { path }), ToastAndroid.LONG))
+              .catch(error => ToastAndroid.show(t('archiveSaveFailed', { error: String(error) }), ToastAndroid.LONG));
+          }
+          else if (op.name === 'loadArchive') {
+            void (async () => {
+              
+              let confirmed = false;
+              try {
+                confirmed = await NativeUIUtils.showRattaDialog(
+                  t('archiveLoadAsk'), t('archiveLoadCancel'), t('archiveLoadConfirm'), false,
+                );
+              } catch (error) {
+                console.log(`[MosaicArchive] confirm dialog failed: ${String(error)}`);
+              }
+              if (!confirmed) return false;
+              if (!(await ensureArchivePermissions(t('archivePermissionRead'), t('archivePermissionWrite')))) {
+                throw new Error(t('archivePermissionDenied'));
+              }
+              await restoreMosaicArchive();
+              return true;
+            })()
+              .then(restored => (restored ? loadBoard() : undefined))
+              .then(document => {
+                if (document === undefined) return;
+                if (document === null) throw new Error(t('archiveInvalid'));
+                metaRef.current = document.meta;
+                extrasRef.current = { blobs: document.blobs, ext: document.ext };
+                modelRef.current = {
+                  cards: document.cards,
+                  connections: document.connections,
+                  ink: document.ink,
+                  whiteboards: document.whiteboards,
+                  viewport: document.meta.viewport,
+                };
+                pushFullScene();
+                setLoaded(true);
+                loadedRef.current = true;
+                ToastAndroid.show(t('archiveLoaded'), ToastAndroid.LONG);
+              })
+              .catch(error => ToastAndroid.show(t('archiveLoadFailed', { error: String(error) }), ToastAndroid.LONG));
+          }
           else if (op.name === 'insertTextCard') {
+            if (!isMosaicBoardSurface()) {
+              pendingDocTextRef.current = op.text;
+              console.log('[MosaicBoard] deferred text card while surface=note');
+              break;
+            }
             
             
             const created: Card = {
@@ -591,7 +794,7 @@ export default function App(): React.JSX.Element | null {
               width: op.width ?? SIZE_PRESETS.default.width,
               height: op.height ?? SIZE_PRESETS.default.height,
               zIndex: nextZIndex(model.cards),
-              sourceType: 'transcription',
+              sourceType: op.source === 'doc' ? 'manual' : 'transcription',
               createdAt: new Date().toISOString(),
             };
             model.cards.push(created);
@@ -599,28 +802,39 @@ export default function App(): React.JSX.Element | null {
             console.log(`[MosaicBoard] inserted text card=${created.id} at world=(${op.x},${op.y}) len=${op.text.length}`);
           }
           else if (op.name === 'sync') {
-            syncClientRef.current?.publish('document', currentDocument());
-            if (syncBoardIdRef.current) {
-              const link = `https://re.yalums.top/whiteboard/#board=${syncBoardIdRef.current}`;
-              Alert.alert('Mosaic 同步', `请在网页端打开此共享链接\n${link}`);
-            } else Alert.alert('Mosaic 同步', '正在建立共享白板，请稍后再次点击同步');
+            setSyncTarget(op.enable, op.address ?? '').catch(error => console.log(`[MosaicSync] target.error ${String(error)}`));
           }
           break;
         default:
           console.log(`[MosaicBoardCommand] unknown op ${JSON.stringify(op)}`);
       }
     }
+    if (removedInkIds.size > 0) {
+      model.ink = model.ink.filter(stroke => !removedInkIds.has(stroke.id));
+    }
+    if (removedInkRequested > 128 || batchStrokeCount > 128 && inkChanged) {
+      console.log(`[MosaicBoard] ink batch upserts=${batchStrokeCount} ` +
+        `removeRequested=${removedInkRequested} remaining=${model.ink.length}`);
+    }
     if (structureChanged) {
       
       engineSync.syncCards(model.cards);
       engineSync.syncConnections(model.connections);
     }
-    if (structureChanged || changed) scheduleSave();
+    const structure = structureChanged || anchorsChanged;
+    const domain = structure && inkChanged ? 'document' : structure ? 'structure' : inkChanged ? 'ink' : null;
+    
+    
+    
+    const deferLargeInk = domain === 'ink' && !structureChanged &&
+      (batchStrokeCount > 128 || deferredInkPersistenceRef.current !== null);
+    if (structureChanged || changed) {
+      if (deferLargeInk) deferInkPersistence('ink');
+      else scheduleSave();
+    }
     if (!applyingRemoteRef.current) {
       
-      const structure = structureChanged || anchorsChanged;
-      const domain = structure && inkChanged ? 'document' : structure ? 'structure' : inkChanged ? 'ink' : null;
-      if (domain !== null) syncClientRef.current?.publish(domain, currentDocument());
+      if (domain !== null && !deferLargeInk) syncClientRef.current?.publish(domain, currentDocument());
       
       
       scheduleAssetSync();
@@ -629,7 +843,7 @@ export default function App(): React.JSX.Element | null {
     const batchMs = Date.now() - batchStartedAt;
     if (batchMs > 100) console.log(`[MosaicBoard] slow command batch ms=${batchMs} ops=${ops.map(op => op.type === 'action' ? `action:${op.name}` : op.type).join(',')}`);
     if (closeRequested) closeBoard('toolbar');
-  }, [closeBoard, currentDocument, engineSync, insertCapturedShot, pushClippedWhiteboards, recognizeLassoToCard, scheduleAssetSync, scheduleSave]);
+  }, [closeBoard, currentDocument, deferInkPersistence, engineSync, flushSave, insertCapturedShot, isMosaicBoardSurface, pushClippedWhiteboards, pushFullScene, recognizeLassoToCard, scheduleAssetSync, scheduleSave, setSyncTarget]);
 
   useEffect(() => subscribeBoardCommands(applyCommands), [applyCommands]);
 
@@ -647,15 +861,16 @@ export default function App(): React.JSX.Element | null {
 
   useEffect(() => {
     if (!loaded) return;
+    if (!isMosaicBoardSurface()) return;
     const pending = consumePendingDocText() ?? pendingDocTextRef.current;
     pendingDocTextRef.current = null;
     if (pending) insertTextCard(pending);
-  }, [loaded, insertTextCard]);
+  }, [isMosaicBoardSurface, loaded, insertTextCard]);
 
   
 
   const importPendingImageCard = useCallback(async () => {
-    if (!loadedRef.current || importBusyRef.current) return;
+    if (!loadedRef.current || importBusyRef.current || !isMosaicBoardSurface()) return;
     importBusyRef.current = true;
     let claim: Awaited<ReturnType<typeof claimPendingMosaicImageCard>> = null;
     let committed = false;
@@ -665,6 +880,12 @@ export default function App(): React.JSX.Element | null {
       if (!imageAvailable()) throw new Error('MosaicImage native module unavailable');
       console.log(`[MosaicImport] claimed request=${claim.request.id} source=${claim.request.imagePath}`);
       const imported = await importImage(claim.request.imagePath);
+      if (!isMosaicBoardSurface()) {
+        await releasePendingMosaicImageCard(claim);
+        claim = null;
+        console.log('[MosaicImport] deferred claimed image after surface switched to note');
+        return;
+      }
       const model = modelRef.current;
       const viewport = model.viewport;
       const { width: screenW, height: screenH } = Dimensions.get('window');
@@ -701,55 +922,83 @@ export default function App(): React.JSX.Element | null {
     } finally {
       importBusyRef.current = false;
     }
-  }, [currentDocument, engineSync, scheduleAssetSync, scheduleSave]);
+  }, [currentDocument, engineSync, isMosaicBoardSurface, scheduleAssetSync, scheduleSave]);
+
+  
+  
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('MosaicBoardVisibility', (event: any) => {
+      const next = event?.surface === 'note' ? 'note' : 'board';
+      const was = mosaicSurfaceRef.current;
+      mosaicVisibleRef.current = event?.visible === true;
+      mosaicSurfaceRef.current = mosaicVisibleRef.current ? next : 'board';
+      if (!mosaicVisibleRef.current || mosaicSurfaceRef.current !== 'board' || was === 'board') return;
+      const pending = pendingDocTextRef.current;
+      pendingDocTextRef.current = null;
+      if (pending && loadedRef.current) insertTextCard(pending);
+      else if (pending) pendingDocTextRef.current = pending;
+      void importPendingImageCard();
+    });
+    return () => sub.remove();
+  }, [importPendingImageCard, insertTextCard]);
+
+  
+  
+  
+  useEffect(() => {
+    mosaicVisibleRef.current = true;
+    
+    
+    
+    
+    
+    if (loadedRef.current && mosaicSurfaceRef.current === 'board') {
+      const pending = consumePendingDocText() ?? pendingDocTextRef.current;
+      pendingDocTextRef.current = null;
+      if (pending) insertTextCard(pending);
+    }
+    return () => {
+      mosaicVisibleRef.current = false;
+    };
+  }, [insertTextCard]);
 
   
 
+  
+  
+  
+  
   useEffect(() => {
     let cancelled = false;
     void ensureMosaicImportPermissions().then(ready => {
       if (cancelled) return;
-      setPluginPermissionsReady(ready);
-      if (ready) return;
-      ToastAndroid.show(t('mosaicPermissionNeeded'), ToastAndroid.LONG);
-      closeBoard('permission-denied');
+      setImportPermissionsReady(ready);
+      if (!ready) ToastAndroid.show(t('mosaicPermissionNeeded'), ToastAndroid.LONG);
     });
     return () => {
       cancelled = true;
     };
-  }, [closeBoard]);
+  }, []);
 
   useEffect(() => {
-    if (pluginPermissionsReady !== true) return;
     StatusBar.setHidden(true, 'none');
-    setBoardVisible(true, 'permissions-ready');
+    setBoardVisible(true, 'mounted');
     return () => {
       StatusBar.setHidden(false, 'none');
       setBoardVisible(false, 'unmount');
     };
-  }, [pluginPermissionsReady]);
+  }, []);
 
+  
   
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      loadBoard().catch(error => {
-        console.log(`[MosaicBoard] load failed: ${String(error)}`);
-        return null;
-      }),
-      ensureImageDir().catch(error => {
-        console.log(`[MosaicImage] image dir unavailable: ${String(error)}`);
-        return null;
-      }),
-      ensureNoteDir().catch(error => {
-        console.log(`[MosaicNote] note dir unavailable: ${String(error)}`);
-        return null;
-      }),
-      PluginManager.getDeviceType().catch(() => -1),
-    ]).then(([doc, , noteDir, type]) => {
+    const loadStartedAt = Date.now();
+    void loadBoard().catch(error => {
+      console.log(`[MosaicBoard] load failed: ${String(error)}`);
+      return null;
+    }).then(doc => {
       if (cancelled) return;
-      setDeviceType(type);
-      if (noteDir) setNotesDirectory(noteDir);
       const cleaned = doc === null ? null : removeLegacySampleCards(doc);
       if (cleaned !== null) {
         metaRef.current = cleaned.meta;
@@ -777,33 +1026,95 @@ export default function App(): React.JSX.Element | null {
       setLoaded(true);
       console.log(
         `[MosaicBoard] loaded cards=${modelRef.current.cards.length} ink=${modelRef.current.ink.length} `
-        + `whiteboards=${modelRef.current.whiteboards.length} deviceType=${type}`,
+        + `whiteboards=${modelRef.current.whiteboards.length} deviceType=pending `
+        + `loadMs=${Date.now() - loadStartedAt}`,
       );
+    });
+    
+    
+    
+    void Promise.all([
+      ensureImageDir().catch(error => {
+        console.log(`[MosaicImage] image dir unavailable: ${String(error)}`);
+        return null;
+      }),
+      ensureNoteDir().catch(error => {
+        console.log(`[MosaicNote] note dir unavailable: ${String(error)}`);
+        return null;
+      }),
+      PluginManager.getDeviceType().catch(() => -1),
+    ]).then(([imageDir, noteDir, type]) => {
+      if (cancelled) return;
+      setDeviceType(type);
+      if (noteDir) setNotesDirectory(noteDir);
+      
+      
+      
+      if ((imageDir || noteDir) && loadedRef.current) {
+        engineSync.refreshAssetCardPaths(modelRef.current.cards);
+      }
+      console.log(`[MosaicBoard] runtime deviceType=${type} imageDir=${imageDir ? 'ready' : 'missing'} noteDir=${noteDir ? 'ready' : 'missing'}`);
     });
     return () => {
       cancelled = true;
     };
   }, [pushFullScene]);
 
+  
   useEffect(() => {
     if (!BOARD_SYNC_ENABLED || !loaded) return;
+    loadSyncConfig()
+      .then(config => {
+        lastLocalAddressRef.current = config.localAddress;
+        setSyncAddress(config.enabled ? config.localAddress : null);
+      })
+      .catch(error => console.log(`[MosaicSync] config.error ${String(error)}`));
+  }, [loaded]);
+
+  useEffect(() => {
+    if (!BOARD_SYNC_ENABLED || !loaded) return;
+    if (syncAddress === null) {
+      pushSyncState(false, 'off');
+      return;
+    }
+    const local = syncAddress !== '';
     let cancelled = false;
+    BoardSyncClient.socketFactory = plainSocketFactory;
     const client = new BoardSyncClient();
     syncClientRef.current = client;
+    pushSyncState(true, 'connecting');
     void (async () => {
       try {
         if (!(await ensureSyncNetworkPermission())) throw new Error('网络权限未授予');
-        const config = await loadSyncConfig();
-        let boardId = config.boardId;
-        if (!boardId) {
-          boardId = await createSharedBoard(currentDocument());
-          await saveSyncConfig({ serverUrl: 'https://re.yalums.top/whiteboard/', boardId });
-          console.log(`[MosaicSync] room.created board=${boardId}`);
+        
+        
+        let site = SYNC_SITE;
+        let boardId = LOCAL_ROOM_ID;
+        if (local) site = localSyncSite(syncAddress);
+        else {
+          const config = await loadSyncConfig();
+          boardId = config.boardId;
+          if (!boardId) {
+            boardId = await createSharedBoard(currentDocument());
+            await saveSyncConfig({ ...config, serverUrl: SYNC_SITE, boardId });
+            console.log(`[MosaicSync] room.created board=${boardId}`);
+          }
         }
-        syncBoardIdRef.current = boardId;
         if (cancelled) return;
-        const endpoint = 'wss://re.yalums.top/whiteboard/ws/board';
-        client.connect(boardId, currentDocument(), (document, _revision, domain) => {
+        syncBoardIdRef.current = boardId;
+        assetSyncRef.current?.setSite(site);
+        if (syncAnnounceRef.current) {
+          syncAnnounceRef.current = false;
+          Alert.alert(t('sync'), `${t('syncLinkHint')}\n${sharedBoardLink(boardId)}`);
+        }
+        const endpoint = siteSyncEndpoint(site);
+        console.log(`[MosaicSync] connect endpoint=${endpoint} board=${boardId}`);
+        
+        
+        const seed: BoardDoc = local
+          ? { v: 1, meta: createEmptyBoardMeta({ name: 'Mosaic Board' }), cards: [], connections: [], ink: [], whiteboards: [], blobs: {} }
+          : currentDocument();
+        client.connect(boardId, seed, (document, _revision, domain) => {
           if (domain === 'import') {
             void confirmRemoteImport(document);
             return;
@@ -811,11 +1122,22 @@ export default function App(): React.JSX.Element | null {
           applyRemoteDocument(document, domain);
         }, endpoint, state => {
           console.log(`[MosaicSync] state=${state} board=${boardId}`);
+          if (!cancelled) pushSyncState(true, state);
           
           if (state === 'connected') scheduleAssetSync();
         });
+        
+        
+        if (local) {
+          const own = currentDocument();
+          if (own.cards.length > 0 || own.ink.length > 0 || own.whiteboards.length > 0) {
+            client.protectLocalUntilAck();
+            client.publish('import', own);
+          } else console.log('[MosaicSync] local board empty, adopting room content');
+        }
       } catch (error) {
         console.log(`[MosaicSync] setup.error ${String(error)}`);
+        if (!cancelled) pushSyncState(true, 'error');
       }
     })();
     return () => {
@@ -823,16 +1145,17 @@ export default function App(): React.JSX.Element | null {
       client.close();
       assetSyncRef.current?.dispose();
       if (syncClientRef.current === client) syncClientRef.current = null;
+      syncBoardIdRef.current = '';
     };
-  }, [applyRemoteDocument, confirmRemoteImport, currentDocument, loaded, scheduleAssetSync]);
+  }, [applyRemoteDocument, confirmRemoteImport, currentDocument, loaded, pushSyncState, scheduleAssetSync, syncAddress]);
 
   
   const attachNativeInput = useCallback(() => {
-    if (pluginPermissionsReady !== true || deviceType === null) return;
+    if (deviceType === null) return;
     MosaicHandwriting?.attachInput(deviceType).catch(() => {});
     
     MosaicHandwriting?.lockStatusBar(false).catch(() => {});
-  }, [deviceType, pluginPermissionsReady]);
+  }, [deviceType]);
 
   useEffect(() => {
     attachNativeInput();
@@ -845,7 +1168,7 @@ export default function App(): React.JSX.Element | null {
   
   
   useEffect(() => {
-    if (!loaded || pluginPermissionsReady !== true) return;
+    if (!loaded || !importPermissionsReady) return;
     console.log(`[MosaicImport] polling inbox=${MOSAIC_INBOX_DIR}`);
     void importPendingImageCard();
     const timer = setInterval(() => {
@@ -858,7 +1181,7 @@ export default function App(): React.JSX.Element | null {
       clearInterval(timer);
       sub.remove();
     };
-  }, [importPendingImageCard, loaded, pluginPermissionsReady]);
+  }, [importPendingImageCard, loaded, importPermissionsReady]);
 
   useEffect(() => () => {
     if (saveTimerRef.current !== null) {
@@ -875,17 +1198,17 @@ export default function App(): React.JSX.Element | null {
   }, [currentDocument]);
 
 
-  if (pluginPermissionsReady !== true) return null;
-
   return (
     <View style={styles.root}>
-      <MosaicBoardViewNative
-        ref={boardRef}
-        style={styles.board}
-        deviceType={deviceType ?? -1}
-        touchEnabled={touchEnabled}
-        notesDirectory={notesDirectory}
-      />
+      {importPermissionsReady ? (
+        <MosaicBoardViewNative
+          ref={boardRef}
+          style={styles.board}
+          deviceType={deviceType ?? -1}
+          touchEnabled={touchEnabled}
+          notesDirectory={notesDirectory}
+        />
+      ) : null}
     </View>
   );
 }

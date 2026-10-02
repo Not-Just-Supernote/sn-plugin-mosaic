@@ -29,7 +29,7 @@ class MosaicBoardView(
 
     companion object {
         private const val TAG = "MosaicBoardView"
-        private const val NATIVE_BUILD_TAG = "shapes-rotate-20260918a"
+        private const val NATIVE_BUILD_TAG = "pressure-clock-20260928a"
 
         private const val RETRY_INTERVAL_MS = 500L
         private const val SLOW_RETRY_INTERVAL_MS = 2000L
@@ -43,6 +43,8 @@ class MosaicBoardView(
         private const val WRITE_INFO_REFRESH_MIN_INTERVAL_MS = 1000L
         
         private const val BACKGROUND_SYNC_PROMPT_DELAY_MS = 120L
+        
+        private const val PEN_MODE_RESET_MAX_MS = 1500L
         private const val BACKGROUND_SYNC_IDLE_DELAY_MS = 2000L
         
         private const val CLOSE_WATCHDOG_MS = 3000L
@@ -61,7 +63,7 @@ class MosaicBoardView(
 
     fun setPenStyle(style: PenStyle, width: Float) {
         penStyle = style
-        penWidth = (width * 100f).toInt().coerceIn(50, 3200)
+        penWidth = (width * 100f).toInt().coerceIn(50, 4000)
         penConfigDirty = true
         Log.i(TAG, "pen style requested type=${style.objType} stdWidth=$width sent=${drawPathPenWidth()} configured=$configured suspended=$drawPathSuspended")
         if (configured && !drawPathSuspended) rearmDrawPath("pen-style")
@@ -114,7 +116,7 @@ class MosaicBoardView(
                 transientStrokeActive = false
                 releaseInkDefer()
                 if (configured) disableDrawPath("ink-disabled")
-            } else if (configured && !lassoEnabled && !drawPathSuspended) {
+            } else if (configured && !lassoEnabled && !toolLassoActive && !drawPathSuspended) {
                 enableDrawPath("ink-enabled")
             } else if (stylusContact && lassoEnabled && !shapeDrag) {
                 
@@ -128,6 +130,9 @@ class MosaicBoardView(
     var shapeDrag: Boolean = false
 
     
+    var toolLassoActive: Boolean = false
+
+    
     var lassoEnabled: Boolean = false
         set(value) {
             if (field == value) return
@@ -138,10 +143,10 @@ class MosaicBoardView(
             if (value) {
                 releaseInkDefer()
                 if (configured) disableDrawPath("lasso-enabled")
-            } else if (configured && inkEnabled && !drawPathSuspended) {
+            } else if (configured && inkEnabled && !toolLassoActive && !drawPathSuspended) {
                 enableDrawPath("lasso-disabled")
             }
-            if (value && stylusContact && inkEnabled && !shapeDrag) {
+            if (value && stylusContact && !shapeDrag) {
                 transientStrokeActive = true
                 inkBegin(lastStylusX, lastStylusY)
                 Log.i(TAG, "transient ink restarted on lasso switch enabled=$value")
@@ -176,6 +181,15 @@ class MosaicBoardView(
     private var hoverRearmDeferred = false
     
     private var holdPenRefreshUntilSettle = false
+    
+    private val penModeResetFallback = Runnable {
+        if (!stylusContact && penModeApplied) {
+            holdPenRefreshUntilSettle = false
+            penModeApplied = false
+            MosaicEinkRefreshModule.resetNative("pen")
+            Log.i(TAG, "pen refresh mode reset by fallback")
+        }
+    }
 
     private val handler = Handler(Looper.getMainLooper())
     private var configureGeneration = 0
@@ -191,7 +205,12 @@ class MosaicBoardView(
     
     private var discardSyncPending = false
     
-    private var drawPathSuspended = false
+    
+    private var suspendRequested = false
+    
+    private var regionBlocked = false
+    
+    private val drawPathSuspended: Boolean get() = suspendRequested || regionBlocked
 
     
     private data class WriteContext(
@@ -208,7 +227,16 @@ class MosaicBoardView(
     
     private val drawPathAppName: String = DrawPathClient.MOSAIC_APP_NAME
     
-    private var drawPathPenColor: Int = DrawPathClient.PEN_COLOR_BLACK
+    private var trailWhite = false
+    
+    private var markerInk = MarkerInk.BLACK
+    
+    private val drawPathPenColor: Int
+        get() = when {
+            penStyle == PenStyle.MARKER -> markerInk.drawPathColor
+            trailWhite -> DrawPathClient.PEN_COLOR_WHITE
+            else -> DrawPathClient.PEN_COLOR_BLACK
+        }
     private var lastWriteInfoRefreshAt = 0L
     private var lastObservedRotation = -1
     private val displayManager by lazy {
@@ -300,6 +328,9 @@ class MosaicBoardView(
         super.onAttachedToWindow()
         Log.i(TAG, "onAttachedToWindow nativeBuild=$NATIVE_BUILD_TAG")
         attached = true
+        
+        
+        InputReader.ensureBoardReader(context)
         InklingLink.attach(context, this)
         publishBoardVisibility(true)
         handler.post {
@@ -313,6 +344,12 @@ class MosaicBoardView(
             Log.i(TAG, "viewport restored pan=(${it.panX},${it.panY}) scale=${it.scale}")
         }
         controller.attach()
+        
+        
+        contentView.requestInitialRaster()
+        handler.postDelayed({
+            if (attached) contentView.requestInitialRaster()
+        }, 250L)
         context.applicationContext.registerComponentCallbacks(configurationCallback)
         displayManager.registerDisplayListener(displayListener, handler)
         publishHostRotation()
@@ -325,6 +362,7 @@ class MosaicBoardView(
 
     override fun onDetachedFromWindow() {
         attached = false
+        InputReader.releaseBoardReader()
         publishBoardVisibility(false)
         InklingLink.detach(this)
         controller.detach()
@@ -358,11 +396,27 @@ class MosaicBoardView(
         super.onDetachedFromWindow()
     }
 
+    
+    fun redrawAfterHostRefresh() {
+        if (!attached) return
+        contentView.forceRedrawAfterHostRefresh()
+        handler.postDelayed({
+            if (attached) contentView.forceRedrawAfterHostRefresh()
+        }, 350L)
+        handler.postDelayed({
+            if (attached) contentView.postInvalidateOnAnimation()
+        }, 1000L)
+    }
+
     private fun publishBoardVisibility(visible: Boolean) {
         InputReader.setPluginViewVisible(visible)
         MosaicNoteShotModule.updateBoardVisibility(visible)
         InklingLink.setBoardVisible(visible, "board-view")
-        val data = Arguments.createMap().apply { putBoolean("visible", visible) }
+        val data = Arguments.createMap().apply {
+            putBoolean("visible", visible)
+            putString("surface", InklingLink.currentSurface())
+            InklingLink.currentNoteRef()?.let { putString("noteRef", it) } ?: putNull("noteRef")
+        }
         reactContext
             .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
             .emit(BOARD_VISIBILITY_EVENT, data)
@@ -373,6 +427,7 @@ class MosaicBoardView(
         super.onSizeChanged(w, h, oldw, oldh)
         if (!attached || (w == oldw && h == oldh)) return
         Log.i(TAG, "onSizeChanged ${oldw}x$oldh -> ${w}x$h, reconfigure drawPath")
+        contentView.requestInitialRaster()
         requestRotationReconfigure("sizeChanged")
     }
 
@@ -412,11 +467,15 @@ class MosaicBoardView(
     
 
     
-    private fun drawPathPenWidth(): Int = if (penStyle.isConstantWidth) {
-        (penWidth * penStyle.constantScale).toInt()
-    } else {
-        penWidth / 2
-    }.coerceIn(100, 3000)
+    private fun drawPathPenType(): Int = when (penStyle) {
+        PenStyle.FILLED_SHAPE -> DrawPathClient.PEN_TYPE_PRESSURE
+        PenStyle.BRUSH -> DrawPathClient.PEN_TYPE_NEEDLE
+        else -> penStyle.objType
+    }
+
+    
+    private fun drawPathPenWidth(): Int =
+        DrawPathClient.liveWidthArgumentFromStdHundredths(penWidth, penStyle)
 
     
     private fun drawPathDisableAreas(): List<DrawPathClient.DisableArea> {
@@ -456,6 +515,10 @@ class MosaicBoardView(
         if (!attached) return
         handler.post {
             if (!attached) return@post
+            if (!InklingLink.isBoardSurface()) {
+                Log.i(TAG, "inkling paste deferred surface=${InklingLink.currentSurface()}")
+                return@post
+            }
             controller.handlePasteStrokes()
         }
     }
@@ -464,6 +527,10 @@ class MosaicBoardView(
         if (!attached) return
         handler.post {
             if (!attached) return@post
+            if (!InklingLink.isBoardSurface()) {
+                Log.i(TAG, "inkling clear-selection deferred surface=${InklingLink.currentSurface()} delete=$delete")
+                return@post
+            }
             controller.clearLassoForInkling(delete)
         }
     }
@@ -472,6 +539,10 @@ class MosaicBoardView(
         if (!attached) return
         handler.post {
             if (!attached) return@post
+            if (!InklingLink.isBoardSurface()) {
+                Log.i(TAG, "inkling text-card deferred surface=${InklingLink.currentSurface()}")
+                return@post
+            }
             controller.insertTextCardFromInkling(text, anchorScreenX, anchorScreenY)
         }
     }
@@ -480,9 +551,31 @@ class MosaicBoardView(
         if (!attached) return
         handler.post {
             if (!attached) return@post
+            if (!InklingLink.isBoardSurface()) {
+                Log.i(TAG, "inkling inbox notification deferred surface=${InklingLink.currentSurface()}")
+                return@post
+            }
             reactContext
                 .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
                 .emit(INBOX_READY_EVENT, null)
+        }
+    }
+
+    override fun onInklingSurfaceChanged(surface: String, noteRef: String?) {
+        if (!attached) return
+        handler.post {
+            if (!attached) return@post
+            
+            
+            val data = Arguments.createMap().apply {
+                putBoolean("visible", true)
+                putString("surface", surface)
+                noteRef?.let { putString("noteRef", it) } ?: putNull("noteRef")
+            }
+            reactContext
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                .emit(BOARD_VISIBILITY_EVENT, data)
+            Log.i(TAG, "surface event surface=$surface noteRef=$noteRef")
         }
     }
 
@@ -639,9 +732,21 @@ class MosaicBoardView(
 
     
     fun setTrailWhite(white: Boolean, reason: String) {
-        val color = if (white) DrawPathClient.PEN_COLOR_WHITE else DrawPathClient.PEN_COLOR_BLACK
-        if (color == drawPathPenColor) return
-        drawPathPenColor = color
+        val previous = drawPathPenColor
+        trailWhite = white
+        sendPenColorIfChanged(previous, reason)
+    }
+
+    
+    fun setMarkerInk(ink: MarkerInk, reason: String) {
+        val previous = drawPathPenColor
+        markerInk = ink
+        sendPenColorIfChanged(previous, reason)
+    }
+
+    private fun sendPenColorIfChanged(previous: Int, reason: String) {
+        val color = drawPathPenColor
+        if (color == previous) return
         penConfigDirty = true
         if (!configured || !drawPathActive) {
             Log.i(TAG, "[MosaicTrail] color=$color stored reason=$reason configured=$configured active=$drawPathActive")
@@ -654,7 +759,7 @@ class MosaicBoardView(
         }
         val binder = drawPathBinder ?: return
         try {
-            DrawPathClient.sendPenInfo(binder, drawPathAppName, DrawPathClient.PEN_TYPE_TECHNICAL, drawPathPenWidth(), color)
+            DrawPathClient.sendPenInfo(binder, drawPathAppName, drawPathPenType(), drawPathPenWidth(), color)
             penConfigDirty = false
             Log.i(TAG, "[MosaicTrail] color=$color sent reason=$reason")
         } catch (error: Throwable) {
@@ -665,15 +770,30 @@ class MosaicBoardView(
 
     
     fun setDrawPathSuspended(suspended: Boolean, reason: String) {
-        if (drawPathSuspended == suspended) return
-        drawPathSuspended = suspended
-        Log.i(TAG, "drawPath suspended=$suspended reason=$reason configured=$configured active=$drawPathActive")
+        if (suspendRequested == suspended) return
+        val was = drawPathSuspended
+        suspendRequested = suspended
+        applyDrawPathSuspension(was, reason)
+    }
+
+    
+    fun setDrawPathRegionBlocked(blocked: Boolean, reason: String) {
+        if (regionBlocked == blocked) return
+        val was = drawPathSuspended
+        regionBlocked = blocked
+        applyDrawPathSuspension(was, "region:$reason")
+    }
+
+    private fun applyDrawPathSuspension(was: Boolean, reason: String) {
+        val suspended = drawPathSuspended
+        if (was == suspended) return
+        Log.i(TAG, "drawPath suspended=$suspended reason=$reason requested=$suspendRequested region=$regionBlocked configured=$configured active=$drawPathActive")
         if (!configured) return
         if (suspended) {
             if (drawPathActive) disableDrawPath("suspend:$reason")
         } else if (inkEnabled && !lassoEnabled && !drawPathActive) {
             enableDrawPath("resume:$reason")
-        } else if (!suspended && penConfigDirty && inkEnabled && !lassoEnabled) {
+        } else if (penConfigDirty && inkEnabled && !lassoEnabled) {
             rearmDrawPath("resume-pen-style:$reason")
         }
     }
@@ -781,7 +901,7 @@ class MosaicBoardView(
             Log.i(
                 TAG,
                 "drawPath direct enabled: reason=$reason app=$drawPathAppName " +
-                    "type=${DrawPathClient.PEN_TYPE_TECHNICAL} style=${penStyle.name} " +
+                    "type=${drawPathPenType()} style=${penStyle.name} " +
                     "width=${drawPathPenWidth()} color=$drawPathPenColor",
             )
         } catch (error: Throwable) {
@@ -815,7 +935,7 @@ class MosaicBoardView(
         DrawPathClient.configure(
             binder = binder,
             appName = drawPathAppName,
-            penType = DrawPathClient.PEN_TYPE_TECHNICAL,
+            penType = drawPathPenType(),
             penWidth = drawPathPenWidth(),
             penColor = drawPathPenColor,
             areas = drawPathDisableAreas(),
@@ -859,6 +979,14 @@ class MosaicBoardView(
         contentView.markSettleRequested()
         contentView.refreshAfterRaster()
         inkView.clearImmediately()
+        if (reason == "no-commit") {
+            
+            
+            
+            contentView.runWhenSettled {
+                if (attached && !stylusContact) sendBackgroundSync(force = true)
+            }
+        }
         Log.i(TAG, "ink session finalize: reason=$reason")
     }
 
@@ -1105,7 +1233,8 @@ class MosaicBoardView(
                     releaseInkDefer()
                 }
                 
-                transientStrokeActive = inkEnabled && lassoEnabled && !shapeDrag
+                
+                transientStrokeActive = lassoEnabled && !shapeDrag
                 if (transientStrokeActive) {
                     inkBegin(event.x, event.y)
                 }
@@ -1128,6 +1257,14 @@ class MosaicBoardView(
                 if (penModeApplied) {
                     
                     holdPenRefreshUntilSettle = true
+                    if (!writing) {
+                        
+                        
+                        contentView.markSettleRequested()
+                        contentView.postInvalidateOnAnimation()
+                    }
+                    handler.removeCallbacks(penModeResetFallback)
+                    handler.postDelayed(penModeResetFallback, PEN_MODE_RESET_MAX_MS)
                 }
                 if (transientStrokeActive) inkEnd()
                 transientStrokeActive = false

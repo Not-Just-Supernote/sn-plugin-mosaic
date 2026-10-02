@@ -20,6 +20,9 @@ class MosaicEinkPackage : ReactPackage, ViewManagerOnDemandReactPackage {
         MosaicNoteShotModule(reactContext),
         MosaicBoardEngineModule(reactContext),
         MosaicImageModule(reactContext),
+        MosaicPermissionModule(reactContext),
+        MosaicArchiveModule(reactContext),
+        MosaicRawNetModule(reactContext),
     )
 
     override fun createViewManagers(

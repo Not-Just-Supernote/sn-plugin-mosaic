@@ -3,7 +3,9 @@ package me.laumss.mosaic
 import android.annotation.SuppressLint
 import android.os.IBinder
 import android.os.Parcel
+import android.os.Build
 import android.util.Log
+import kotlin.math.roundToInt
 
 
 object DrawPathClient {
@@ -30,10 +32,149 @@ object DrawPathClient {
     val MOSAIC_APP_NAME: String = BuildConfig.APPLICATION_ID
 
     
-    const val PEN_TYPE_TECHNICAL = 10
+    const val PEN_TYPE_NEEDLE = 10
+    const val PEN_TYPE_MARKER = 11
+    const val PEN_TYPE_BRUSH = 15
+    const val PEN_TYPE_PRESSURE = 16
+
+    
+    private data class PaletteTable(val needle: IntArray, val marker: Int)
+
+    private val paletteTable = when {
+        Build.BOARD == "A5X2" -> PaletteTable(
+            needle = intArrayOf(200, 300, 400, 500, 600, 700, 900, 1000, 1100, 1200, 1800, 2400),
+            marker = 3800,
+        )
+        Build.MODEL == "Supernote A5 X" -> PaletteTable(
+            needle = intArrayOf(100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1500, 2000),
+            marker = 3000,
+        )
+        Build.MODEL == "Supernote A6 X" || Build.MODEL == "Supernote Nomad" -> PaletteTable(
+            needle = intArrayOf(200, 300, 400, 500, 700, 800, 1000, 1100, 1200, 1300, 1800, 2400),
+            marker = 3800,
+        )
+        else -> PaletteTable(
+            needle = intArrayOf(200, 300, 400, 500, 600, 700, 900, 1000, 1100, 1200, 1800, 2400),
+            marker = 3800,
+        )
+    }
+
+    
+    private fun paletteSteps(style: PenStyle): IntArray = when (style) {
+        PenStyle.MARKER -> intArrayOf(paletteTable.marker)
+        PenStyle.NEEDLE -> paletteTable.needle
+        PenStyle.BRUSH -> paletteTable.needle
+        else -> paletteTable.needle.copyOfRange(2, paletteTable.needle.size)
+    }
+
+    private fun nearestPaletteWidth(style: PenStyle, raw: Int): Int {
+        val steps = paletteSteps(style)
+        return steps.minByOrNull { kotlin.math.abs(it - raw) } ?: steps[0]
+    }
+
+    
+    private const val NOTE_CALLIGRAPHY_START = 4
+
+    
+    fun noteCalligraphyThickness(drawPathWidth: Int): Int {
+        val steps = paletteTable.needle.copyOfRange(NOTE_CALLIGRAPHY_START, paletteTable.needle.size)
+        return steps.minByOrNull { kotlin.math.abs(it - drawPathWidth) } ?: steps[0]
+    }
+
+    
+    fun widthArgument(style: PenStyle, stdWidth: Float): Int =
+        nearestPaletteWidth(style, (stdWidth.coerceIn(1f, 40f) * 100f).roundToInt())
+
+    fun widthArgumentFromStdHundredths(stdWidth: Int, style: PenStyle = PenStyle.PEN): Int =
+        nearestPaletteWidth(style, stdWidth.coerceIn(50, 4000))
+
+    
+    fun liveWidthArgumentFromStdHundredths(stdWidth: Int, style: PenStyle = PenStyle.PEN): Int {
+        val rawWidth = widthArgumentFromStdHundredths(stdWidth, style)
+        return when (style) {
+            PenStyle.PEN -> rawWidth * LIVE_PEN_WIDTH_SCALE
+            PenStyle.BRUSH -> (rawWidth * BRUSH_LIVE_WIDTH_SCALE).roundToInt()
+            else -> rawWidth
+        }
+    }
+
+    
+    private const val ABS_PRESSURE_MAX_A5X2 = 4095
+    private const val LAMY_BAD_PRESSURE = 6991
+    private const val LAMY_LINE_TYPE_PEN = 0
+    private const val LAMY_PEN_OFFSET = 45
+    private const val LAMY_PEN_FACTOR_0 = -615
+    private const val LAMY_PEN_FACTOR_1 = 183
+    private const val LAMY_SCALE_TO_PIXELS_PEN = 0.004f
+    private const val MARKER_CANVAS_CALIBRATION = 3.4f
+    
+    
+    
+    private const val BRUSH_NOTE_ALIGN = 300f / 500f
+    private const val BRUSH_LIVE_WIDTH_SCALE = 1.7f * BRUSH_NOTE_ALIGN
+    private const val BRUSH_CANVAS_WIDTH_SCALE = 6f * BRUSH_NOTE_ALIGN
+    private const val LAMY_MIN_X1000 = 1500
+    private const val DRAW_PATH_MIN_WIDTH = 4
+    private const val LIVE_PEN_WIDTH_SCALE = 4
+
+    private fun lamyX1000Width(lineType: Int, pressureRaw: Int, baseWidth: Float): Int {
+        
+        
+        require(lineType == LAMY_LINE_TYPE_PEN) { "Unsupported Lamy line type: $lineType" }
+        val pressure = pressureRaw.coerceIn(0, ABS_PRESSURE_MAX_A5X2)
+        if (pressure >= LAMY_BAD_PRESSURE) return LAMY_MIN_X1000
+
+        val pressureIndex = (pressure / 10).coerceIn(0, 699)
+        val belowOffset = pressureIndex < LAMY_PEN_OFFSET
+        val tableIndex = if (belowOffset) LAMY_PEN_OFFSET else pressureIndex
+        
+        val logIndex = (1000.0 * kotlin.math.ln((tableIndex + 1).toDouble())).roundToInt()
+        
+        
+        val factorTerm = (logIndex * LAMY_PEN_FACTOR_1 + LAMY_PEN_FACTOR_0 * 1000) / 100
+        val value = baseWidth * 296.20255f * factorTerm.toFloat() / 1000f -
+            if (belowOffset) 1f else 0f
+        val rounded = value.roundToInt()
+        return rounded.coerceIn(LAMY_MIN_X1000, (baseWidth * 1000f).toInt())
+    }
+
+    private fun drawPathPressureWidth(
+        drawPathWidth: Int,
+        pressure01: Float,
+    ): Float {
+        val pressureRaw = (pressure01 * ABS_PRESSURE_MAX_A5X2).roundToInt()
+            .coerceIn(0, ABS_PRESSURE_MAX_A5X2)
+        
+        val baseWidth = (drawPathWidth * 0.01f).roundToInt().coerceAtLeast(1).toFloat()
+        val lamy = lamyX1000Width(LAMY_LINE_TYPE_PEN, pressureRaw, baseWidth)
+        return (lamy * LAMY_SCALE_TO_PIXELS_PEN).roundToInt()
+            .coerceAtLeast(DRAW_PATH_MIN_WIDTH).toFloat()
+    }
+
+    fun nativePressureWidthUnits(drawPathType: Int, drawPathWidth: Int, pressure01: Float): Float {
+        require(drawPathWidth > 0) { "drawPath width is unavailable" }
+        require(pressure01.isFinite() && pressure01 in 0f..1f) {
+            "drawPath pressure sample is invalid: $pressure01"
+        }
+        if (drawPathType == PEN_TYPE_MARKER) {
+            
+            return drawPathWidth * 0.254f / 100f * MARKER_CANVAS_CALIBRATION
+        }
+        if (drawPathType == PEN_TYPE_BRUSH) {
+            
+            return drawPathWidth * BRUSH_CANVAS_WIDTH_SCALE * 0.254f / 100f
+        }
+        if (drawPathType == PEN_TYPE_PRESSURE) {
+            return drawPathPressureWidth(drawPathWidth, pressure01)
+        }
+        
+        return drawPathWidth * 0.254f / 100f
+    }
     
     const val PEN_COLOR_BLACK = 0
     const val PEN_COLOR_WHITE = 0xfe
+    const val PEN_COLOR_LIGHT_GRAY = -0x66
+    const val PEN_COLOR_DARK_GRAY = -0x65
 
     data class DisableArea(
         val left: Int,

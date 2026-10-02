@@ -4,8 +4,10 @@ import android.graphics.PointF
 import android.graphics.RectF
 import kotlin.math.abs
 import kotlin.math.hypot
+import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 
@@ -36,11 +38,11 @@ object BoardGeometry {
     
     
     const val MIN_ZOOM_SCALE = 0.36666667f
-    const val NORMAL_ZOOM_SCALE = 0.7f
-    const val MAX_ZOOM_SCALE = 1.4f
+    const val NORMAL_ZOOM_SCALE = 0.8f
+    const val MAX_ZOOM_SCALE = 2.0f
     val UI_ZOOM_LEVELS = intArrayOf(10, 25, 50, 75, 100, 125, 150, 175, 200)
     val ZOOM_LEVELS: FloatArray = FloatArray(UI_ZOOM_LEVELS.size) { scaleForZoomPercent(UI_ZOOM_LEVELS[it].toFloat()) }
-    val DEFAULT_ZOOM: Float = scaleForZoomPercent(150f)
+    val DEFAULT_ZOOM: Float = scaleForZoomPercent(75f)
     
     val WHITEBOARD_CREATION_SCALE: Float = scaleForZoomPercent(100f)
 
@@ -250,7 +252,12 @@ object BoardGeometry {
             consider(x, other.y - h - BRIDGE_GAP)
             consider(x, other.y + other.height + BRIDGE_GAP)
         }
-        return if (snapped) SnapResult(snapX, snapY, other.id) else SnapResult(x, y, other.id)
+        
+        
+        
+        
+        
+        return if (snapped) SnapResult(snapX, snapY, other.id) else SnapResult(x, y, null)
     }
 
     
@@ -356,7 +363,8 @@ object BoardGeometry {
         if (percent <= 100f) {
             MIN_ZOOM_SCALE + ((percent - 10f) / 90f) * (NORMAL_ZOOM_SCALE - MIN_ZOOM_SCALE)
         } else {
-            NORMAL_ZOOM_SCALE + ((percent - 100f) / 100f) * (MAX_ZOOM_SCALE - NORMAL_ZOOM_SCALE)
+            val t = ((percent - 100f) / 100f).coerceIn(0f, 1f)
+            NORMAL_ZOOM_SCALE * ((MAX_ZOOM_SCALE / NORMAL_ZOOM_SCALE).toDouble().pow(t.toDouble())).toFloat()
         }
 
     fun zoomPercentForScale(scale: Float): Float {
@@ -364,7 +372,7 @@ object BoardGeometry {
         return if (c <= NORMAL_ZOOM_SCALE) {
             10f + ((c - MIN_ZOOM_SCALE) / (NORMAL_ZOOM_SCALE - MIN_ZOOM_SCALE)) * 90f
         } else {
-            100f + ((c - NORMAL_ZOOM_SCALE) / (MAX_ZOOM_SCALE - NORMAL_ZOOM_SCALE)) * 100f
+            100f + (ln(c / NORMAL_ZOOM_SCALE) / ln(MAX_ZOOM_SCALE / NORMAL_ZOOM_SCALE)) * 100f
         }
     }
 

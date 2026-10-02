@@ -5,7 +5,7 @@ class ToolArbiter {
 
     
     enum class Tool { ERASER, LASSO, SHAPE }
-    enum class Source { PEN_BUTTON, SCREEN, SLIDEBAR }
+    enum class Source { PEN_BUTTON, SCREEN, SLIDEBAR, SHAPE }
     enum class Settle { ON_PEN_UP, ON_NEXT_PEN_DOWN }
     enum class Physical { STYLUS, RUBBER }
 
@@ -33,8 +33,8 @@ class ToolArbiter {
 
     private class Override(
         val source: Source,
-        val tool: Tool,
-        val settle: Settle,
+        var tool: Tool,
+        var settle: Settle,
         var exitRequested: Boolean = false,
         
         val armed: Boolean,
@@ -104,6 +104,15 @@ class ToolArbiter {
 
     
     fun forceExit(source: Source): Transition = transition("force-exit:$source", true) { remove(source) }
+
+    
+    fun replaceOverride(source: Source, tool: Tool, settle: Settle): Transition? =
+        transition("replace:$source/$tool", true) {
+            val item = overrides.firstOrNull { it.source == source } ?: return@transition
+            item.tool = tool
+            item.settle = settle
+            item.exitRequested = false
+        }
 
     
     fun reset() {

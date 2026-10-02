@@ -17,6 +17,8 @@ class InteractionOverlayView(context: Context) : View(context) {
         const val LASSO_ACTION_SIZE_DP = 52f
         const val LASSO_ACTION_GAP_DP = 14f
         const val LASSO_ACTION_MARGIN_DP = 12f
+        
+        const val LASSO_ACTION_SPACING_DP = 16f
         private const val LASSO_CORNER_DP = 28f
         private const val HANDLE_DP = 18f
         
@@ -428,7 +430,9 @@ class InteractionOverlayView(context: Context) : View(context) {
                     "trash" -> drawTrashButton(canvas, lassoActionRects[i], d)
                     "note" -> drawNoteButton(canvas, lassoActionRects[i], d)
                     "black" -> drawBlackButton(canvas, lassoActionRects[i], d)
+                    "edit-text" -> drawEditTextButton(canvas, lassoActionRects[i], d)
                     "square", "circle", "iso", "equi", "right" -> drawShapeButton(canvas, lassoActionRects[i], d, type)
+                    "fill", "hollow" -> drawPaintBucketButton(canvas, lassoActionRects[i], d, type == "fill")
                 }
             }
         }
@@ -583,6 +587,33 @@ class InteractionOverlayView(context: Context) : View(context) {
         }
     }
 
+    
+    private fun drawPaintBucketButton(canvas: Canvas, r: RectF, d: Float, fill: Boolean) {
+        val radius = r.width() / 2f
+        val cx = r.centerX(); val cy = r.centerY()
+        canvas.drawCircle(cx, cy, radius, fillWhite)
+        canvas.drawCircle(cx, cy, radius, thinDashPaint)
+        val s = 11f * d
+        val bucket = Path().apply {
+            moveTo(cx - s * .72f, cy - s * .25f)
+            lineTo(cx + s * .72f, cy - s * .25f)
+            lineTo(cx + s * .52f, cy + s * .95f)
+            lineTo(cx - s * .52f, cy + s * .95f)
+            close()
+        }
+        if (fill) {
+            canvas.drawPath(bucket, fillBlack)
+            canvas.drawOval(cx - s * .72f, cy - s * .43f, cx + s * .72f, cy - s * .05f, fillBlack)
+            canvas.drawLine(cx + s * .2f, cy - s * 1.05f, cx + s * .2f, cy - s * .48f, solidPaint)
+            canvas.drawLine(cx + s * .2f, cy - s * 1.05f, cx + s * .02f, cy - s * .78f, solidPaint)
+            canvas.drawLine(cx + s * .2f, cy - s * 1.05f, cx + s * .38f, cy - s * .78f, solidPaint)
+        } else {
+            canvas.drawPath(bucket, solidPaint)
+            canvas.drawOval(cx - s * .72f, cy - s * .43f, cx + s * .72f, cy - s * .05f, solidPaint)
+            canvas.drawLine(cx - s * 1.05f, cy + s * 1.1f, cx + s * 1.05f, cy - s * 1.1f, solidPaint)
+        }
+    }
+
     private fun drawTrashButton(canvas: Canvas, r: RectF, d: Float) {
         val radius = r.width() / 2f
         canvas.drawCircle(r.centerX(), r.centerY(), radius, fillWhite)
@@ -629,5 +660,23 @@ class InteractionOverlayView(context: Context) : View(context) {
         canvas.drawCircle(r.centerX(), r.centerY(), radius, thinDashPaint)
         
         canvas.drawCircle(r.centerX(), r.centerY(), 11f * d, fillBlack)
+    }
+
+    
+    private fun drawEditTextButton(canvas: Canvas, r: RectF, d: Float) {
+        val radius = r.width() / 2f
+        canvas.drawCircle(r.centerX(), r.centerY(), radius, fillWhite)
+        canvas.drawCircle(r.centerX(), r.centerY(), radius, thinDashPaint)
+        val cx = r.centerX(); val cy = r.centerY()
+        val p = Path()
+        p.moveTo(cx - 10f * d, cy + 9f * d)
+        p.lineTo(cx - 7f * d, cy - 7f * d)
+        p.lineTo(cx + 5f * d, cy - 11f * d)
+        p.lineTo(cx + 10f * d, cy + 4f * d)
+        p.lineTo(cx - 10f * d, cy + 9f * d)
+        p.close()
+        canvas.drawPath(p, solidPaint)
+        canvas.drawLine(cx - 5f * d, cy - 2f * d, cx + 5f * d, cy - 5f * d, thinDashPaint)
+        canvas.drawLine(cx - 6f * d, cy + 4f * d, cx + 4f * d, cy + 1f * d, thinDashPaint)
     }
 }

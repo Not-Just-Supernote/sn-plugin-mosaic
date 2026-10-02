@@ -7,7 +7,7 @@ import {
 } from './React/src/boardFormat';
 import { base64ToBytes, bytesToBase64 } from './React/src/base64';
 
-const BOARD_FILENAME = 'board.mosaic';
+export const BOARD_FILENAME = 'board.mosaic';
 
 async function resolveBoardPath(): Promise<string> {
   return `${await NativePluginManager.getPluginDirPath()}/${BOARD_FILENAME}`;

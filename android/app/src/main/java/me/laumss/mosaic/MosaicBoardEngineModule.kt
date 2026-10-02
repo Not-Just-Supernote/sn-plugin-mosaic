@@ -16,6 +16,14 @@ class MosaicBoardEngineModule(
     override fun getName(): String = "MosaicBoardEngine"
 
     
+    @ReactMethod(isBlockingSynchronousMethod = true)
+    fun getCurrentSurface(): String = InklingLink.currentSurface()
+
+    
+    @ReactMethod(isBlockingSynchronousMethod = true)
+    fun isBoardSurface(): Boolean = InklingLink.isBoardSurface()
+
+    
     @ReactMethod
     fun applyOps(base64: String) {
         WhiteboardSceneGate.dispatch { BoardEngine.applyOps(base64) }
@@ -79,8 +87,20 @@ class MosaicBoardEngineModule(
 
     
     @ReactMethod
+    fun setSyncState(viewTag: Int, enabled: Boolean, state: String, address: String) {
+        withView(viewTag) { it.controller.setSyncState(enabled, state, address) }
+    }
+
+    
+    @ReactMethod
     fun createRecognizedTextCard(viewTag: Int, text: String) {
         withView(viewTag) { it.controller.createRecognizedTextCard(text) }
+    }
+
+    
+    @ReactMethod
+    fun insertDocTextCard(viewTag: Int, text: String) {
+        withView(viewTag) { it.controller.insertDocTextCard(text) }
     }
 
     

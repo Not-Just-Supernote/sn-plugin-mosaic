@@ -1,5 +1,5 @@
 import RNFS from 'react-native-fs';
-import { PluginCommAPI, PluginManager, PointUtils } from 'sn-plugin-lib';
+import { PluginCommAPI, PluginFileAPI } from 'sn-plugin-lib';
 
 
 
@@ -17,18 +17,41 @@ type ClipStroke = { penStyle?: number; width?: number; pts?: number[] };
 
 function mosaicPenToSdk(objType: number): number {
   switch (objType) {
-    case 18: return 10; 
-    case 0: return 1;   
-    case 14: return 15; 
+    case 0: 
+    case 16: return 16;  
+    case 14: 
     case 15: return 15; 
-    case 17: return 11; 
-    default: return 1;
+    case 17: 
+    case 11: return 11; 
+    default: return 16;
   }
 }
 
-function mosaicPageSize(deviceType: number): { width: number; height: number } {
-  
-  return deviceType === 5 ? { width: 1920, height: 2560 } : { width: 1404, height: 1872 };
+function validPageSize(value: any): value is { width: number; height: number } {
+  return Number.isInteger(value?.width) && value.width > 0
+    && Number.isInteger(value?.height) && value.height > 0;
+}
+
+
+async function currentPageSize(): Promise<{ width: number; height: number } | null> {
+  try {
+    const fileRes: any = await PluginCommAPI.getCurrentFilePath();
+    const pageRes: any = await PluginCommAPI.getCurrentPageNum();
+    if (fileRes?.success && typeof fileRes.result === 'string'
+      && pageRes?.success && typeof pageRes.result === 'number') {
+      const sizeRes: any = await PluginFileAPI.getPageSize(fileRes.result, pageRes.result);
+      if (sizeRes?.success && validPageSize(sizeRes.result)) {
+        console.log(`${LOG} page size=${sizeRes.result.width}x${sizeRes.result.height}`);
+        return { width: sizeRes.result.width, height: sizeRes.result.height };
+      }
+      console.log(`${LOG} getPageSize failed res=${JSON.stringify(sizeRes)}`);
+    } else {
+      console.log(`${LOG} current file/page unavailable file=${JSON.stringify(fileRes)} page=${JSON.stringify(pageRes)}`);
+    }
+  } catch (err) {
+    console.log(`${LOG} current page size failed: ${err}`);
+  }
+  return null;
 }
 
 async function readClipStrokes(): Promise<ClipStroke[] | null> {
@@ -71,23 +94,27 @@ async function strokesToElements(
       return null;
     }
     const el: any = createRes.result;
-    const emrPoints: any[] = [];
+    const androidPoints: any[] = [];
     const pressures: number[] = [];
     const p = s.pts ?? [];
     for (let i = 0; i + 2 < p.length; i += 3) {
       const pageX = SIDE_MARGIN + (p[i] - minX) * fit;
       const pageY = SIDE_MARGIN + (p[i + 1] - minY) * fit;
-      emrPoints.push(PointUtils.androidPoint2Emr({ x: Math.round(pageX), y: Math.round(pageY) }, pageSize));
+      
+      
+      
+      
+      androidPoints.push({ x: Math.round(pageX), y: Math.round(pageY) });
       pressures.push(Math.max(1, Math.round((p[i + 2] ?? 1) * MOSAIC_PRESSURE)));
     }
-    if (emrPoints.length < 2 || !el.stroke) continue;
+    if (androidPoints.length < 2 || !el.stroke) continue;
     el.thickness = Math.max(
       MOSAIC_THICK_MIN,
       Math.min(MOSAIC_THICK_MAX, Math.round((s.width ?? 2) * fit * MOSAIC_THICK_FACTOR)),
     );
     el.stroke.penColor = 0;
     el.stroke.penType = mosaicPenToSdk(s.penStyle ?? 0);
-    const okPts = await el.stroke.points.setRange(0, emrPoints.length - 1, emrPoints);
+    const okPts = await el.stroke.points.setRange(0, androidPoints.length - 1, androidPoints);
     const okPrs = await el.stroke.pressures.setRange(0, pressures.length - 1, pressures);
     if (!okPts || !okPrs) {
       console.log(`${LOG} setRange failed`);
@@ -105,9 +132,11 @@ export async function recognizeLassoText(): Promise<string | null> {
     console.log(`${LOG} no lasso strokes to recognize`);
     return null;
   }
-  let deviceType = -1;
-  try { deviceType = await PluginManager.getDeviceType(); } catch { deviceType = -1; }
-  const pageSize = mosaicPageSize(deviceType);
+  const pageSize = await currentPageSize();
+  if (pageSize === null) {
+    console.log(`${LOG} recognition skipped because the actual page size is unavailable`);
+    return null;
+  }
   const elements = await strokesToElements(strokes, pageSize);
   if (!elements || elements.length === 0) {
     console.log(`${LOG} no elements built`);

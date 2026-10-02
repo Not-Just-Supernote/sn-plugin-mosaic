@@ -74,11 +74,88 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 putString("space", rec.space)
                 putDouble("width", rec.width.toDouble())
                 putDouble("color", (rec.color.toLong() and 0xffffffffL).toDouble())
+                
+                
+                
                 putInt("pen", rec.penStyle)
+                putInt("drawPathWidth", rec.drawPathWidth)
                 putDouble("sampleScale", rec.sampleScale.toDouble())
                 putString("points", packPoints(rec.points, rec.pressures))
+                
+                
+                
+                putMap("bounds", Arguments.createMap().apply {
+                    putDouble("left", rec.bounds.left.toDouble())
+                    putDouble("top", rec.bounds.top.toDouble())
+                    putDouble("right", rec.bounds.right.toDouble())
+                    putDouble("bottom", rec.bounds.bottom.toDouble())
+                })
             },
         )
+    }
+
+    
+    fun strokeUpsertBatch(records: Collection<BoardEngine.StrokeRec>) {
+        if (records.isEmpty()) return
+        val startedAt = System.nanoTime()
+        val values = records.toList()
+        var totalPoints = 0
+        for (rec in values) totalPoints += rec.points.size / 2
+        val pointBuffer = ByteBuffer.allocate(totalPoints * 12).order(ByteOrder.LITTLE_ENDIAN)
+        val ids = Arguments.createArray()
+        val spaces = Arguments.createArray()
+        val widths = Arguments.createArray()
+        val colors = Arguments.createArray()
+        val pens = Arguments.createArray()
+        val drawPathWidths = Arguments.createArray()
+        val sampleScales = Arguments.createArray()
+        val bounds = Arguments.createArray()
+        val pointOffsets = Arguments.createArray()
+        val pointCounts = Arguments.createArray()
+        var byteOffset = 0
+        for (rec in values) {
+            ids.pushString(rec.id)
+            spaces.pushString(rec.space)
+            widths.pushDouble(rec.width.toDouble())
+            colors.pushDouble((rec.color.toLong() and 0xffffffffL).toDouble())
+            pens.pushInt(rec.penStyle)
+            drawPathWidths.pushInt(rec.drawPathWidth)
+            sampleScales.pushDouble(rec.sampleScale.toDouble())
+            bounds.pushDouble(rec.bounds.left.toDouble())
+            bounds.pushDouble(rec.bounds.top.toDouble())
+            bounds.pushDouble(rec.bounds.right.toDouble())
+            bounds.pushDouble(rec.bounds.bottom.toDouble())
+            pointOffsets.pushInt(byteOffset)
+            pointCounts.pushInt(rec.points.size / 2)
+            var point = 0
+            while (point * 2 + 1 < rec.points.size) {
+                pointBuffer.putFloat(rec.points[point * 2])
+                pointBuffer.putFloat(rec.points[point * 2 + 1])
+                pointBuffer.putFloat(rec.pressures.getOrNull(point) ?: 1f)
+                point++
+                byteOffset += 12
+            }
+        }
+        val payload = Base64.encodeToString(pointBuffer.array(), Base64.NO_WRAP)
+        op(
+            Arguments.createMap().apply {
+                putString("type", "strokeBatch")
+                putArray("ids", ids)
+                putArray("spaces", spaces)
+                putArray("widths", widths)
+                putArray("colors", colors)
+                putArray("pens", pens)
+                putArray("drawPathWidths", drawPathWidths)
+                putArray("sampleScales", sampleScales)
+                putArray("bounds", bounds)
+                putArray("pointOffsets", pointOffsets)
+                putArray("pointCounts", pointCounts)
+                putString("points", payload)
+            },
+        )
+        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000.0
+        Log.i(TAG, "[MosaicBridgePerf] strokeBatch count=${values.size} points=$totalPoints " +
+            "payloadBytes=${pointBuffer.array().size} encodeMs=${"%.2f".format(elapsedMs)}")
     }
 
     fun strokesRemove(ids: Collection<String>) {
@@ -111,6 +188,9 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 putDouble("height", rec.height.toDouble())
                 putInt("zIndex", rec.zIndex)
                 putString("kind", rec.kind)
+                
+                
+                putString("content", rec.content)
                 putString("noteRef", rec.noteRef)
                 putString("bgColor", rec.bgColor)
                 putString("textColor", rec.textColor)
@@ -136,6 +216,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 putString("id", rec.id)
                 putString("from", rec.fromId)
                 putString("to", rec.toId)
+                putBoolean("locked", rec.locked)
             },
         )
     }

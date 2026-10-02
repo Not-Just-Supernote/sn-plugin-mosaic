@@ -1,5 +1,6 @@
 import RNFS from 'react-native-fs';
 import { PluginManager } from 'sn-plugin-lib';
+import { NativeModules } from 'react-native';
 
 
 export const MOSAIC_INBOX_DIR = '/sdcard/EXPORT/mosaic/inbox';
@@ -9,7 +10,9 @@ const FILE_WRITE_PERMISSION = 'plugin.permission.FILE:WRITE';
 const FILE_DELETE_PERMISSION = 'plugin.permission.FILE:DELETE';
 const INTERNET_PERMISSION = 'plugin.permission.INTERNET';
 
-const PERMISSION_STATUS_GRANTED = 2;
+function isGranted(status: unknown): boolean {
+  return Number(status) > 0;
+}
 
 let importPermissionFlow: Promise<boolean> | null = null;
 
@@ -17,9 +20,9 @@ async function ensurePermission(permission: string, description: string): Promis
   try {
     const current = await PluginManager.hasPermission(permission);
     console.log(`[MosaicImport] permission has ${permission} status=${current}`);
-    if (Number(current) === PERMISSION_STATUS_GRANTED) return true;
+    if (isGranted(current)) return true;
     const requested = await PluginManager.requestPermission(permission, description);
-    const granted = Number(requested) === PERMISSION_STATUS_GRANTED;
+    const granted = isGranted(requested);
     console.log(`[MosaicImport] permission request ${permission} status=${requested} granted=${granted}`);
     return granted;
   } catch (error) {
@@ -30,6 +33,13 @@ async function ensurePermission(permission: string, description: string): Promis
 
 
 export function ensureMosaicImportPermissions(): Promise<boolean> {
+  const native = (NativeModules as any).MosaicPermission;
+  if (typeof native?.requestPermissions === 'function') {
+    return native.requestPermissions().then((ready: boolean) => {
+      console.log(`[MosaicImport] native permission gate ready=${ready}`);
+      return ready;
+    });
+  }
   if (importPermissionFlow !== null) return importPermissionFlow;
   importPermissionFlow = (async () => {
     const readGranted = await ensurePermission(

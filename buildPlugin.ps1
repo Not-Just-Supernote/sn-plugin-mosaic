@@ -703,6 +703,17 @@ function Build-AndroidApk {
                 return $false
             }
 
+            $autolinkingDirs = @(
+                (Join-Path $androidDir 'build\generated\autolinking'),
+                (Join-Path $androidDir 'app\build\generated\autolinking')
+            )
+            foreach ($autolinkingDir in $autolinkingDirs) {
+                if (Test-Path $autolinkingDir) {
+                    Write-ColorOutput "Removing stale autolinking output: $autolinkingDir" 'Yellow'
+                    Remove-Item $autolinkingDir -Recurse -Force -ErrorAction Stop
+                }
+            }
+
             Write-ColorOutput "Building $gradleTask with a fresh Kotlin/Java compile..." 'Blue'
             & cmd.exe /c "$gradlewPath $gradleTask --no-daemon --rerun-tasks"
             $buildResult = $LASTEXITCODE

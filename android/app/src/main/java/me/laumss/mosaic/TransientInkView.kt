@@ -13,6 +13,8 @@ class TransientInkView(context: Context) : View(context) {
         private const val CLEAR_DELAY_MS = 160L
         private const val LASSO_DOT_RADIUS_DP = 2.2f
         private const val LASSO_DOT_SPACING_DP = 10f
+        
+        private const val LASSO_DOT_HALO_DP = 1.2f
     }
 
     private var lastX = 0f
@@ -33,6 +35,7 @@ class TransientInkView(context: Context) : View(context) {
     private val displayDensity: Float
         get() = resources.displayMetrics.density.coerceAtLeast(1f)
     private val lassoDotRadiusPx: Float get() = LASSO_DOT_RADIUS_DP * displayDensity
+    private val lassoDotHaloPx: Float get() = LASSO_DOT_HALO_DP * displayDensity
     private val lassoDotSpacingPx: Float get() = LASSO_DOT_SPACING_DP * displayDensity
 
     fun beginStroke(x: Float, y: Float) {
@@ -61,7 +64,7 @@ class TransientInkView(context: Context) : View(context) {
     private fun invalidateDots(minX: Float, minY: Float, maxX: Float, maxY: Float) {
         if (minX < allMinX) allMinX = minX; if (maxX > allMaxX) allMaxX = maxX
         if (minY < allMinY) allMinY = minY; if (maxY > allMaxY) allMaxY = maxY
-        val pad = kotlin.math.ceil(lassoDotRadiusPx + 2f).toInt()
+        val pad = kotlin.math.ceil(lassoDotRadiusPx + lassoDotHaloPx + 2f).toInt()
         invalidate(
             kotlin.math.floor(minX).toInt() - pad,
             kotlin.math.floor(minY).toInt() - pad,
@@ -107,6 +110,10 @@ class TransientInkView(context: Context) : View(context) {
         color = 0xE6000000.toInt()
         style = Paint.Style.FILL
     }
+    private val lassoDotHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.FILL
+    }
 
     private fun cancelPendingClear() {
         pendingClear?.let { removeCallbacks(it) }
@@ -118,7 +125,7 @@ class TransientInkView(context: Context) : View(context) {
         lassoDots.clear()
         dirty = false
         if (hadInk && allMinX <= allMaxX) {
-            val pad = kotlin.math.ceil(lassoDotRadiusPx + 2f).toInt()
+            val pad = kotlin.math.ceil(lassoDotRadiusPx + lassoDotHaloPx + 2f).toInt()
             invalidate(
                 kotlin.math.floor(allMinX).toInt() - pad,
                 kotlin.math.floor(allMinY).toInt() - pad,
@@ -163,7 +170,11 @@ class TransientInkView(context: Context) : View(context) {
         super.onDraw(canvas)
         if (lassoDots.isNotEmpty()) {
             val r = lassoDotRadiusPx
-            for (dot in lassoDots) canvas.drawCircle(dot[0], dot[1], r, lassoDotPaint)
+            val halo = r + lassoDotHaloPx
+            for (dot in lassoDots) {
+                canvas.drawCircle(dot[0], dot[1], halo, lassoDotHaloPaint)
+                canvas.drawCircle(dot[0], dot[1], r, lassoDotPaint)
+            }
         }
     }
 }

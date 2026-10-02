@@ -54,6 +54,9 @@ object InklingLink {
 
         
         fun onInklingInboxReady()
+
+        
+        fun onInklingSurfaceChanged(surface: String, noteRef: String?)
     }
 
     @Volatile private var toolbarRect: Rect? = null
@@ -105,6 +108,10 @@ object InklingLink {
     fun detach(host: Host) {
         if (this.host !== host) return
         this.host = null
+        
+        
+        surface = SURFACE_BOARD
+        noteRef = null
         setBoardVisible(false, "detach")
         val app = appContext
         val r = receiver
@@ -127,6 +134,8 @@ object InklingLink {
         boardVisible = visible
         
         if (!visible) {
+            surface = SURFACE_BOARD
+            noteRef = null
             toolbarRect = null
             overlayRects = emptyList()
         }
@@ -144,6 +153,9 @@ object InklingLink {
     fun currentSurface(): String = surface
 
     fun currentNoteRef(): String? = noteRef
+
+    
+    fun isBoardSurface(): Boolean = boardVisible && surface == SURFACE_BOARD
 
     private fun publishState(reason: String) {
         val ctx = appContext ?: return
@@ -212,16 +224,30 @@ object InklingLink {
         when (val cmd = intent.getStringExtra("cmd")) {
             "close" -> host?.onInklingCloseRequested()
             "sync" -> publishState("sync-request")
-            "paste_strokes" -> host?.onInklingPasteStrokesRequested()
-            "clear_selection" -> host?.onInklingClearSelectionRequested(delete = false)
-            "delete_selection" -> host?.onInklingClearSelectionRequested(delete = true)
+            "paste_strokes" -> {
+                if (isBoardSurface()) host?.onInklingPasteStrokesRequested()
+                else Log.i(TAG, "paste ignored surface=$surface visible=$boardVisible")
+            }
+            "clear_selection" -> {
+                if (isBoardSurface()) host?.onInklingClearSelectionRequested(delete = false)
+                else Log.i(TAG, "clear-selection ignored surface=$surface visible=$boardVisible")
+            }
+            "delete_selection" -> {
+                if (isBoardSurface()) host?.onInklingClearSelectionRequested(delete = true)
+                else Log.i(TAG, "delete-selection ignored surface=$surface visible=$boardVisible")
+            }
             "text_card" -> {
                 val text = intent.getStringExtra("text") ?: ""
                 val x = intent.getIntExtra("anchorScreenX", 0)
                 val y = intent.getIntExtra("anchorScreenY", 0)
-                if (text.isNotEmpty()) host?.onInklingTextCardRequested(text, x, y)
+                if (text.isNotEmpty() && isBoardSurface()) host?.onInklingTextCardRequested(text, x, y)
+                else if (text.isNotEmpty()) Log.i(TAG, "text-card ignored surface=$surface visible=$boardVisible")
             }
-            "inbox" -> host?.onInklingInboxReady()
+            "inbox" -> {
+                
+                if (isBoardSurface()) host?.onInklingInboxReady()
+                else Log.i(TAG, "inbox notification deferred surface=$surface visible=$boardVisible")
+            }
             else -> Log.i(TAG, "unknown request cmd=$cmd")
         }
     }

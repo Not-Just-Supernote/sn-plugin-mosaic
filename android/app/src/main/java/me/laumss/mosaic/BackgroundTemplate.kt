@@ -41,6 +41,32 @@ data class BackgroundTemplate(
 }
 
 
+
+object TranslucentStore {
+    private const val PREFS = "mosaic_translucent"
+    
+    private const val KEY_LEVEL = "level_v2"
+    const val MIN_LEVEL = 0
+    const val MAX_LEVEL = 100
+    const val STEP = 5
+    const val MIN_SEE_THROUGH = 15f
+    const val MAX_SEE_THROUGH = 40f
+    
+    const val DEFAULT_LEVEL = 15
+
+    fun seeThroughPercent(level: Int): Float =
+        MIN_SEE_THROUGH + (MAX_SEE_THROUGH - MIN_SEE_THROUGH) * level.coerceIn(MIN_LEVEL, MAX_LEVEL) / MAX_LEVEL
+
+    fun level(context: Context): Int =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_LEVEL, DEFAULT_LEVEL).coerceIn(MIN_LEVEL, MAX_LEVEL)
+
+    fun setLevel(context: Context, level: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_LEVEL, level.coerceIn(MIN_LEVEL, MAX_LEVEL)).apply()
+    }
+}
+
 object TemplateStore {
     private const val PREFS = "mosaic_templates"
     private const val KEY_BOARD = "board"
@@ -67,10 +93,6 @@ object TemplateStore {
 
 
 object TemplatePaper {
-    private val linePaint = Paint().apply { color = Color.LTGRAY; style = Paint.Style.STROKE }
-    private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.GRAY; style = Paint.Style.FILL }
-    private val crossPaint = Paint().apply { color = Color.GRAY; style = Paint.Style.STROKE }
-
     private const val LINE_W = 0.9f
     private const val DOT_R = 1.5f
     private const val CROSS_W = 0.9f
@@ -79,6 +101,12 @@ object TemplatePaper {
         if (template.style == TemplateStyle.NONE) return
         val pitch = template.spacing.pitch
         if (pitch <= 0f) return
+        
+        
+        
+        val linePaint = Paint().apply { color = Color.LTGRAY; style = Paint.Style.STROKE; strokeWidth = LINE_W }
+        val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.GRAY; style = Paint.Style.FILL }
+        val crossPaint = Paint().apply { color = Color.GRAY; style = Paint.Style.STROKE; strokeWidth = CROSS_W }
         val bounded = pageWidth > 0f
 
         
@@ -91,7 +119,6 @@ object TemplatePaper {
 
         when (template.style) {
             TemplateStyle.LINES -> {
-                linePaint.strokeWidth = LINE_W
                 var y = firstRow
                 while (y <= world.bottom) {
                     canvas.drawLine(rowLeft, y, rowRight, y, linePaint)
@@ -106,7 +133,6 @@ object TemplatePaper {
                 }
             }
             TemplateStyle.CROSS -> {
-                crossPaint.strokeWidth = CROSS_W
                 val half = pitch * 0.16f
                 var y = firstRow
                 while (y <= world.bottom) {

@@ -15,6 +15,7 @@
     "MosaicBoardViewNative.ts",
     "noteBridge.ts",
     "noteStore.ts",
+    "rawNet.ts",
     "i18n.ts",
     "React/src/boardFormat.ts",
     "React/src/utf8.ts",

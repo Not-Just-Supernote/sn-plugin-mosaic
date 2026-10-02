@@ -5,54 +5,66 @@ package me.laumss.mosaic
 enum class PenStyle(
     
     val objType: Int,
-    
-    val ppMap: IntArray?,
-    
-    val speedMap: IntArray?,
-    
-    val constantScale: Float,
 ) {
     
-    PEN(0, PenTables.PEN_PP, PenTables.PEN_SPEED, 0f),
-
+    NEEDLE(DrawPathClient.PEN_TYPE_NEEDLE),
     
-    PENCIL(14, PenTables.PENCIL_PP, null, 0f),
-
+    PEN(DrawPathClient.PEN_TYPE_PRESSURE),
     
-    BRUSH(15, PenTables.BRUSH_PP, PenTables.BRUSH_SPEED, 0f),
-
+    BRUSH(DrawPathClient.PEN_TYPE_BRUSH),
+    MARKER(DrawPathClient.PEN_TYPE_MARKER),
     
-    MARKER(17, null, null, 1.2f),
-
-    
-    FIXED(18, null, null, 1f),
+    FILLED_SHAPE(18),
     ;
-
-    
-    val isConstantWidth: Boolean get() = ppMap == null
 
     companion object {
         
-        fun fromObjType(objType: Int): PenStyle =
-            entries.first { it.objType == objType }
+        fun normalizeStoredType(type: Int): Int = when (type) {
+            0 -> DrawPathClient.PEN_TYPE_PRESSURE
+            10 -> DrawPathClient.PEN_TYPE_NEEDLE
+            14 -> DrawPathClient.PEN_TYPE_BRUSH
+            17 -> DrawPathClient.PEN_TYPE_MARKER
+            DrawPathClient.PEN_TYPE_MARKER,
+            DrawPathClient.PEN_TYPE_BRUSH,
+            DrawPathClient.PEN_TYPE_PRESSURE,
+            PenStyle.FILLED_SHAPE.objType -> type
+            else -> throw IllegalArgumentException("Unsupported drawPath pen type: $type")
+        }
+
+        fun fromObjType(objType: Int): PenStyle {
+            val normalized = normalizeStoredType(objType)
+            return entries.first { it.objType == normalized }
+        }
     }
 }
 
 
-internal object PenTables {
-
+enum class MarkerInk(
+    val argb: Int,
+    val drawPathColor: Int,
+    val noteColor: Int,
+    val darkBackdrop: Boolean,
     
-    val PEN_PP = intArrayOf(10, 58, 120, 68, 270, 138, 320, 170, 350, 235, 420, 250)
+    val badge: String,
+) {
+    BLACK(0xFF000000.toInt(), DrawPathClient.PEN_COLOR_BLACK, 0x00, darkBackdrop = true, badge = "BK"),
+    DARK_GRAY(0xFF808080.toInt(), DrawPathClient.PEN_COLOR_DARK_GRAY, 0x9D, darkBackdrop = false, badge = "DG"),
+    LIGHT_GRAY(0xFFC0C0C0.toInt(), DrawPathClient.PEN_COLOR_LIGHT_GRAY, 0xC9, darkBackdrop = false, badge = "LG"),
+    ;
 
-    
-    val PEN_SPEED = intArrayOf(20, 130, 80, 128, 120, 110, 500, 98, 1200, 90, 4000, 86)
+    companion object {
+        
+        fun fromArgb(argb: Int): MarkerInk = when (argb) {
+            0xFF9D9D9D.toInt() -> DARK_GRAY
+            0xFFC9C9C9.toInt() -> LIGHT_GRAY
+            else -> entries.firstOrNull { it.argb == argb } ?: BLACK
+        }
 
-    
-    val PENCIL_PP = intArrayOf(10, 80, 120, 80, 270, 160, 320, 240, 350, 288, 420, 300)
-
-    
-    val BRUSH_PP = intArrayOf(10, 68, 120, 80, 270, 160, 320, 226, 350, 272, 420, 280)
-
-    
-    val BRUSH_SPEED = intArrayOf(20, 132, 50, 130, 100, 108, 400, 90, 120, 84, 4000, 70)
+        
+        fun fromNoteColor(color: Int): MarkerInk = when (color and 0xFF) {
+            in 0x00 until 0x4F -> BLACK
+            in 0x4F until 0xB3 -> DARK_GRAY
+            else -> LIGHT_GRAY
+        }
+    }
 }

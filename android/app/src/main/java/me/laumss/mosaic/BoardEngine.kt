@@ -11,7 +11,7 @@ import java.nio.ByteOrder
 object BoardEngine {
 
     private const val TAG = "MosaicBoardEngine"
-    const val PROTOCOL_VERSION = 3
+    const val PROTOCOL_VERSION = 5
 
     private const val OP_ADD_STROKE = 1
     private const val OP_REMOVE_STROKES = 2
@@ -22,7 +22,12 @@ object BoardEngine {
     private const val OP_SET_CONNECTIONS = 8
 
     private const val GRID_CELL = 512f
-    const val STROKE_PAD = 8f
+    
+    
+    
+    
+    
+    const val STROKE_PAD = 32f
     
     const val NECK_PAD = 16f
 
@@ -37,23 +42,40 @@ object BoardEngine {
         
         val pressures: FloatArray,
         
-        val penStyle: Int,
+        rawPenStyle: Int,
         
         val sampleScale: Float,
+        
+        _requestedDrawPathWidth: Int = 0,
     ) {
+        
+        val penStyle: Int = PenStyle.normalizeStoredType(rawPenStyle)
+        
+        val drawPathWidth: Int = _requestedDrawPathWidth.takeIf { it > 0 }
+            ?: DrawPathClient.widthArgument(PenStyle.fromObjType(penStyle), width)
         val bounds: RectF = computePointBounds(points)
         
-        val isShape: Boolean = Shapes.kindOf(points, pressures) != null
-        val path: Path = if (isShape) buildPolylinePath(points) else buildStrokePath(points)
+        
+        
+        
+        
+        val isShape: Boolean by lazy { Shapes.kindOf(points, pressures) != null }
+        val path: Path by lazy { if (isShape) buildPolylinePath(points) else buildStrokePath(points) }
         val cardId: String? = if (space.startsWith("card:")) space.substring(5) else null
-        val runs: List<TchRaster.Run> by lazy { TchRaster.runs(points, pressures, sampleScale, width, PenStyle.fromObjType(penStyle)) }
+        val connectionId: String? = if (space.startsWith("connection:")) space.substring(11) else null
+        val runs: List<TchRaster.Run> by lazy {
+            TchRaster.runs(points, pressures, sampleScale, penStyle, drawPathWidth)
+        }
 
         fun sameGeometry(other: StrokeRec): Boolean =
-            space == other.space && width == other.width && color == other.color && penStyle == other.penStyle && sampleScale == other.sampleScale &&
+            space == other.space && width == other.width && color == other.color && penStyle == other.penStyle && sampleScale == other.sampleScale && drawPathWidth == other.drawPathWidth &&
                 points.contentEquals(other.points) && pressures.contentEquals(other.pressures)
 
         fun withColor(c: Int): StrokeRec =
-            if (c == color) this else StrokeRec(id, space, width, c, points, pressures, penStyle, sampleScale)
+            if (c == color) this else StrokeRec(id, space, width, c, points, pressures, penStyle, sampleScale, drawPathWidth)
+
+        fun withPenStyle(style: PenStyle): StrokeRec =
+            if (style.objType == penStyle) this else StrokeRec(id, space, width, color, points, pressures, style.objType, sampleScale, DrawPathClient.widthArgument(style, width))
 
         
         fun translated(
@@ -77,12 +99,25 @@ object BoardEngine {
                 id,
                 if (destinationCard == null) "canvas" else "card:${destinationCard.id}",
                 width,
-                contrastInk(color, destinationCard),
+                color,
                 out,
                 pressures,
                 penStyle,
                 sampleScale,
+                drawPathWidth,
             )
+        }
+
+        
+        fun translatedWorld(dx: Float, dy: Float): StrokeRec {
+            val out = FloatArray(points.size)
+            var i = 0
+            while (i < points.size) {
+                out[i] = points[i] + dx
+                out[i + 1] = points[i + 1] + dy
+                i += 2
+            }
+            return StrokeRec(id, space, width, color, out, pressures, penStyle, sampleScale, drawPathWidth)
         }
 
         
@@ -112,11 +147,12 @@ object BoardEngine {
                 id,
                 if (destinationCard == null) "canvas" else "card:${destinationCard.id}",
                 (width * widthScale).coerceAtLeast(0.5f),
-                contrastInk(color, destinationCard),
+                color,
                 out,
                 pressures,
                 penStyle,
                 sampleScale,
+                (drawPathWidth * widthScale).toInt().coerceAtLeast(1),
             )
         }
 
@@ -150,31 +186,27 @@ object BoardEngine {
                 id,
                 if (destinationCard == null) "canvas" else "card:${destinationCard.id}",
                 width,
-                contrastInk(color, destinationCard),
+                color,
                 rotated,
                 pressures,
                 penStyle,
                 sampleScale,
+                drawPathWidth,
             )
         }
 
         
         fun withPoints(pts: FloatArray): StrokeRec =
-            StrokeRec(id, space, width, color, pts, if (pressures.size == pts.size / 2) pressures else Shapes.pressures(pts.size / 2), penStyle, sampleScale)
+            StrokeRec(id, space, width, color, pts, if (pressures.size == pts.size / 2) pressures else Shapes.pressures(pts.size / 2), penStyle, sampleScale, drawPathWidth)
 
         companion object {
             const val INK_BLACK = 0xFF000000.toInt()
             const val INK_WHITE = 0xFFFFFFFF.toInt()
+            
+            const val INK_WHITE_PINNED = 0xFFFEFEFE.toInt()
 
             
-            fun contrastInk(color: Int, card: CardRec?): Int {
-                val dark = card?.colored == true
-                return when {
-                    dark && color == INK_BLACK -> INK_WHITE
-                    !dark && color == INK_WHITE -> INK_BLACK
-                    else -> color
-                }
-            }
+            
         }
     }
 
@@ -219,12 +251,15 @@ object BoardEngine {
 
         fun withColors(bg: String, text: String): CardRec = CardRec(id, x, y, width, height, zIndex, kind, content, imagePath, noteRef, bg, text, title)
 
+        fun withContent(value: String): CardRec = CardRec(id, x, y, width, height, zIndex, kind, value, imagePath, noteRef, bgColor, textColor, title)
+
         
         fun sameNeckGeometry(other: CardRec): Boolean =
             x == other.x && y == other.y && width == other.width && height == other.height && colored == other.colored
     }
 
-    class ConnectionRec(val id: String, val fromId: String, val toId: String) {
+    class ConnectionRec(val id: String, val fromId: String, val toId: String, val locked: Boolean = false) {
+        fun withLocked(value: Boolean): ConnectionRec = if (locked == value) this else ConnectionRec(id, fromId, toId, value)
         fun links(a: String, b: String): Boolean =
             (fromId == a && toId == b) || (fromId == b && toId == a)
 
@@ -274,6 +309,58 @@ object BoardEngine {
         val necks: List<NeckRec>, val whiteboards: List<WhiteboardRec>, val selected: List<String>,
         val panX: Float, val panY: Float, val scale: Float, val hiddenCardId: String?,
     )
+
+    
+    data class RenderSnapshot(
+        val canvasStrokes: List<StrokeRec>,
+        val cardsByZ: List<CardRec>,
+        val cards: Map<String, CardRec>,
+        val cardStrokes: Map<String, List<StrokeRec>>,
+        val markers: Map<String, List<StrokeRec>>,
+        val connections: Map<String, ConnectionRec>,
+        val necks: List<NeckRec>,
+        val whiteboards: List<WhiteboardRec>,
+        val hiddenCardId: String?,
+        val scale: Float,
+    )
+
+    
+    fun renderSnapshot(world: RectF): RenderSnapshot = synchronized(lock) {
+        val canvas = ArrayList<StrokeRec>()
+        queryCanvasStrokes(world, canvas)
+        val orderedCards = cardsByZ.toList()
+        val cardMap = HashMap<String, CardRec>(orderedCards.size)
+        for (card in orderedCards) cardMap[card.id] = card
+        val attached = HashMap<String, List<StrokeRec>>(cardStrokes.size)
+        
+        
+        
+        val cardRect = RectF()
+        for (card in orderedCards) {
+            card.rect(cardRect)
+            if (!RectF.intersects(cardRect, world)) continue
+            cardStrokes[card.id]?.let { attached[card.id] = it.toList() }
+        }
+        val markers = HashMap<String, MutableList<StrokeRec>>()
+        for (stroke in strokes.values) {
+            if (stroke.penStyle == PenStyle.MARKER.objType) {
+                markers.getOrPut(stroke.space) { ArrayList(2) }.add(stroke)
+            }
+        }
+        RenderSnapshot(
+            canvasStrokes = canvas,
+            cardsByZ = orderedCards,
+            cards = cardMap,
+            cardStrokes = attached,
+            markers = markers,
+            connections = HashMap(connections),
+            necks = necks.values.toList(),
+            whiteboards = whiteboards.values.toList(),
+            hiddenCardId = hiddenCardId,
+            scale = scale,
+        )
+    }
+
     fun snapshotScene(): SceneSnapshot = synchronized(lock) { SceneSnapshot(strokes.values.toList(), cards.values.toList(), connections.values.toList(), necks.values.toList(), whiteboards.values.toList(), selectedCardIds.toList(), panX, panY, scale, hiddenCardId) }
     fun replaceScene(snapshot: SceneSnapshot) {
         val m = Mutation(); synchronized(lock) {
@@ -396,6 +483,128 @@ object BoardEngine {
             }
             insertStrokeLocked(rec)
             addDirty(strokeWorldBounds(rec))
+            rec.connectionId?.let { connectionId ->
+                val connection = connections[connectionId]
+                if (connection != null && !connection.locked) {
+                    connections[connectionId] = connection.withLocked(true)
+                    touchedConnections.add(connectionId)
+                }
+            }
+        }
+
+        
+        fun addStrokesBatch(records: List<StrokeRec>) {
+            if (records.size <= 1) {
+                records.firstOrNull()?.let(::addStroke)
+                return
+            }
+            val startedAt = System.nanoTime()
+            val removedRecords = ArrayList<StrokeRec>()
+            val finalWrites = LinkedHashMap<String, StrokeRec>()
+            val lockConnections = LinkedHashSet<String>()
+            var left = Float.POSITIVE_INFINITY
+            var top = Float.POSITIVE_INFINITY
+            var right = Float.NEGATIVE_INFINITY
+            var bottom = Float.NEGATIVE_INFINITY
+            fun includeBounds(rec: StrokeRec) {
+                val card = rec.cardId?.let { cards[it] }
+                val x = card?.x ?: 0f
+                val y = card?.y ?: 0f
+                left = minOf(left, rec.bounds.left + x - STROKE_PAD)
+                top = minOf(top, rec.bounds.top + y - STROKE_PAD)
+                right = maxOf(right, rec.bounds.right + x + STROKE_PAD)
+                bottom = maxOf(bottom, rec.bounds.bottom + y + STROKE_PAD)
+            }
+            for (rec in records) {
+                val existing = strokes[rec.id]
+                if (existing != null && existing.sameGeometry(rec)) continue
+                if (existing != null) {
+                    includeBounds(existing)
+                    moved = true
+                    
+                    strokes.remove(rec.id)
+                    removedRecords.add(existing)
+                }
+                strokes[rec.id] = rec
+                finalWrites.remove(rec.id)
+                finalWrites[rec.id] = rec
+                includeBounds(rec)
+                rec.connectionId?.let(lockConnections::add)
+            }
+            if (finalWrites.isEmpty()) return
+
+            val removeCells = HashMap<Long, MutableSet<String>>()
+            val removeCards = HashMap<String, MutableSet<String>>()
+            for (rec in removedRecords) {
+                val cardId = rec.cardId
+                if (cardId == null) {
+                    forEachCell(rec.bounds) { key ->
+                        removeCells.getOrPut(key) { HashSet() }.add(rec.id)
+                    }
+                } else removeCards.getOrPut(cardId) { HashSet() }.add(rec.id)
+            }
+            for ((key, ids) in removeCells) {
+                val bucket = canvasStrokeGrid[key] ?: continue
+                bucket.removeAll { it in ids }
+                if (bucket.isEmpty()) canvasStrokeGrid.remove(key)
+            }
+            for ((cardId, ids) in removeCards) {
+                val bucket = cardStrokes[cardId] ?: continue
+                bucket.removeAll { it.id in ids }
+                if (bucket.isEmpty()) cardStrokes.remove(cardId)
+            }
+
+            val cellCounts = HashMap<Long, Int>()
+            val cardCounts = HashMap<String, Int>()
+            for (rec in finalWrites.values) {
+                val cardId = rec.cardId
+                if (cardId == null) {
+                    forEachCell(rec.bounds) { key ->
+                        cellCounts[key] = (cellCounts[key] ?: 0) + 1
+                    }
+                } else cardCounts[cardId] = (cardCounts[cardId] ?: 0) + 1
+            }
+            val appendCells = HashMap<Long, ArrayList<String>>(cellCounts.size)
+            val appendCards = HashMap<String, ArrayList<StrokeRec>>(cardCounts.size)
+            for ((key, count) in cellCounts) appendCells[key] = ArrayList(count)
+            for ((cardId, count) in cardCounts) appendCards[cardId] = ArrayList(count)
+            for (rec in finalWrites.values) {
+                val cardId = rec.cardId
+                if (cardId == null) {
+                    forEachCell(rec.bounds) { key -> appendCells[key]?.add(rec.id) }
+                } else appendCards[cardId]?.add(rec)
+            }
+            for ((key, ids) in appendCells) {
+                val bucket = canvasStrokeGrid[key]
+                if (bucket == null) canvasStrokeGrid[key] = ids
+                else {
+                    @Suppress("UNCHECKED_CAST")
+                    (bucket as? java.util.ArrayList<String>)?.ensureCapacity(bucket.size + ids.size)
+                    bucket.addAll(ids)
+                }
+            }
+            for ((cardId, added) in appendCards) {
+                val bucket = cardStrokes[cardId]
+                if (bucket == null) cardStrokes[cardId] = added
+                else {
+                    @Suppress("UNCHECKED_CAST")
+                    (bucket as? java.util.ArrayList<StrokeRec>)?.ensureCapacity(bucket.size + added.size)
+                    bucket.addAll(added)
+                }
+            }
+            for (connectionId in lockConnections) {
+                val connection = connections[connectionId] ?: continue
+                if (!connection.locked) {
+                    connections[connectionId] = connection.withLocked(true)
+                    touchedConnections.add(connectionId)
+                }
+            }
+            if (left.isFinite()) addDirty(RectF(left, top, right, bottom))
+            if (records.size > 128) {
+                val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000.0
+                Log.i(TAG, "[MosaicIndexPerf] strokeBatch requested=${records.size} changed=${finalWrites.size} " +
+                    "cells=${appendCells.size} cards=${appendCards.size} ms=${"%.2f".format(elapsedMs)}")
+            }
         }
 
         fun removeStroke(id: String): StrokeRec? {
@@ -447,7 +656,7 @@ object BoardEngine {
                 nextIds.add(c.id)
                 val previous = connections[c.id]
                 if (previous == null) newConnections.add(c.id)
-                if (previous == null || previous.fromId != c.fromId || previous.toId != c.toId) touchedConnections.add(c.id)
+                if (previous == null || previous.fromId != c.fromId || previous.toId != c.toId || previous.locked != c.locked) touchedConnections.add(c.id)
             }
             for (id in connections.keys) if (id !in nextIds) touchedConnections.add(id)
             connections.clear()
@@ -553,61 +762,116 @@ object BoardEngine {
         var count = 0
         val startedAt = System.nanoTime()
         val m = Mutation()
+        
+        
+        
+        
+        val decoded = ArrayList<() -> Unit>()
+        val pendingStrokes = ArrayList<StrokeRec>()
+        fun flushPendingStrokes() {
+            if (pendingStrokes.isEmpty()) return
+            val batch = pendingStrokes.toList()
+            decoded.add { m.addStrokesBatch(batch) }
+            pendingStrokes.clear()
+        }
+        var applied = false
         try {
             val version = buf.short.toInt()
-            if (version != PROTOCOL_VERSION) {
+            if (version != PROTOCOL_VERSION && version != 4 && version != 3) {
                 Log.w(TAG, "applyOps: unsupported protocol version=$version")
                 return 0
             }
             val opCount = buf.int
+            repeat(opCount) {
+                val op = buf.get().toInt()
+                if (op == OP_ADD_STROKE) {
+                    pendingStrokes.add(readStroke(buf, version))
+                    count += 1
+                    return@repeat
+                }
+                flushPendingStrokes()
+                when (op) {
+                    OP_REMOVE_STROKES -> {
+                        val k = buf.int
+                        val ids = ArrayList<String>(k)
+                        repeat(k) { ids.add(readString(buf)) }
+                        decoded.add { ids.forEach { m.removeStroke(it) } }
+                    }
+                    OP_UPSERT_CARD -> {
+                        val card = readCard(buf)
+                        decoded.add { m.upsertCard(card) }
+                    }
+                    OP_REMOVE_CARDS -> {
+                        val k = buf.int
+                        val ids = ArrayList<String>(k)
+                        repeat(k) { ids.add(readString(buf)) }
+                        decoded.add { ids.forEach { m.removeCard(it) } }
+                    }
+                    OP_SET_WHITEBOARDS -> {
+                        val k = buf.int
+                        val values = ArrayList<WhiteboardRec>(k)
+                        repeat(k) {
+                            val id = readString(buf)
+                            val name = readString(buf)
+                            val x = buf.float
+                            val y = buf.float
+                            val w = buf.float
+                            val h = buf.float
+                            
+                            buf.get()
+                            values.add(WhiteboardRec(id, name, x, y, w, h, false))
+                        }
+                        decoded.add {
+                            val next = LinkedHashMap<String, WhiteboardRec>(values.size)
+                            for (value in values) {
+                                next[value.id] = WhiteboardRec(
+                                    value.id, value.name, value.x, value.y, value.width, value.height,
+                                    whiteboards[value.id]?.current ?: false,
+                                )
+                            }
+                            m.replaceWhiteboards(next)
+                        }
+                    }
+                    OP_SET_SELECTION -> {
+                        val k = buf.int
+                        val ids = ArrayList<String>(k)
+                        repeat(k) { ids.add(readString(buf)) }
+                        decoded.add { m.setSelection(ids) }
+                    }
+                    OP_SET_CONNECTIONS -> {
+                        val k = buf.int
+                        val next = ArrayList<ConnectionRec>(k)
+                        repeat(k) {
+                            val id = readString(buf)
+                            val from = readString(buf)
+                            val to = readString(buf)
+                            val locked = if (version >= 5) buf.get().toInt() != 0 else false
+                            next.add(ConnectionRec(id, from, to, locked))
+                        }
+                        decoded.add { m.replaceConnections(next) }
+                    }
+                    else -> throw IllegalStateException("unknown op=$op at ${buf.position()}")
+                }
+                count += 1
+            }
+            flushPendingStrokes()
             synchronized(lock) {
                 try {
-                    repeat(opCount) {
-                        when (val op = buf.get().toInt()) {
-                            OP_ADD_STROKE -> m.addStroke(readStroke(buf))
-                            OP_REMOVE_STROKES -> repeat(buf.int) { m.removeStroke(readString(buf)) }
-                            OP_UPSERT_CARD -> m.upsertCard(readCard(buf))
-                            OP_REMOVE_CARDS -> repeat(buf.int) { m.removeCard(readString(buf)) }
-                            OP_SET_WHITEBOARDS -> {
-                                val k = buf.int
-                                val next = LinkedHashMap<String, WhiteboardRec>(k)
-                                repeat(k) {
-                                    val id = readString(buf)
-                                    val name = readString(buf)
-                                    val x = buf.float
-                                    val y = buf.float
-                                    val w = buf.float
-                                    val h = buf.float
-                                    
-                                    
-                                    buf.get()
-                                    next[id] = WhiteboardRec(id, name, x, y, w, h, whiteboards[id]?.current ?: false)
-                                }
-                                m.replaceWhiteboards(next)
-                            }
-                            OP_SET_SELECTION -> {
-                                val k = buf.int
-                                val ids = ArrayList<String>(k)
-                                repeat(k) { ids.add(readString(buf)) }
-                                m.setSelection(ids)
-                            }
-                            OP_SET_CONNECTIONS -> {
-                                val k = buf.int
-                                val next = ArrayList<ConnectionRec>(k)
-                                repeat(k) { next.add(ConnectionRec(readString(buf), readString(buf), readString(buf))) }
-                                m.replaceConnections(next)
-                            }
-                            else -> throw IllegalStateException("unknown op=$op at ${buf.position()}")
-                        }
-                        count += 1
-                    }
+                    decoded.forEach { it() }
                 } finally {
-                    
                     m.refreshNecksLocked()
                 }
             }
+            applied = true
         } catch (error: Throwable) {
+            flushPendingStrokes()
             Log.w(TAG, "applyOps: decode failed after $count op(s)", error)
+            if (!applied && decoded.isNotEmpty()) {
+                synchronized(lock) {
+                    runCatching { decoded.forEach { it() } }
+                    m.refreshNecksLocked()
+                }
+            }
             m.invalidateAll()
         }
         m.dispatch()
@@ -686,6 +950,22 @@ object BoardEngine {
     fun connectionBetween(a: String, b: String): ConnectionRec? {
         for (c in connections.values) if (c.links(a, b)) return c
         return null
+    }
+
+    
+    fun connectionAt(worldX: Float, worldY: Float): ConnectionRec? = synchronized(lock) {
+        var best: ConnectionRec? = null
+        var bestArea = Float.POSITIVE_INFINITY
+        for ((id, neck) in necks) {
+            val r = neck.bounds
+            if (worldX < r.left - 8f || worldX > r.right + 8f || worldY < r.top - 8f || worldY > r.bottom + 8f) continue
+            val area = r.width() * r.height()
+            if (area < bestArea) {
+                bestArea = area
+                best = connections[id]
+            }
+        }
+        best
     }
 
     fun connectionsOf(cardId: String, out: MutableList<ConnectionRec>) {
@@ -787,13 +1067,14 @@ object BoardEngine {
         return String(bytes, Charsets.UTF_8)
     }
 
-    private fun readStroke(buf: ByteBuffer): StrokeRec {
+    private fun readStroke(buf: ByteBuffer, version: Int): StrokeRec {
         val id = readString(buf)
         val space = readString(buf)
         val width = buf.float
         val color = buf.int
         val penStyle = buf.short.toInt() and 0xffff
         val sampleScale = buf.float
+        val drawPathWidth = if (version >= 4) buf.int else DrawPathClient.widthArgument(PenStyle.fromObjType(penStyle), width)
         val pointCount = buf.int
         require(pointCount > 0 && pointCount <= 1_000_000)
         val points = FloatArray(pointCount * 2)
@@ -802,8 +1083,8 @@ object BoardEngine {
             points[2*i] = buf.float; points[2*i+1] = buf.float; pressures[i] = buf.float
         }
         require(sampleScale.isFinite() && sampleScale > 0f)
-        PenStyle.fromObjType(penStyle)
-        return StrokeRec(id, space, width, color, points, pressures, penStyle, sampleScale)
+        val drawPathType = PenStyle.normalizeStoredType(penStyle)
+        return StrokeRec(id, space, width, color, points, pressures, drawPathType, sampleScale, drawPathWidth)
     }
 
     private fun readCard(buf: ByteBuffer): CardRec {

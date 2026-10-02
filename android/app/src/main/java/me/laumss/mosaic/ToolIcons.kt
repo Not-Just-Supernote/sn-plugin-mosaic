@@ -63,6 +63,8 @@ object ToolIcons {
 
     
     fun nibDot(c: Canvas,s: Float,p: Paint,radiusU: Float){ c.drawCircle(u(12f,s),u(12f,s),u(radiusU,s),fill(p)) }
+    
+    fun colorSwatch(c: Canvas,s: Float,p: Paint,argb: Int){ c.drawCircle(u(12f,s),u(12f,s),u(7f,s),fill(p).apply { color = argb }); c.drawCircle(u(12f,s),u(12f,s),u(7f,s),p) }
 
     
     fun caret(c: Canvas,s: Float,p: Paint){

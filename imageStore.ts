@@ -8,7 +8,7 @@ import type { Card } from './React/src/types';
 
 
 
-const IMAGE_DIR_NAME = 'images';
+export const IMAGE_DIR_NAME = 'images';
 const IMAGE_FILE_PREFIX = 'img-';
 const IMAGE_FILE_EXT = '.png';
 

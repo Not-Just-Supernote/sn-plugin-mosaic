@@ -45,24 +45,30 @@ class MosaicEinkRefreshModule(
     private var activeMode: Int? = null
     private var modeView: WeakReference<View>? = null
     
-    private var modeOwner: String? = null
+    private val requests = LinkedHashMap<String, Int>()
 
     init {
         instance = WeakReference(this)
     }
 
+    private fun effectiveMode(): Int? =
+        if (requests.containsValue(MODE_DUX)) MODE_DUX else requests.values.lastOrNull()
+
     private fun applyOwned(mode: Int, owner: String) {
-        modeOwner = owner
-        applyRefreshMode(mode)
+        requests.remove(owner)
+        requests[owner] = mode
+        
+        applyRefreshMode(effectiveMode())
     }
 
     private fun resetOwned(owner: String) {
-        if (modeOwner != owner) {
-            Log.i(TAG, "reset skipped owner=$owner current=${modeOwner ?: "none"}")
+        if (requests.remove(owner) == null) {
+            Log.i(TAG, "reset skipped owner=$owner (no request) others=${requests.keys}")
             return
         }
-        modeOwner = null
-        applyRefreshMode(null)
+        val next = effectiveMode()
+        if (next != activeMode) applyRefreshMode(next)
+        else Log.i(TAG, "reset owner=$owner kept mode=${next ?: "reset"} held by ${requests.keys}")
     }
 
     override fun getName(): String = "MosaicEinkRefresh"
@@ -75,16 +81,18 @@ class MosaicEinkRefreshModule(
                 promise.resolve(false)
                 return@runOnUiThread
             }
-            modeOwner = "js"
-            promise.resolve(applyRefreshMode(mode))
+            requests.remove("js")
+            requests["js"] = mode
+            promise.resolve(applyRefreshMode(effectiveMode()))
         }
     }
 
     @ReactMethod
     fun resetRefreshMode(promise: Promise) {
         UiThreadUtil.runOnUiThread {
-            modeOwner = null
-            promise.resolve(applyRefreshMode(null))
+            requests.remove("js")
+            val next = effectiveMode()
+            promise.resolve(if (next != activeMode) applyRefreshMode(next) else true)
         }
     }
 
@@ -156,7 +164,7 @@ class MosaicEinkRefreshModule(
     override fun invalidate() {
         if (instance?.get() === this) instance = null
         UiThreadUtil.runOnUiThread {
-            modeOwner = null
+            requests.clear()
             applyRefreshMode(null)
         }
         super.invalidate()

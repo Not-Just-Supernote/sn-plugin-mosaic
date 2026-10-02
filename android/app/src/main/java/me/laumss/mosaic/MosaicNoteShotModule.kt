@@ -2,11 +2,15 @@ package me.laumss.mosaic
 
 import android.app.ActivityManager
 import android.content.Context
+import android.graphics.Point
 import android.graphics.Rect
+import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.util.SizeF
+import android.view.WindowManager
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -215,7 +219,17 @@ class MosaicNoteShotModule(
                 finishQuery(token, "page unavailable reason=$reason")
                 return@pageCallback
             }
-            host.getElements(app, page, filePath) elementsCallback@{ elementsResponse ->
+            host.getPageSize(app, filePath, page) pageSizeCallback@{ pageSizeResponse ->
+                if (!queryIsActive(token)) return@pageSizeCallback
+                val pageSize = if (pageSizeResponse.isSuccess) {
+                    pageSizeResponse.getResult(SizeF::class.java)
+                } else null
+                if (pageSize == null || pageSize.width <= 0f || pageSize.height <= 0f) {
+                    finishQuery(token, "page size unavailable page=$page reason=$reason")
+                    return@pageSizeCallback
+                }
+                val displaySize = currentDisplaySize()
+                host.getElements(app, page, filePath) elementsCallback@{ elementsResponse ->
                 if (!queryIsActive(token)) return@elementsCallback
                 val cachePath = if (elementsResponse.isSuccess) elementsResponse.getResult(String::class.java) else null
                 if (cachePath.isNullOrEmpty()) {
@@ -236,7 +250,7 @@ class MosaicNoteShotModule(
                     }
                 Log.i(
                     TAG,
-                    "scan page=$page reason=$reason pictures=${pictures.joinToString(prefix = "[", postfix = "]") { "${it.key}@${it.element.picture.rect}:${it.basename}" }}",
+                    "scan page=$page pageSize=${pageSize.width}x${pageSize.height} display=${displaySize.x}x${displaySize.y} reason=$reason pictures=${pictures.joinToString(prefix = "[", postfix = "]") { "${it.key}@${it.element.picture.rect}:${it.basename}" }}",
                 )
                 val resolved = resolveRegistry(app, filePath, page, pictures)
                 if (!queryIsActive(token)) {
@@ -255,12 +269,10 @@ class MosaicNoteShotModule(
                     val meta = legacy?.let { ResolvedMeta(it, false) } ?: resolved[picture.key]
                     val rect = picture.element.picture.rect
                     if (meta == null || rect == null) continue
+                    val screenRect = pictureRectToScreen(rect, picture.element, pageSize, displaySize)
+                    if (screenRect == null) continue
                     val screen = titleHotspotRect(
-                        rect.left.toFloat(),
-                        rect.top.toFloat(),
-                        rect.right.toFloat(),
-                        rect.bottom.toFloat(),
-                        meta.json,
+                        screenRect.left, screenRect.top, screenRect.right, screenRect.bottom, meta.json,
                     )
                     Log.i(
                         TAG,
@@ -292,8 +304,58 @@ class MosaicNoteShotModule(
                         Log.i(TAG, "show gated visible=$boardVisible foreground=${isNotePageForeground()}")
                     }
                 }
+                }
             }
         }
+    }
+
+    private fun currentDisplaySize(): Point {
+        val point = Point()
+        try {
+            val manager = reactApplicationContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+            manager?.defaultDisplay?.getRealSize(point)
+        } catch (error: Throwable) {
+            Log.w(TAG, "display size read failed: $error")
+        }
+        if (point.x <= 0 || point.y <= 0) {
+            point.x = reactApplicationContext.resources.displayMetrics.widthPixels
+            point.y = reactApplicationContext.resources.displayMetrics.heightPixels
+        }
+        return point
+    }
+
+    private fun emrPointToPage(
+        x: Float,
+        y: Float,
+        pageSize: SizeF,
+        maxX: Int,
+        maxY: Int,
+    ): Pair<Float, Float>? {
+        if (pageSize.width <= 1f || pageSize.height <= 1f || maxX <= 0 || maxY <= 0) return null
+        val sourceX = x / (maxX.toFloat() / (pageSize.height - 1f))
+        val sourceY = y / (maxY.toFloat() / (pageSize.width - 1f))
+        return pageSize.width - 1f - sourceY to sourceX
+    }
+
+    private fun pictureRectToScreen(
+        rect: Rect,
+        element: Element,
+        pageSize: SizeF,
+        displaySize: Point,
+    ): RectF? {
+        val corners = listOf(
+            emrPointToPage(rect.left.toFloat(), rect.top.toFloat(), pageSize, element.maxX, element.maxY),
+            emrPointToPage(rect.right.toFloat(), rect.top.toFloat(), pageSize, element.maxX, element.maxY),
+            emrPointToPage(rect.left.toFloat(), rect.bottom.toFloat(), pageSize, element.maxX, element.maxY),
+            emrPointToPage(rect.right.toFloat(), rect.bottom.toFloat(), pageSize, element.maxX, element.maxY),
+        )
+        if (corners.any { it == null } || displaySize.x <= 0 || displaySize.y <= 0) return null
+        val points = corners.filterNotNull()
+        val left = points.minOf { it.first } * displaySize.x / pageSize.width
+        val top = points.minOf { it.second } * displaySize.y / pageSize.height
+        val right = points.maxOf { it.first } * displaySize.x / pageSize.width
+        val bottom = points.maxOf { it.second } * displaySize.y / pageSize.height
+        return RectF(left, top, right, bottom)
     }
 
     private fun beginQuery(allowShow: Boolean, reason: String): Long? {

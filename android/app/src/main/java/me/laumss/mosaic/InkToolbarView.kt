@@ -10,6 +10,8 @@ import android.widget.LinearLayout
 class InkToolbar(context: android.content.Context) : LinearLayout(context) {
     var onPenStyle: (PenStyle, Float) -> Unit = { _, _ -> }
     
+    var onMarkerInk: (MarkerInk) -> Unit = {}
+    
     var onTool: (String) -> Unit = {}
     var onUndo: () -> Unit = {}
     var onRedo: () -> Unit = {}
@@ -22,11 +24,22 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
     
     var onNibWidthRequest: (cellLeft: Int, cellWidth: Int) -> Unit = { _, _ -> }
 
-    private val widths = PenPopup.WIDTHS
+    private fun widthsFor(style: PenStyle): FloatArray =
+        when (style) {
+            PenStyle.BRUSH -> PenPopup.BRUSH_WIDTHS
+            PenStyle.MARKER -> PenPopup.MARKER_WIDTHS
+            else -> PenPopup.WIDTHS
+        }
+    private fun labelsFor(style: PenStyle): Array<String> =
+        when (style) {
+            PenStyle.BRUSH -> PenPopup.BRUSH_LABELS
+            PenStyle.MARKER -> PenPopup.MARKER_LABELS
+            else -> PenPopup.LABELS
+        }
 
     companion object {
         
-        val NIBS = listOf(PenStyle.PEN, PenStyle.PENCIL, PenStyle.FIXED)
+        val NIBS = listOf(PenStyle.PEN, PenStyle.BRUSH, PenStyle.MARKER)
         
         const val BASE_CELL_W_DP = 96f
         const val BASE_CELL_H_DP = 104f
@@ -54,7 +67,7 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
     private lateinit var shapeCell: IconCell
     private var selectedStyle = PenStyle.PEN
     
-    private val widthIndexByStyle = HashMap<PenStyle, Int>().apply { NIBS.forEach { put(it, PenPopup.DEFAULT_INDEX) } }
+    private val widthIndexByStyle = HashMap<PenStyle, Int>().apply { NIBS.forEach { put(it, PenPopup.defaultIndex(it)) } }
     private var touchEnabled = false
     private var selectBelowActive = false
     
@@ -62,9 +75,25 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
     private val density get() = resources.displayMetrics.density
 
     
+    fun cancelTransientPresses() {
+        styleCells.values.forEach { it.cancelPress() }
+        toolCells.values.forEach { it.cancelPress() }
+        touchCell.cancelPress()
+        moreCell.cancelPress()
+        selectBelowCell.cancelPress()
+        shapeCell.cancelPress()
+    }
+
+    
     private val selectedWidthIndex: Int get() = widthIndexByStyle[selectedStyle] ?: PenPopup.DEFAULT_INDEX
-    val selectedWidth: Float get() = widths[selectedWidthIndex]
+    val selectedWidth: Float get() = widthsFor(selectedStyle)[selectedWidthIndex]
+    val widthCount: Int get() = widthsFor(selectedStyle).size
     val widthIndex: Int get() = selectedWidthIndex
+    
+    val markerSelected: Boolean get() = selectedStyle == PenStyle.MARKER
+    
+    var markerInk: MarkerInk = MarkerInk.BLACK
+        private set
 
     init {
         orientation = HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL; setBackgroundColor(Color.WHITE)
@@ -76,7 +105,13 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
         add(selectBelowCell)
         NIBS.forEach { style ->
             
-            val cell = IconCell(context, { c,s,p -> when (style) { PenStyle.BRUSH -> ToolIcons.brush(c,s,p); PenStyle.FIXED -> ToolIcons.tech(c,s,p); PenStyle.PENCIL -> ToolIcons.pencil(c,s,p); else -> ToolIcons.pen(c,s,p) } }, nibBadge = { if (activeTool == null && selectedStyle == style) PenPopup.LABELS[widthIndexByStyle[style] ?: PenPopup.DEFAULT_INDEX] else "" }) {
+            val cell = IconCell(context, { c,s,p -> when (style) { PenStyle.BRUSH -> ToolIcons.tech(c,s,p); PenStyle.MARKER -> ToolIcons.tech(c,s,p); else -> ToolIcons.pen(c,s,p) } }, nibBadge = {
+                when {
+                    activeTool != null || selectedStyle != style -> ""
+                    style == PenStyle.MARKER -> markerInk.badge
+                    else -> labelsFor(style)[widthIndexByStyle[style] ?: PenPopup.DEFAULT_INDEX]
+                }
+            }) {
                 
                 if (activeTool == null && selectedStyle == style) {
                     styleCells[style]?.let { onNibWidthRequest(it.left, it.width) }
@@ -85,7 +120,7 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
                 selectedStyle = style
                 returnToWrite()
                 refreshSelection()
-                onPenStyle(style, widths[selectedWidthIndex])
+                onPenStyle(style, widthsFor(style)[widthIndexByStyle[style] ?: PenPopup.DEFAULT_INDEX])
             }
             styleCells[style] = cell
             add(cell)
@@ -125,13 +160,27 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
 
     
     fun setWidthIndex(index: Int) {
+        val widths = widthsFor(selectedStyle)
         if (index !in widths.indices || index == selectedWidthIndex) return
         widthIndexByStyle[selectedStyle] = index
         returnToWrite()
         refreshSelection()
         
         styleCells.values.forEach { it.invalidate() }
+        android.util.Log.i("MosaicInkToolbar", "width selected style=${selectedStyle.name} index=$index stdWidth=${widths[index]}")
         onPenStyle(selectedStyle, widths[index])
+    }
+
+    
+    fun setMarkerInk(ink: MarkerInk) {
+        if (ink == markerInk) return
+        markerInk = ink
+        returnToWrite()
+        refreshSelection()
+        
+        styleCells[PenStyle.MARKER]?.invalidate()
+        android.util.Log.i("MosaicInkToolbar", "marker ink selected ink=${ink.name}")
+        onMarkerInk(ink)
     }
 
     
@@ -194,6 +243,7 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
         var active = false
             set(value) { if (field != value) { field = value; invalidate() } }
         private var down=false
+        private var downY = 0f
         
         private val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style=Paint.Style.STROKE
@@ -203,6 +253,12 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
         }
         private val badgeText=Paint(Paint.ANTI_ALIAS_FLAG).apply { isFakeBoldText=true; textAlign=Paint.Align.RIGHT }
         private val badgeTri=Paint(Paint.ANTI_ALIAS_FLAG)
+
+        fun cancelPress() {
+            if (!down) return
+            down = false
+            invalidate()
+        }
         override fun onDraw(c: Canvas){
             
             
@@ -235,6 +291,38 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
             val ty = height - pad - badgeText.descent()
             c.drawText(label, tx, ty, badgeText)
         }
-        override fun onTouchEvent(e: android.view.MotionEvent): Boolean { when(e.actionMasked){android.view.MotionEvent.ACTION_DOWN->{down=true;invalidate();return true};android.view.MotionEvent.ACTION_UP->{down=false;invalidate();if(e.x>=0&&e.y>=0&&e.x<width&&e.y<height)click();return true};android.view.MotionEvent.ACTION_CANCEL->{down=false;invalidate();return true}};return true }
+        override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    down = true
+                    downY = e.y
+                    invalidate()
+                    return true
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    
+                    
+                    
+                    if (down && e.y - downY > 8f) {
+                        down = false
+                        invalidate()
+                    }
+                    return true
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    val wasDown = down
+                    down = false
+                    invalidate()
+                    if (wasDown && e.x >= 0 && e.y >= 0 && e.x < width && e.y < height) click()
+                    return true
+                }
+                android.view.MotionEvent.ACTION_CANCEL -> {
+                    down = false
+                    invalidate()
+                    return true
+                }
+            }
+            return true
+        }
     }
 }

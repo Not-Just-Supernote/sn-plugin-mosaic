@@ -1,6 +1,6 @@
 import { NativeModules } from 'react-native';
 import {
-  unpackStrokePoints,
+  STROKE_ENCODING_F32X3,
   type InkStroke,
   type WhiteboardAnchor,
 } from './React/src/boardFormat';
@@ -12,7 +12,7 @@ import { notePathFor } from './noteStore';
 
 
 
-const PROTOCOL_VERSION = 3;
+const PROTOCOL_VERSION = 5;
 
 const OP_ADD_STROKE = 1;
 const OP_REMOVE_STROKES = 2;
@@ -98,6 +98,13 @@ class OpsWriter {
     this.offset += 4;
   }
 
+  
+  raw(data: Uint8Array) {
+    this.ensure(data.byteLength);
+    this.bytes.set(data, this.offset);
+    this.offset += data.byteLength;
+  }
+
   str(value: string) {
     const encoded = utf8Encode(value);
     const length = Math.min(encoded.length, 0xffff);
@@ -163,12 +170,26 @@ function writeStroke(writer: OpsWriter, stroke: InkStroke) {
   
   writer.u16(stroke.pen);
   writer.f32(stroke.sampleScale);
-  const points = unpackStrokePoints(stroke.points);
-  writer.u32(points.length);
-  for (const point of points) {
-    writer.f32(point.x);
-    writer.f32(point.y);
-    writer.f32(point.p);
+  writer.u32(stroke.drawPathWidth ?? Math.round(Math.max(0.5, Math.min(40, stroke.width)) * 100));
+  const points = stroke.points;
+  
+  
+  
+  
+  if ((stroke.encoding === undefined || stroke.encoding === STROKE_ENCODING_F32X3)
+      && points.byteLength % 12 === 0) {
+    writer.u32(points.byteLength / 12);
+    writer.raw(points);
+    return;
+  }
+  const count = Math.floor(points.byteLength / 12);
+  writer.u32(count);
+  const view = new DataView(points.buffer, points.byteOffset, points.byteLength);
+  for (let index = 0; index < count; index += 1) {
+    const offset = index * 12;
+    writer.f32(view.getFloat32(offset, true));
+    writer.f32(view.getFloat32(offset + 4, true));
+    writer.f32(view.getFloat32(offset + 8, true));
   }
 }
 
@@ -239,9 +260,32 @@ export class EngineSyncSession {
   }
 
   
+  refreshAssetCardPaths(cards: Card[]) {
+    if (MosaicBoardEngine === undefined) return;
+    const assetCards = cards.filter(card =>
+      (card.kind === 'note' && Boolean(card.noteRef)) ||
+      (card.kind === 'image' && Boolean(card.imageRef)),
+    );
+    if (assetCards.length === 0) return;
+    const writer = new OpsWriter();
+    for (const card of assetCards) writeCard(writer, card);
+    MosaicBoardEngine.applyOps(writer.finish());
+    for (const card of assetCards) this.lastCards.set(card.id, card);
+    this.invalidateImages(
+      assetCards
+        .map(card => card.kind === 'note' ? notePathFor(card.noteRef) : imagePathFor(card.imageRef))
+        .filter(path => path.length > 0),
+    );
+  }
+
+  
 
   acknowledgeStroke(stroke: InkStroke) {
     this.lastInk.set(stroke.id, stroke);
+  }
+
+  acknowledgeStrokes(strokes: InkStroke[]) {
+    for (const stroke of strokes) this.lastInk.set(stroke.id, stroke);
   }
 
   acknowledgeStrokesRemoved(ids: string[]) {
@@ -263,16 +307,36 @@ export class EngineSyncSession {
     if (MosaicBoardEngine === undefined) return;
     const writer = new OpsWriter();
     const nextIds = new Set<string>();
+    let changedCount = 0;
+    let changedPointBytes = 0;
     for (const stroke of next) {
       nextIds.add(stroke.id);
-      if (this.lastInk.get(stroke.id) !== stroke) writeStroke(writer, stroke);
+      if (this.lastInk.get(stroke.id) !== stroke) {
+        writeStroke(writer, stroke);
+        changedCount += 1;
+        changedPointBytes += stroke.points.byteLength;
+      }
     }
     const removed: string[] = [];
     for (const id of this.lastInk.keys()) {
       if (!nextIds.has(id)) removed.push(id);
     }
     if (removed.length > 0) writeIdList(writer, OP_REMOVE_STROKES, removed);
-    if (writer.count > 0) MosaicBoardEngine.applyOps(writer.finish());
+    if (writer.count > 0) {
+      const encodeStartedAt = Date.now();
+      const payload = writer.finish();
+      const encodeMs = Date.now() - encodeStartedAt;
+      const applyStartedAt = Date.now();
+      MosaicBoardEngine.applyOps(payload);
+      const applyMs = Date.now() - applyStartedAt;
+      if (changedCount >= 64 || changedPointBytes >= 256 * 1024) {
+        console.log(
+          `[MosaicEngineSync] ink transfer ops=${writer.count} changed=${changedCount} `
+          + `removed=${removed.length} pointsBytes=${changedPointBytes} `
+          + `base64Bytes=${payload.length} encodeMs=${encodeMs} applyMs=${applyMs}`,
+        );
+      }
+    }
     this.lastInk = new Map(next.map(stroke => [stroke.id, stroke]));
   }
 
@@ -297,7 +361,7 @@ export class EngineSyncSession {
   
   syncConnections(connections: Connection[]) {
     if (MosaicBoardEngine === undefined) return;
-    const signature = connections.map(c => `${c.id}:${c.fromCardId}:${c.toCardId}`).join(';');
+    const signature = connections.map(c => `${c.id}:${c.fromCardId}:${c.toCardId}:${c.locked === true ? 1 : 0}`).join(';');
     if (signature === this.lastConnectionsSignature) return;
     this.lastConnectionsSignature = signature;
     const writer = new OpsWriter();
@@ -307,6 +371,7 @@ export class EngineSyncSession {
       writer.str(c.id);
       writer.str(c.fromCardId);
       writer.str(c.toCardId);
+      writer.u8(c.locked === true ? 1 : 0);
     }
     MosaicBoardEngine.applyOps(writer.finish());
   }

@@ -51,13 +51,20 @@ object Shapes {
         val t = min(y0, y1); val b = max(y0, y1)
         return when (kind) {
             Kind.RECT -> floatArrayOf(l, t, r, t, r, b, l, b, l, t)
-            Kind.TRIANGLE -> {
-                val cx = (l + r) / 2f
-                floatArrayOf(cx, t, r, b, l, b, cx, t)
-            }
+            Kind.TRIANGLE -> triangleAlong(x0, y0, x1, y1)
             Kind.ELLIPSE -> ellipseAround((l + r) / 2f, (t + b) / 2f, (r - l) / 2f, (b - t) / 2f)
             Kind.LINE -> floatArrayOf(x0, y0, x1, y1)
         }
+    }
+
+    
+    private fun triangleAlong(x0: Float, y0: Float, x1: Float, y1: Float): FloatArray {
+        val dx = x1 - x0; val dy = y1 - y0
+        val len = hypot(dx, dy)
+        if (len <= 1e-3f) return floatArrayOf(x0, y0, x1, y1, x1, y1, x0, y0)
+        
+        val hx = -dy / 2f; val hy = dx / 2f
+        return floatArrayOf(x0, y0, x1 + hx, y1 + hy, x1 - hx, y1 - hy, x0, y0)
     }
 
     private fun ellipseAround(cx: Float, cy: Float, rx: Float, ry: Float): FloatArray {
@@ -115,40 +122,36 @@ object Shapes {
     
     fun toTriangle(tri: FloatArray, form: TriangleForm): FloatArray {
         if (tri.size < 6) return tri
-        val v = arrayOf(
-            floatArrayOf(tri[0], tri[1]), floatArrayOf(tri[2], tri[3]), floatArrayOf(tri[4], tri[5]),
-        )
         
-        var apex = 0
-        var best = -1f
-        for (i in 0 until 3) {
-            val a = v[(i + 1) % 3]; val b = v[(i + 2) % 3]
-            val len = hypot(b[0] - a[0], b[1] - a[1])
-            if (len > best) { best = len; apex = i }
-        }
-        val a = v[(apex + 1) % 3]; val b = v[(apex + 2) % 3]; val c = v[apex]
-        val abx = b[0] - a[0]; val aby = b[1] - a[1]
-        val len = hypot(abx, aby)
+        
+        
+        
+        val legacy = tri[1] == tri[3] && tri[0] < tri[2] && tri[5] < tri[1] && tri[4] != tri[2]
+        val apexIndex = if (legacy) 2 else 0
+        val ax = tri[apexIndex * 2]; val ay = tri[apexIndex * 2 + 1]
+        val b1x = tri[((apexIndex + 1) % 3) * 2]; val b1y = tri[((apexIndex + 1) % 3) * 2 + 1]
+        val b2x = tri[((apexIndex + 2) % 3) * 2]; val b2y = tri[((apexIndex + 2) % 3) * 2 + 1]
+        val ex = b2x - b1x; val ey = b2y - b1y
+        val len = hypot(ex, ey)
         if (len <= 1e-3f) return tri
-        var nx = -aby / len; var ny = abx / len
-        val mx = (a[0] + b[0]) / 2f; val my = (a[1] + b[1]) / 2f
-        var h = (c[0] - mx) * nx + (c[1] - my) * ny
+        val mx = (b1x + b2x) / 2f; val my = (b1y + b2y) / 2f
+        
+        var nx = -ey / len; var ny = ex / len
+        var h = (ax - mx) * nx + (ay - my) * ny
         if (h < 0f) { nx = -nx; ny = -ny; h = -h }
         if (h <= 1e-3f) h = len / 2f
-        val nc = when (form) {
-            TriangleForm.ISOSCELES -> floatArrayOf(mx + nx * h, my + ny * h)
+        val (px, py) = when (form) {
+            TriangleForm.ISOSCELES -> mx + nx * h to my + ny * h
             TriangleForm.EQUILATERAL -> {
                 val eh = len * sqrt(3f) / 2f
-                floatArrayOf(mx + nx * eh, my + ny * eh)
+                mx + nx * eh to my + ny * eh
             }
             TriangleForm.RIGHT -> {
-                val t = ((c[0] - a[0]) * abx + (c[1] - a[1]) * aby) / (len * len)
-                val base = if (t < 0.5f) a else b
-                floatArrayOf(base[0] + nx * h, base[1] + ny * h)
+                val t = ((ax - b1x) * ex + (ay - b1y) * ey) / (len * len)
+                if (t < 0.5f) b1x + nx * h to b1y + ny * h else b2x + nx * h to b2y + ny * h
             }
         }
-        v[apex] = nc
-        return floatArrayOf(v[0][0], v[0][1], v[1][0], v[1][1], v[2][0], v[2][1], v[0][0], v[0][1])
+        return floatArrayOf(px, py, b1x, b1y, b2x, b2y, px, py)
     }
 
     

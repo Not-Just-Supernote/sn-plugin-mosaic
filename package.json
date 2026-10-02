@@ -15,7 +15,7 @@
     "react-native": "0.79.2",
     "react-native-fs": "^2.20.0",
     "react-native-svg": "^15.15.5",
-    "sn-plugin-lib": "^0.1.65"
+    "sn-plugin-lib": "^0.1.68"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

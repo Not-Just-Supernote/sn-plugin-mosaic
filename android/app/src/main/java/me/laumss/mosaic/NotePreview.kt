@@ -15,6 +15,9 @@ import kotlin.math.ceil
 
 
 object NotePreview {
+    
+    private const val PREVIEW_STROKE_SCALE = 2f
+
     fun write(file: File, doc: ScrollingDocument) {
         val width = ceil(doc.contentWidth.toDouble()).toInt(); val height = ceil(doc.contentHeight.toDouble()).toInt()
         val atomic = AtomicFile(file); val stream = atomic.startWrite()
@@ -47,7 +50,11 @@ object NotePreview {
                         val count = minOf(256, height-top); val canvas = Canvas(bitmap)
                         bitmap.eraseColor(0)
                         canvas.translate(0f, -top.toFloat())
-                        for (s in doc.strokes) if (s.bounds.bottom+s.width >= top && s.bounds.top-s.width < top+count) TchRaster.draw(canvas,s,paint)
+                        val visible = doc.strokes.filter { s ->
+                            val pad = s.width * PREVIEW_STROKE_SCALE
+                            s.bounds.bottom + pad >= top && s.bounds.top - pad < top + count
+                        }
+                        TchRaster.drawLayer(canvas, visible, paint, widthScale = PREVIEW_STROKE_SCALE)
                         for (y in 0 until count) {
                             bitmap.getPixels(pixels,0,width,0,y,width,1)
                             row[0]=0

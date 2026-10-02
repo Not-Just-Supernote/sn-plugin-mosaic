@@ -15,7 +15,6 @@ object NeckGeometry {
     private const val SHRINK_CLAMP_MAX = 0.4f
     private const val HANDLE_DISTANCE = 100f
     private const val HANDLE_SCALE_NEAR = 0.25f
-    private const val HANDLE_SCALE_FAR = 1f
     private const val TRANSITION_RAMP = 5f
     private const val INSET = 2f
     private const val EPS = 1e-7f
@@ -165,42 +164,60 @@ object NeckGeometry {
         val bHigh = insetTowardCenter(b, anchorBHigh.point)
 
         
-        val chordA = dist(aHigh, aLow)
-        val chordB = dist(bHigh, bLow)
-        val handle = lerp(HANDLE_SCALE_NEAR, HANDLE_SCALE_FAR, min(1f, gap / HANDLE_DISTANCE)) * (chordA + chordB) / 4f
-
-        val cpALow = aLow + anchorALow.dir * handle
-        val cpBLow = bLow + anchorBLow.dir * handle
-        val cpAHigh = aHigh + anchorAHigh.dir * handle
-        val cpBHigh = bHigh + anchorBHigh.dir * handle
+        
+        fun orderByPerpendicular(p: V, q: V): Array<V> {
+            val pProjection = p.x * perpendicular.x + p.y * perpendicular.y
+            val qProjection = q.x * perpendicular.x + q.y * perpendicular.y
+            return if (pProjection <= qProjection) arrayOf(p, q) else arrayOf(q, p)
+        }
+        val orderedA = orderByPerpendicular(aLow, aHigh)
+        val orderedB = orderByPerpendicular(bLow, bHigh)
+        val aLowFinal = orderedA[0]
+        val aHighFinal = orderedA[1]
+        val bLowFinal = orderedB[0]
+        val bHighFinal = orderedB[1]
 
         
         
-        val wallLowLength = dist(aLow, bLow)
-        val wallHighLength = dist(aHigh, bHigh)
+        
+        
+        val wallT = lerp(HANDLE_SCALE_NEAR, 0.42f, min(1f, gap / HANDLE_DISTANCE))
+        val cpALow = aLowFinal + (bLowFinal - aLowFinal) * wallT
+        val cpBLow = bLowFinal + (aLowFinal - bLowFinal) * wallT
+        val cpAHigh = aHighFinal + (bHighFinal - aHighFinal) * wallT
+        val cpBHigh = bHighFinal + (aHighFinal - bHighFinal) * wallT
+
+        
+        
+        val chordA = dist(aHighFinal, aLowFinal)
+        val chordB = dist(bHighFinal, bLowFinal)
+        val wallLowLength = dist(aLowFinal, bLowFinal)
+        val wallHighLength = dist(aHighFinal, bHighFinal)
         val wallTotal = max(1e-6f, wallLowLength + wallHighLength)
         val lowRoundness = 0.78f + 0.44f * (wallHighLength / wallTotal)
         val highRoundness = 0.78f + 0.44f * (wallLowLength / wallTotal)
         val capLow = min(CORNER_RADIUS * 1.35f * lowRoundness, chordB * 0.32f)
         val capHigh = min(CORNER_RADIUS * 1.35f * highRoundness, chordB * 0.32f)
-        val lowTangent = normalize(bLow - cpBLow)
-        val highTangent = normalize(cpBHigh - bHigh)
-        val capCpLow = bLow + lowTangent * capLow
-        val capCpHigh = bHigh - highTangent * capHigh
+        
+        
+        
+        
+        val bCapDir = normalize(bHighFinal - bLowFinal)
+        val capCpLow = bLowFinal + bCapDir * capLow
+        val capCpHigh = bHighFinal - bCapDir * capHigh
         val aCap = min(CORNER_RADIUS * 1.35f, chordA * 0.32f)
-        val aHighTangent = normalize(aHigh - cpAHigh)
-        val aLowTangent = normalize(cpALow - aLow)
-        val aCapCpHigh = aHigh + aHighTangent * aCap
-        val aCapCpLow = aLow - aLowTangent * aCap
+        val aCapDir = normalize(aLowFinal - aHighFinal)
+        val aCapCpHigh = aHighFinal + aCapDir * aCap
+        val aCapCpLow = aLowFinal - aCapDir * aCap
 
         val path = Path()
-        path.moveTo(aLow.x, aLow.y)
-        path.cubicTo(cpALow.x, cpALow.y, cpBLow.x, cpBLow.y, bLow.x, bLow.y)
-        path.cubicTo(capCpLow.x, capCpLow.y, capCpHigh.x, capCpHigh.y, bHigh.x, bHigh.y)
-        path.cubicTo(cpBHigh.x, cpBHigh.y, cpAHigh.x, cpAHigh.y, aHigh.x, aHigh.y)
-        path.cubicTo(aCapCpHigh.x, aCapCpHigh.y, aCapCpLow.x, aCapCpLow.y, aLow.x, aLow.y)
+        path.moveTo(aLowFinal.x, aLowFinal.y)
+        path.cubicTo(cpALow.x, cpALow.y, cpBLow.x, cpBLow.y, bLowFinal.x, bLowFinal.y)
+        path.cubicTo(capCpLow.x, capCpLow.y, capCpHigh.x, capCpHigh.y, bHighFinal.x, bHighFinal.y)
+        path.cubicTo(cpBHigh.x, cpBHigh.y, cpAHigh.x, cpAHigh.y, aHighFinal.x, aHighFinal.y)
+        path.cubicTo(aCapCpHigh.x, aCapCpHigh.y, aCapCpLow.x, aCapCpLow.y, aLowFinal.x, aLowFinal.y)
         path.close()
-        if (!pathIsFinite(aLow, bLow, bHigh, aHigh)) return null
+        if (!pathIsFinite(aLowFinal, bLowFinal, bHighFinal, aHighFinal)) return null
         return path
     }
 

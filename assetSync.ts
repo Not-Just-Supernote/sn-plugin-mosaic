@@ -2,6 +2,9 @@ import RNFS from 'react-native-fs';
 import type { Card } from './React/src/types';
 import { imagePathFor } from './imageStore';
 import { notePathFor } from './noteStore';
+import { plainHttp } from './rawNet';
+import { bytesToBase64 } from './React/src/base64';
+import { encodeUtf8 } from './React/src/utf8';
 
 
 
@@ -35,9 +38,17 @@ export class AssetSync {
 
   
   constructor(
-    private readonly site: string,
+    private site: string,
     private readonly onDownloaded: (paths: string[]) => void,
   ) {}
+
+  
+  setSite(site: string) {
+    if (site === this.site) return;
+    this.site = site;
+    this.uploaded.clear();
+    this.missingAt.clear();
+  }
 
   schedule(boardId: string, cards: Card[]) {
     if (!boardId) return;
@@ -112,13 +123,17 @@ export class AssetSync {
   private async upload(boardId: string, ref: string, path: string): Promise<boolean> {
     try {
       const pngBase64 = await RNFS.readFile(path, 'base64');
-      const response = await fetch(`${this.site}api/board/assets/${boardId}/${encodeURIComponent(ref)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pngBase64 }),
-      });
-      if (!response.ok) {
-        console.log(`[MosaicAsset] upload failed ref=${ref} http=${response.status}`);
+      const url = `${this.site}api/board/assets/${boardId}/${encodeURIComponent(ref)}`;
+      const body = JSON.stringify({ pngBase64 });
+      let status: number;
+      const raw = await plainHttp('PUT', url, { contentType: 'application/json', bodyBase64: bytesToBase64(encodeUtf8(body)) });
+      if (raw !== null) status = raw.status;
+      else {
+        const response = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body });
+        status = response.status;
+      }
+      if (status < 200 || status >= 300) {
+        console.log(`[MosaicAsset] upload failed ref=${ref} http=${status}`);
         return false;
       }
       return true;
@@ -132,11 +147,17 @@ export class AssetSync {
     const tmp = `${path}.download`;
     try {
       const url = `${this.site}api/board/assets/${boardId}/${encodeURIComponent(ref)}`;
-      const { promise } = RNFS.downloadFile({ fromUrl: url, toFile: tmp });
-      const result = await promise;
-      if (result.statusCode !== 200) {
-        await RNFS.unlink(tmp).catch(() => {});
-        return false;
+      const raw = await plainHttp('GET', url);
+      if (raw !== null) {
+        if (raw.status !== 200) return false;
+        await RNFS.writeFile(tmp, raw.bodyBase64, 'base64');
+      } else {
+        const { promise } = RNFS.downloadFile({ fromUrl: url, toFile: tmp });
+        const result = await promise;
+        if (result.statusCode !== 200) {
+          await RNFS.unlink(tmp).catch(() => {});
+          return false;
+        }
       }
       
       await RNFS.moveFile(tmp, path);

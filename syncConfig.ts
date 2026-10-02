@@ -4,9 +4,13 @@ import { NativePluginManager } from 'sn-plugin-lib';
 export interface MosaicSyncConfig {
   serverUrl: string;
   boardId: string;
+  
+  enabled: boolean;
+  
+  localAddress: string;
 }
 
-const CONFIG_FILENAME = 'sync-config.json';
+export const CONFIG_FILENAME = 'sync-config.json';
 
 async function configPath(): Promise<string> {
   const pluginDir = await NativePluginManager.getPluginDirPath();
@@ -15,11 +19,13 @@ async function configPath(): Promise<string> {
 
 export async function loadSyncConfig(): Promise<MosaicSyncConfig> {
   const path = await configPath();
-  if (!(await RNFS.exists(path))) return { serverUrl: '', boardId: '' };
+  if (!(await RNFS.exists(path))) return { serverUrl: '', boardId: '', enabled: false, localAddress: '' };
   const parsed = JSON.parse(await RNFS.readFile(path, 'utf8')) as Partial<MosaicSyncConfig>;
   return {
     serverUrl: parsed.serverUrl?.trim() ?? '',
     boardId: parsed.boardId?.trim() ?? '',
+    enabled: parsed.enabled === true,
+    localAddress: parsed.localAddress?.trim() ?? '',
   };
 }
 

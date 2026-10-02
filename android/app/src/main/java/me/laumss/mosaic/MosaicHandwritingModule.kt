@@ -19,22 +19,22 @@ class MosaicHandwritingModule(
 
     private var inputReader: InputReader? = null
     private var sliderReader: SliderReader? = null
+    private var refreshKeyReader: RefreshKeyReader? = null
 
     override fun getName(): String = "MosaicHandwriting"
 
     @ReactMethod
     fun attachInput(deviceType: Int, promise: Promise) {
         try {
-            if (inputReader == null) {
+            
+            
+            inputReader = InputReader.ensureBoardReader(reactApplicationContext)
+            Log.i(TAG, "attachInput: native board reader reused")
+            if (refreshKeyReader == null) {
                 
-                
-                
-                
-                InputArbiter.reset()
-                val reader = InputReader(reactApplicationContext)
-                reader.start()
-                inputReader = reader
-                Log.i(TAG, "attachInput: reader started")
+                val refresh = RefreshKeyReader()
+                refresh.start()
+                refreshKeyReader = refresh
             }
             if (sliderReader == null && SliderReader.isSupportedDevice(deviceType)) {
                 val slider = SliderReader()
@@ -51,10 +51,12 @@ class MosaicHandwritingModule(
 
     @ReactMethod
     fun detachInput(promise: Promise) {
-        inputReader?.stop()
+        InputReader.releaseBoardReader()
         inputReader = null
         sliderReader?.stop()
         sliderReader = null
+        refreshKeyReader?.stop()
+        refreshKeyReader = null
         InputArbiter.reset()
         
         
@@ -93,4 +95,5 @@ class MosaicHandwritingModule(
             promise.reject("LOCK_STATUSBAR_FAILED", e)
         }
     }
+
 }

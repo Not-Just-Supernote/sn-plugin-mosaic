@@ -1,4 +1,4 @@
-import { DeviceEventEmitter, NativeModules } from 'react-native';
+import { DeviceEventEmitter, Dimensions, NativeModules } from 'react-native';
 import RNFS from 'react-native-fs';
 import {
   PluginCommAPI,
@@ -87,6 +87,12 @@ async function ensurePermission(permission: string, description: string): Promis
   }
 }
 
+
+export async function ensureArchivePermissions(readReason: string, writeReason: string): Promise<boolean> {
+  if (!(await ensurePermission(FILE_READ_PERMISSION, readReason))) return false;
+  return ensurePermission(FILE_WRITE_PERMISSION, writeReason);
+}
+
 export async function ensureNoteShotPermissions(): Promise<boolean> {
   const readGranted = await ensurePermission(
     FILE_READ_PERMISSION,
@@ -159,6 +165,46 @@ function pictureRecords(elements: any[]): PictureRecord[] {
       key: pictureKey(element),
       basename: pathBasename(String(element?.picture?.picturePath ?? '')),
     }));
+}
+
+function emrPointToPage(
+  x: number,
+  y: number,
+  pageWidth: number,
+  pageHeight: number,
+  maxX: number,
+  maxY: number,
+): { x: number; y: number } | null {
+  if (!(pageWidth > 1 && pageHeight > 1 && maxX > 0 && maxY > 0)) return null;
+  const sourceX = x / (maxX / (pageHeight - 1));
+  const sourceY = y / (maxY / (pageWidth - 1));
+  return { x: pageWidth - 1 - sourceY, y: sourceX };
+}
+
+
+function pictureRectToScreen(
+  element: any,
+  pageSize: { width: number; height: number },
+  screenSize: { width: number; height: number },
+): Rect | null {
+  const rect = element?.picture?.rect;
+  const maxX = Number(element?.maxX);
+  const maxY = Number(element?.maxY);
+  if (!rect || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
+  const corners = [
+    emrPointToPage(rect.left, rect.top, pageSize.width, pageSize.height, maxX, maxY),
+    emrPointToPage(rect.right, rect.top, pageSize.width, pageSize.height, maxX, maxY),
+    emrPointToPage(rect.left, rect.bottom, pageSize.width, pageSize.height, maxX, maxY),
+    emrPointToPage(rect.right, rect.bottom, pageSize.width, pageSize.height, maxX, maxY),
+  ];
+  if (corners.some(point => point === null)) return null;
+  const pagePoints = corners.filter((point): point is { x: number; y: number } => point !== null);
+  return {
+    left: Math.min(...pagePoints.map(point => point.x)) * screenSize.width / pageSize.width,
+    top: Math.min(...pagePoints.map(point => point.y)) * screenSize.height / pageSize.height,
+    right: Math.max(...pagePoints.map(point => point.x)) * screenSize.width / pageSize.width,
+    bottom: Math.max(...pagePoints.map(point => point.y)) * screenSize.height / pageSize.height,
+  };
 }
 
 async function resolveRegistryPath(): Promise<string> {
@@ -558,6 +604,13 @@ async function handleNoteTap(x: number, y: number, toolType: number): Promise<vo
     }
     const elements: any[] = elementsRes.result ?? [];
     const pictures = pictureRecords(elements);
+    const pageSizeRes: any = await PluginFileAPI.getPageSize(filePath, page);
+    const pageSize = pageSizeRes?.success && pageSizeRes.result?.width > 0 && pageSizeRes.result?.height > 0
+      ? { width: pageSizeRes.result.width, height: pageSizeRes.result.height }
+      : null;
+    const windowSize = Dimensions.get('window');
+    const screenSize = { width: windowSize.width, height: windowSize.height };
+    if (!pageSize) console.log(`${LOG} tap page size unavailable file=${filePath} page=${page}`);
     const registryMeta = await registryMetaByPicture(filePath, page, pictures);
     let hit: NoteShotMeta | null = null;
     let shotCount = 0;
@@ -567,7 +620,10 @@ async function handleNoteTap(x: number, y: number, toolType: number): Promise<vo
         if (meta === null) continue;
         shotCount++;
         if (hit !== null || !picture.element.picture?.rect) continue;
-        const screenRect = picture.element.picture.rect as Rect;
+        const screenRect = pageSize
+          ? pictureRectToScreen(picture.element, pageSize, screenSize)
+          : null;
+        if (!screenRect) continue;
         const hotspotRect = noteShotHotspotRect(screenRect, meta);
         const contains = rectContains(hotspotRect, x, y, TAP_HIT_PAD_PX);
         console.log(`${LOG} tap test wb=${meta.wbId} key=${picture.key} hotspot=(${hotspotRect.left.toFixed(0)},${hotspotRect.top.toFixed(0)},${hotspotRect.right.toFixed(0)},${hotspotRect.bottom.toFixed(0)}) tap=(${x.toFixed(0)},${y.toFixed(0)}) hit=${contains}`);

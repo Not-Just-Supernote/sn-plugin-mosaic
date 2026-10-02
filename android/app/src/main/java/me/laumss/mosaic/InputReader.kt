@@ -3,12 +3,20 @@ package me.laumss.mosaic
 import android.content.Context
 import android.os.Build
 import android.os.SystemClock
+import android.system.Os
+import android.system.OsConstants
+import android.system.StructPollfd
 import android.text.TextUtils
 import android.util.Log
 import android.view.Surface
+import android.view.MotionEvent
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.ArrayDeque
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 
 
 class InputReader(
@@ -49,6 +57,28 @@ class InputReader(
         private val isA5X2 = TextUtils.equals(Build.BOARD, "A5X2")
 
         @Volatile private var pluginViewVisible = false
+        private val boardReaderLock = Any()
+        @Volatile private var boardReader: InputReader? = null
+
+        
+        @JvmStatic
+        fun ensureBoardReader(context: Context): InputReader = synchronized(boardReaderLock) {
+            boardReader ?: InputReader(context).also {
+                InputArbiter.reset()
+                it.start()
+                boardReader = it
+                Log.i(TAG, "board reader ready from native View lifecycle")
+            }
+        }
+
+        @JvmStatic
+        fun releaseBoardReader() {
+            synchronized(boardReaderLock) {
+                boardReader?.stop()
+                boardReader = null
+                InputArbiter.reset()
+            }
+        }
 
         private data class HostDisplay(val rotation: Int, val width: Int, val height: Int)
 
@@ -66,13 +96,95 @@ class InputReader(
             private set
         @Volatile var penRawPressure = -1
             private set
+        
+        @Volatile var penPressure01 = -1f
+            private set
+        @Volatile private var penPressureUpdatedAtMs = 0L
+        @Volatile private var penPressureMin = 0
+        
+        @Volatile private var penPressureMax = 0
+        private const val PRESSURE_HISTORY_SIZE = 2048
+        
+        private const val PRESSURE_SAMPLE_WAIT_MS = 160L
+        private const val PRESSURE_SAMPLE_MAX_AGE_MS = 160L
+        private val pressureHistory = ArrayDeque<PressureSample>(PRESSURE_HISTORY_SIZE)
+        private val pressureSignal = java.lang.Object()
+        private data class PressureSample(val timeMs: Long, val pressure: Float)
+        
+        @Volatile private var pressureClockOffsetMs = 0L
+        @Volatile private var pressureClockOffsetReady = false
         @Volatile var penRawTiltX = 0
             private set
         @Volatile var penRawTiltY = 0
             private set
 
         fun describePenRaw(): String =
-            "raw=($penRawX,$penRawY) pressure=$penRawPressure tilt=($penRawTiltX,$penRawTiltY)"
+            "raw=($penRawX,$penRawY) pressure=$penRawPressure pressure01=$penPressure01 " +
+                "tilt=($penRawTiltX,$penRawTiltY)"
+
+        
+        @JvmStatic
+        fun pressureForMotionEvent(event: MotionEvent): Float? {
+            return pressureAt(event.eventTime, event.actionMasked == MotionEvent.ACTION_DOWN)
+        }
+
+        @JvmStatic
+        fun pressureForHistoricalEvent(event: MotionEvent, index: Int): Float? {
+            return pressureAt(event.getHistoricalEventTime(index))
+        }
+
+        @JvmStatic
+        fun currentPenPressure(): Float? {
+            val raw = penPressure01
+            val age = SystemClock.uptimeMillis() - penPressureUpdatedAtMs
+            if (!raw.isFinite() || raw < 0f || age !in 0..120L) {
+                Log.w(TAG, "drawPath pressure sample unavailable age=$age raw=$penRawPressure")
+                return null
+            }
+            return raw
+        }
+
+        private fun updatePenPressureRange(min: Int, max: Int) {
+            if (max <= min) return
+            penPressureMin = min
+            penPressureMax = max
+            Log.i(TAG, "pen pressure range min=$min max=$max")
+        }
+
+        private fun pressureAt(eventTimeMs: Long, logMatch: Boolean = false): Float? {
+            synchronized(pressureSignal) {
+                val deadline = SystemClock.uptimeMillis() + PRESSURE_SAMPLE_WAIT_MS
+                while (true) {
+                    
+                    
+                    
+                    val match = pressureHistory.minByOrNull { abs(it.timeMs - eventTimeMs) }
+                    val delta = match?.let { abs(it.timeMs - eventTimeMs) }
+                    if (match != null && delta != null && delta <= PRESSURE_SAMPLE_MAX_AGE_MS) {
+                        if (logMatch) Log.i(
+                            TAG,
+                            "pressure matched eventTime=$eventTimeMs sampleTime=${match.timeMs} " +
+                                "delta=$delta pressure=${match.pressure} offset=$pressureClockOffsetMs",
+                        )
+                        return match.pressure
+                    }
+                    val remaining = deadline - SystemClock.uptimeMillis()
+                    if (remaining <= 0L) {
+                        Log.w(TAG, "drawPath pressure sample unavailable eventTime=$eventTimeMs " +
+                            "first=${pressureHistory.peekFirst()?.timeMs} last=${pressureHistory.peekLast()?.timeMs} " +
+                            "uptime=${SystemClock.uptimeMillis()} raw=$penRawPressure history=${pressureHistory.size}")
+                        return null
+                    }
+                    try {
+                        pressureSignal.wait(remaining)
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        Log.w(TAG, "drawPath pressure sample wait interrupted eventTime=$eventTimeMs", e)
+                        return null
+                    }
+                }
+            }
+        }
 
         @JvmStatic
         fun setPluginViewVisible(visible: Boolean) {
@@ -98,6 +210,10 @@ class InputReader(
     private var touchThread: Thread? = null
     private var penThread: Thread? = null
     @Volatile private var running = false
+    private var penReadyLatch = CountDownLatch(0)
+    @Volatile private var penClockReady = false
+    private var framePressure: Float? = null
+    private var firstPressureFrame = true
 
     
     private val fingerX = IntArray(MAX_SLOTS) { -1 }
@@ -150,7 +266,16 @@ class InputReader(
             touchThread = Thread({ readLoop(touchPath, false) }, "MosaicTouchReader").also { it.start() }
         }
         if (readPenEvents && penPath != null) {
+            penReadyLatch = CountDownLatch(1)
             penThread = Thread({ readLoop(penPath, true) }, "MosaicPenReader").also { it.start() }
+            try {
+                if (!penReadyLatch.await(160L, TimeUnit.MILLISECONDS) || !penClockReady) {
+                    Log.w(TAG, "pen reader awaiting monotonic clock path=$penPath")
+                }
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                Log.w(TAG, "pen reader open wait interrupted path=$penPath")
+            }
         }
     }
 
@@ -174,8 +299,18 @@ class InputReader(
         mtSlot = 0
         penHover = false; penRubber = false; penStylusButton = false
         penTiltX = 0; penTiltY = 0
+        framePressure = null
+        firstPressureFrame = true
         touchStreamDropped = false
         if (routeToBoard && readPenEvents) {
+            synchronized(pressureSignal) {
+                pressureHistory.clear()
+                penPressure01 = -1f
+                penPressureUpdatedAtMs = 0L
+                pressureClockOffsetMs = 0L
+                pressureClockOffsetReady = false
+                pressureSignal.notifyAll()
+            }
             InputArbiter.onPenHover(false)
             penTiltDirection = null
         }
@@ -187,8 +322,23 @@ class InputReader(
         val bb = ByteBuffer.wrap(buffer).order(ByteOrder.LITTLE_ENDIAN)
         try {
             FileInputStream(path).use { fis ->
+                if (isPen) {
+                    val clockConfigured = runCatching { EvdevClock.useMonotonic(fis.fd) }
+                        .onFailure { Log.w(TAG, "pen clock ioctl unavailable; using measured timestamp offset", it) }
+                        .isSuccess
+                    penClockReady = true
+                    Log.i(
+                        TAG,
+                        "pen clock=${if (clockConfigured) "CLOCK_MONOTONIC" else "measured-offset"} " +
+                            "path=$path uptime=${SystemClock.uptimeMillis()}",
+                    )
+                }
                 Log.i(TAG, "opened $path (eventSize=$size, isPen=$isPen)")
+                if (isPen) penReadyLatch.countDown()
+                val pollFd = StructPollfd().apply { fd = fis.fd; events = OsConstants.POLLIN.toShort() }
                 while (running) {
+                    if (Os.poll(arrayOf(pollFd), 50) == 0) continue
+                    if (!running) return
                     var offset = 0
                     while (offset < size) {
                         val n = fis.read(buffer, offset, size - offset)
@@ -198,18 +348,39 @@ class InputReader(
                         }
                         offset += n
                     }
+                    if (!running) return
+                    val eventTimeMs = readEventTimeMs(buffer, size)
                     bb.position(size - 8)
                     val type = bb.short.toInt() and 0xFFFF
                     val code = bb.short.toInt() and 0xFFFF
                     val value = bb.int
-                    if (isPen) handlePenEvent(type, code, value) else handleTouchEvent(type, code, value)
+                    if (isPen) handlePenEvent(type, code, value, eventTimeMs) else handleTouchEvent(type, code, value)
                 }
             }
         } catch (e: InterruptedException) {
             Log.i(TAG, "reader interrupted: $path")
         } catch (e: Exception) {
             Log.e(TAG, "reader error on $path", e)
+        } finally {
+            if (isPen) {
+                penClockReady = false
+                penReadyLatch.countDown()
+            }
         }
+    }
+
+    private fun readEventTimeMs(buffer: ByteArray, size: Int): Long {
+        val view = ByteBuffer.wrap(buffer).order(ByteOrder.LITTLE_ENDIAN)
+        val seconds: Long
+        val micros: Long
+        if (size == INPUT_EVENT_SIZE_64) {
+            seconds = view.long
+            micros = view.long
+        } else {
+            seconds = view.int.toLong()
+            micros = view.int.toLong()
+        }
+        return seconds * 1000L + micros / 1000L
     }
 
     
@@ -407,7 +578,38 @@ class InputReader(
 
     
 
-    private fun handlePenEvent(type: Int, code: Int, value: Int) {
+    private fun handlePenEvent(type: Int, code: Int, value: Int, eventTimeMs: Long) {
+        if (type == EV_SYN && code == SYN_REPORT) {
+            val pressure = framePressure ?: return
+            val now = SystemClock.uptimeMillis()
+            val observedOffset = now - eventTimeMs
+            if (!pressureClockOffsetReady || abs(observedOffset - pressureClockOffsetMs) > 500L) {
+                pressureClockOffsetMs = observedOffset
+                pressureClockOffsetReady = true
+            } else {
+                
+                
+                pressureClockOffsetMs = (pressureClockOffsetMs * 7L + observedOffset) / 8L
+            }
+            val sampleTimeMs = eventTimeMs + pressureClockOffsetMs
+            synchronized(pressureSignal) {
+                if (!running) return
+                penPressure01 = pressure
+                penPressureUpdatedAtMs = sampleTimeMs
+                if (pressureHistory.size == PRESSURE_HISTORY_SIZE) pressureHistory.removeFirst()
+                pressureHistory.addLast(PressureSample(sampleTimeMs, pressure))
+                pressureSignal.notifyAll()
+            }
+            if (firstPressureFrame) {
+                firstPressureFrame = false
+                Log.i(
+                    TAG,
+                    "pressure frame clock=MONOTONIC rawTime=$eventTimeMs sampleTime=$sampleTimeMs " +
+                        "uptime=$now offset=$pressureClockOffsetMs",
+                )
+            }
+            return
+        }
         if (type == EV_KEY) {
             when (code) {
                 BTN_DIGI -> {
@@ -439,7 +641,18 @@ class InputReader(
                 ABS_TILT_Y -> { penTiltY = value; penRawTiltY = value; updateTiltDirection() }
                 ABS_X -> penRawX = value
                 ABS_Y -> penRawY = value
-                ABS_PRESSURE -> penRawPressure = value
+                ABS_PRESSURE -> {
+                    penRawPressure = value
+                    if (penPressureMax <= penPressureMin) {
+                        Log.e(
+                            TAG,
+                            "drawPath ABS_PRESSURE range unavailable min=$penPressureMin max=$penPressureMax",
+                        )
+                        return
+                    }
+                    val range = penPressureMax - penPressureMin
+                    framePressure = ((value - penPressureMin).toFloat() / range).coerceIn(0f, 1f)
+                }
             }
         }
     }
@@ -524,7 +737,19 @@ class InputReader(
                 val name = Regex("name:\\s*\"(.+?)\"").find(block)?.groupValues?.get(1) ?: continue
                 Log.i(TAG, "found device: $name -> $path")
                 when {
-                    name.contains("Wacom", true) || name.contains("Digitizer", true) -> result["pen"] = path
+                    name.contains("Wacom", true) || name.contains("Digitizer", true) -> {
+                        result["pen"] = path
+                        val pressure = Regex(
+                            "ABS_PRESSURE[^\\n]*min\\s+(-?\\d+),\\s*max\\s+(-?\\d+)",
+                            RegexOption.IGNORE_CASE,
+                        ).find(block)
+                        if (pressure != null) {
+                            updatePenPressureRange(
+                                pressure.groupValues[1].toInt(),
+                                pressure.groupValues[2].toInt(),
+                            )
+                        }
+                    }
                     name.contains("Atmel", true) || name.contains("maXTouch", true) ||
                         name.contains("pt_mt", true) || name.contains("fts_ts", true) ||
                         name.contains("Touchscreen", true) -> {

@@ -22,6 +22,12 @@ object MosaicStrings {
         defaultCard,
         edit,
         sync,
+        syncConnected,
+        syncConnecting,
+        syncOffline,
+        syncConnect,
+        syncDisconnect,
+        syncAddressHint,
         translucent,
         sizeLevelHalf,
         sizeLevelDouble,
@@ -40,7 +46,11 @@ object MosaicStrings {
         zoomDefault,
         thick,
         template,
+        spacing,
         shape,
+        noteHeaderPlaceholder,
+        archiveSave,
+        archiveLoad,
     }
 
     private val STRINGS: Map<Key, Pair<String, String>> = mapOf(
@@ -53,6 +63,12 @@ object MosaicStrings {
         Key.defaultCard to ("默认卡" to "Default"),
         Key.edit to ("编辑" to "Edit"),
         Key.sync to ("同步" to "Sync"),
+        Key.syncConnected to ("已连接" to "Connected"),
+        Key.syncConnecting to ("连接中…" to "Connecting…"),
+        Key.syncOffline to ("连不上" to "Offline"),
+        Key.syncConnect to ("同步" to "Sync"),
+        Key.syncDisconnect to ("断开同步" to "Stop sync"),
+        Key.syncAddressHint to ("电脑地址，如 192.168.1.5:3790" to "Computer address, e.g. 192.168.1.5:3790"),
         Key.translucent to ("半透明" to "Translucent"),
         Key.sizeLevelHalf to ("½ 邻卡" to "½ neighbor"),
         Key.sizeLevelDouble to ("2× 邻卡" to "2× neighbor"),
@@ -72,7 +88,11 @@ object MosaicStrings {
         Key.zoomDefault to ("缩放到 100%" to "Zoom to 100%"),
         Key.thick to ("粗细" to "Thick"),
         Key.template to ("模板" to "Template"),
+        Key.spacing to ("间距" to "Spacing"),
         Key.shape to ("图形" to "Shape"),
+        Key.noteHeaderPlaceholder to ("长按编辑标题" to "Long-press to edit title"),
+        Key.archiveSave to ("保存" to "Save"),
+        Key.archiveLoad to ("读取" to "Load"),
     )
 
     fun whiteboardName(number: Int): String =

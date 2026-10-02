@@ -35,6 +35,8 @@ object InputRouter {
         fun onTouch(frame: TouchFrame)
         fun onPenState(state: PenState, value: Boolean)
         fun onSlider(gesture: String, side: Int)
+        
+        fun onManualRefresh() {}
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -81,5 +83,10 @@ object InputRouter {
     fun postSlider(gesture: String, side: Int) {
         val target = sink ?: return
         main.post { if (sink === target) target.onSlider(gesture, side) }
+    }
+
+    fun postManualRefresh() {
+        val target = sink ?: return
+        main.post { if (sink === target) target.onManualRefresh() }
     }
 }
