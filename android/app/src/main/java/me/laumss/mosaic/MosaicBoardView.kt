@@ -758,16 +758,18 @@ class MosaicBoardView(
         
         
         
-        if (stylusContact) {
+        val immediate = stylusContact || reason.startsWith("card-")
+        if (immediate) {
             cancelBackgroundSync()
             sendBackgroundSync(force = true)
+            backgroundSyncUrgency = SyncUrgency.PROMPT
         }
         
         
         
         contentView.markSettleRequested()
         if (!contentView.isDeferringRefresh) contentView.postInvalidateOnAnimation()
-        Log.i(TAG, "pen trail discarded: reason=$reason sync=deferred stylus=$stylusContact active=$drawPathActive")
+        Log.i(TAG, "pen trail discarded: reason=$reason sync=${if (immediate) "now" else "deferred"} stylus=$stylusContact active=$drawPathActive")
     }
 
     
