@@ -77,7 +77,13 @@ object InputRouter {
 
     fun postPenState(state: PenState, value: Boolean) {
         val target = sink ?: return
-        main.post { if (sink === target) target.onPenState(state, value) }
+        
+        
+        val seq = if (state == PenState.HOVER) 0 else DrawPathGate.penSwitchPosted()
+        main.post {
+            if (seq != 0) DrawPathGate.penSwitchHandled(seq)
+            if (sink === target) target.onPenState(state, value)
+        }
     }
 
     fun postSlider(gesture: String, side: Int) {

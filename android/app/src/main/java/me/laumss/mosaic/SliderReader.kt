@@ -262,6 +262,8 @@ class SliderReader {
         Log.i(TAG, "gesture=$gesture side=$side pos=$position speed=$speed dist=$distance")
         
         InputArbiter.onSliderActivity()
+        
+        DrawPathGate.onSliderGesture(gesture, side)
         InputRouter.postSlider(gesture, side)
     }
 }

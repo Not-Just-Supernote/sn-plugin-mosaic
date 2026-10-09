@@ -25,6 +25,11 @@ class InteractionOverlayView(context: Context) : View(context) {
         const val MOVE_HANDLE_RADIUS_DP = 17f
         private const val ERASER_RADIUS_DP = 12f
         
+        private const val ERASER_LIGHT_FILL = 0xFFB7B7B7.toInt()
+        private const val ERASER_LIGHT_BORDER = 0xFF7F7F7F.toInt()
+        private const val ERASER_DARK_FILL = 0xFF7F7F7F.toInt()
+        private const val ERASER_DARK_BORDER = 0xFFB7B7B7.toInt()
+        
         const val ROTATE_HANDLE_GAP_DP = 30f
         const val ROTATE_HANDLE_RADIUS_DP = 15f
         
@@ -104,6 +109,11 @@ class InteractionOverlayView(context: Context) : View(context) {
     private var eraserRadiusPx = 0f
     
     private var eraserOnDark = false
+    
+    private val eraserTrail = Path()
+    private var eraserTrailVisible = false
+    private var eraserTrailRadiusPx = 0f
+    private var eraserTrailOnDark = false
 
     private val solidPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -137,21 +147,29 @@ class InteractionOverlayView(context: Context) : View(context) {
     
     private val eraserFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = 0xCCFFFFFF.toInt()
+        color = ERASER_LIGHT_FILL
     }
     private val eraserBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        color = INK
+        color = ERASER_LIGHT_BORDER
         strokeWidth = 2f
     }
     private val eraserFillDark = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = 0xCC111111.toInt()
+        color = ERASER_DARK_FILL
     }
     private val eraserBorderDark = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        color = Color.WHITE
+        color = ERASER_DARK_BORDER
         strokeWidth = 2f
+    }
+    private val eraserTrailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.WHITE
+        
+        alpha = 255
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
     }
     private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFF111111.toInt()
@@ -372,6 +390,58 @@ class InteractionOverlayView(context: Context) : View(context) {
         invalidateCircle(eraserX, eraserY, eraserRadiusPx)
     }
 
+    
+    fun beginEraserStroke(xPx: Float, yPx: Float, onDark: Boolean = false) {
+        eraserTrail.reset()
+        eraserTrail.moveTo(xPx, yPx)
+        eraserTrailVisible = true
+        eraserTrailOnDark = onDark
+        eraserTrailRadiusPx = ERASER_RADIUS_DP * density
+        invalidateCircle(xPx, yPx, eraserTrailRadiusPx)
+    }
+
+    
+    fun appendEraserStroke(xPx: Float, yPx: Float, onDark: Boolean = eraserTrailOnDark) {
+        if (!eraserTrailVisible) {
+            beginEraserStroke(xPx, yPx, onDark)
+            return
+        }
+        val oldBounds = RectF()
+        eraserTrail.computeBounds(oldBounds, true)
+        eraserTrail.lineTo(xPx, yPx)
+        eraserTrailOnDark = onDark
+        val newBounds = RectF()
+        eraserTrail.computeBounds(newBounds, true)
+        invalidateTrailUnion(oldBounds, newBounds)
+    }
+
+    
+    fun endEraserStroke() {
+        if (!eraserTrailVisible) return
+        val bounds = RectF()
+        eraserTrail.computeBounds(bounds, true)
+        eraserTrailVisible = false
+        eraserTrail.reset()
+        invalidateTrailUnion(bounds, RectF())
+    }
+
+    private fun invalidateTrailUnion(a: RectF, b: RectF) {
+        val u = RectF(a)
+        if (u.isEmpty && b.isEmpty) {
+            
+            invalidateCircle(a.centerX(), a.centerY(), eraserTrailRadiusPx)
+            return
+        }
+        if (u.isEmpty) u.set(b) else if (!b.isEmpty) u.union(b)
+        val pad = eraserTrailRadiusPx + 3f * density
+        invalidate(
+            kotlin.math.floor(u.left - pad).toInt(),
+            kotlin.math.floor(u.top - pad).toInt(),
+            kotlin.math.ceil(u.right + pad).toInt(),
+            kotlin.math.ceil(u.bottom + pad).toInt(),
+        )
+    }
+
     private fun invalidateCircle(cx: Float, cy: Float, r: Float) {
         val pad = r + 3f * density
         invalidate(
@@ -400,6 +470,8 @@ class InteractionOverlayView(context: Context) : View(context) {
         movePath.reset()
         eraserVisible = false
         eraserOnDark = false
+        eraserTrailVisible = false
+        eraserTrail.reset()
         invalidate()
     }
 
@@ -431,6 +503,8 @@ class InteractionOverlayView(context: Context) : View(context) {
                     "note" -> drawNoteButton(canvas, lassoActionRects[i], d)
                     "black" -> drawBlackButton(canvas, lassoActionRects[i], d)
                     "edit-text" -> drawEditTextButton(canvas, lassoActionRects[i], d)
+                    "recognize" -> drawRecognizeButton(canvas, lassoActionRects[i], d)
+                    "shot" -> drawShotButton(canvas, lassoActionRects[i], d)
                     "square", "circle", "iso", "equi", "right" -> drawShapeButton(canvas, lassoActionRects[i], d, type)
                     "fill", "hollow" -> drawPaintBucketButton(canvas, lassoActionRects[i], d, type == "fill")
                 }
@@ -448,6 +522,12 @@ class InteractionOverlayView(context: Context) : View(context) {
             for (c in cards) canvas.drawRect(c, solidPaint)
             if (!path.isEmpty) canvas.drawPath(path, inkPaint)
             canvas.restoreToCount(save)
+        }
+
+        if (eraserTrailVisible) {
+            eraserTrailPaint.color = if (eraserTrailOnDark) ERASER_DARK_FILL else ERASER_LIGHT_FILL
+            eraserTrailPaint.strokeWidth = eraserTrailRadiusPx * 2f
+            canvas.drawPath(eraserTrail, eraserTrailPaint)
         }
 
         if (eraserVisible) {
@@ -678,5 +758,38 @@ class InteractionOverlayView(context: Context) : View(context) {
         canvas.drawPath(p, solidPaint)
         canvas.drawLine(cx - 5f * d, cy - 2f * d, cx + 5f * d, cy - 5f * d, thinDashPaint)
         canvas.drawLine(cx - 6f * d, cy + 4f * d, cx + 4f * d, cy + 1f * d, thinDashPaint)
+    }
+
+    
+    private fun drawShotButton(canvas: Canvas, r: RectF, d: Float) {
+        val radius = r.width() / 2f
+        canvas.drawCircle(r.centerX(), r.centerY(), radius, fillWhite)
+        canvas.drawCircle(r.centerX(), r.centerY(), radius, thinDashPaint)
+        val cx = r.centerX(); val cy = r.centerY()
+        val hw = 10f * d; val hh = 12f * d
+        canvas.drawRect(cx - hw, cy - hh, cx + hw, cy + hh, solidPaint)
+        val mountains = Path()
+        mountains.moveTo(cx - hw + 3f * d, cy + hh - 4f * d)
+        mountains.lineTo(cx - 3f * d, cy - 1f * d)
+        mountains.lineTo(cx + 1f * d, cy + 4f * d)
+        mountains.lineTo(cx + 4f * d, cy + 1f * d)
+        mountains.lineTo(cx + hw - 3f * d, cy + hh - 4f * d)
+        canvas.drawPath(mountains, solidPaint)
+        canvas.drawCircle(cx + 4f * d, cy - 6f * d, 2.4f * d, fillBlack)
+    }
+
+    
+    private fun drawRecognizeButton(canvas: Canvas, r: RectF, d: Float) {
+        val radius = r.width() / 2f
+        canvas.drawCircle(r.centerX(), r.centerY(), radius, fillWhite)
+        canvas.drawCircle(r.centerX(), r.centerY(), radius, thinDashPaint)
+        val cx = r.centerX(); val cy = r.centerY()
+        canvas.drawLine(cx - 9f * d, cy - 11f * d, cx + 9f * d, cy - 11f * d, solidPaint)
+        canvas.drawLine(cx, cy - 11f * d, cx, cy + 3f * d, solidPaint)
+        val wave = Path()
+        wave.moveTo(cx - 11f * d, cy + 10f * d)
+        wave.cubicTo(cx - 7f * d, cy + 5f * d, cx - 3f * d, cy + 15f * d, cx, cy + 10f * d)
+        wave.cubicTo(cx + 3f * d, cy + 5f * d, cx + 7f * d, cy + 15f * d, cx + 11f * d, cy + 10f * d)
+        canvas.drawPath(wave, solidPaint)
     }
 }

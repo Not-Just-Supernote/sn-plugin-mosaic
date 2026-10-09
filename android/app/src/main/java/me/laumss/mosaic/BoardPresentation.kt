@@ -16,15 +16,15 @@ class BoardPresentation(
     enum class Reason(val einkMode: Int?, val flat: Boolean, val suspendFog: Boolean) {
         
         
-        PAN_ZOOM(MosaicEinkRefreshModule.MODE_DUX, flat = true, suspendFog = true),
+        PAN_ZOOM(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true),
         
         TRANSFORM(MosaicEinkRefreshModule.MODE_DEFAULT, flat = true, suspendFog = false),
         
-        TOOL(MosaicEinkRefreshModule.MODE_DUX, flat = false, suspendFog = false),
+        TOOL(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false),
         
-        LASSO(MosaicEinkRefreshModule.MODE_DUX, flat = true, suspendFog = false),
+        LASSO(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false),
         
-        SCREEN_TOOL(MosaicEinkRefreshModule.MODE_DUX, flat = false, suspendFog = true),
+        SCREEN_TOOL(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = true),
         
         PEN_BUTTON(null, flat = false, suspendFog = true),
         
@@ -107,9 +107,9 @@ class BoardPresentation(
             flat = flat || r.flat
             fog = fog || r.suspendFog
             val m = r.einkMode ?: continue
-            if (eink == null || m == MosaicEinkRefreshModule.MODE_DUX) eink = m
+            if (eink == null || m == MosaicEinkRefreshModule.MODE_A2) eink = m
         }
-        val dark = flat || eink == MosaicEinkRefreshModule.MODE_DUX
+        val dark = flat || eink == MosaicEinkRefreshModule.MODE_A2
         return State(flat, dark, flat && isBoardSurface(), fog, eink)
     }
 

@@ -93,29 +93,4 @@ object ToolIcons {
         if (!enabled) c.drawPath(fingerSlash, stroke)
         c.restore()
     }
-
-    
-    
-    private const val CLIP_ARC_A =
-        "M16.5688 12.129L18.0228 10.478L19.4778 8.83195C20.4634 7.71322 21.6599 6.79992 22.999 6.14436C24.338 5.48881 25.7933 5.10389 27.2813 5.01164C28.7694 4.9194 30.261 5.12165 31.6708 5.60681C33.0805 6.09197 34.3807 6.8505 35.4968 7.83895C36.0731 8.34857 36.5965 8.91512 37.0588 9.52995C37.95 10.7137 38.5994 12.0613 38.9698 13.496C39.3343 14.908 39.4253 16.3767 39.2378 17.823C38.946 20.0654 37.9888 22.1688 36.4898 23.862L35.0358 25.509L33.5808 27.155"
-    private const val CLIP_ARC_B =
-        "M27.7639 33.7409L26.3099 35.3879L24.8549 37.0339C23.3764 38.7044 21.439 39.9028 19.2841 40.4797C17.1292 41.0566 14.8522 40.9864 12.7369 40.2779C12.0302 40.0411 11.3488 39.7346 10.7029 39.3629C10.0369 38.9801 9.41133 38.5308 8.83588 38.0219C8.26002 37.5133 7.73673 36.9481 7.27388 36.3349C5.70314 34.247 4.90183 31.6807 5.00552 29.07C5.1092 26.4593 6.11151 23.9646 7.84288 22.0079L9.29688 20.3609L10.7519 18.7149"
-    private const val CLIP_DIAG = "M27.0668 18.588L19.9958 25.659"
-    private const val CLIP_BAR = "M32.8289 38.2419H44.8289"
-    private val clipArcA by lazy { SvgPathParser.parse(CLIP_ARC_A) }
-    private val clipArcB by lazy { SvgPathParser.parse(CLIP_ARC_B) }
-    private val clipDiag by lazy { SvgPathParser.parse(CLIP_DIAG) }
-    private val clipBar by lazy { SvgPathParser.parse(CLIP_BAR) }
-
-    
-    fun clip(c: Canvas,s: Float,p: Paint,removable: Boolean){
-        val k = s / 48f
-        val stroke = Paint(p).apply { style = Paint.Style.STROKE; strokeWidth = p.strokeWidth / k }
-        c.save(); c.scale(k,k)
-        c.drawPath(clipArcA, stroke)
-        c.drawPath(clipArcB, stroke)
-        c.drawPath(clipDiag, stroke)
-        if (removable) c.drawPath(clipBar, stroke)
-        c.restore()
-    }
 }

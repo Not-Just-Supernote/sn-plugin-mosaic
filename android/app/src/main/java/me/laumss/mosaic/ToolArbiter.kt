@@ -56,6 +56,8 @@ class ToolArbiter {
 
     fun hasOverride(source: Source): Boolean = overrides.any { it.source == source }
 
+    fun overrideTool(source: Source): Tool? = overrides.firstOrNull { it.source == source }?.tool
+
     
     fun penButtonPhysical(): Physical? =
         overrides.firstOrNull { it.source == Source.PEN_BUTTON }?.physical

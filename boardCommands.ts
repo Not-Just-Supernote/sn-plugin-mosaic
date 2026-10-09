@@ -7,7 +7,6 @@ import {
   STROKE_ENCODING_F32X3,
   canonicalDrawPathWidth,
   type InkStroke,
-  type WhiteboardAnchor,
 } from './React/src/boardFormat';
 import { base64ToBytes } from './React/src/base64';
 import type { Card, Connection, Viewport } from './React/src/types';
@@ -34,8 +33,6 @@ export type BoardCommand =
   | { type: 'cardsRemove'; ids: string[] }
   | { type: 'connectionAdd'; id: string; from: string; to: string; locked?: boolean }
   | { type: 'connectionsRemove'; ids: string[] }
-  | { type: 'whiteboardUpsert'; id: string; name: string; x: number; y: number; width: number; height: number }
-  | { type: 'whiteboardsRemove'; ids: string[] }
   
   | { type: 'viewport'; panX: number; panY: number; scale: number; viewW?: number; viewH?: number; topInset?: number }
   
@@ -46,22 +43,31 @@ export type BoardCommand =
   
   | { type: 'action'; name: 'insertTextCard'; text: string; x: number; y: number; width?: number; height?: number; source?: 'inkling' | 'doc' }
   
-  | { type: 'action'; name: 'removeClip'; wbId: string }
-  
   | { type: 'action'; name: 'recognizeLasso' }
   | { type: 'action'; name: 'saveArchive' }
   | { type: 'action'; name: 'loadArchive' }
   
   | {
       type: 'action';
-      name: 'captureReady';
+      name: 'noteShotReady';
+      shotId: string;
       path: string;
-      wbId: string;
-      wbName: string;
+      
+      width: number;
+      height: number;
       
       rect: { x: number; y: number; w: number; h: number };
       
       hotspot: { x: number; y: number; w: number; h: number };
+      
+      anchors: string;
+      
+      fingerprint: string;
+      
+      pxPerWorld: number;
+      
+      screenW: number;
+      screenH: number;
     };
 
 export function subscribeBoardCommands(handler: (ops: BoardCommand[]) => void): () => void {
@@ -88,7 +94,9 @@ export function strokeFromCommand(op: Extract<BoardCommand, { type: 'strokeUpser
     width: op.width,
     color: op.color >>> 0,
     pen,
-    drawPathWidth: canonicalDrawPathWidth(pen, op.width),
+    drawPathWidth: op.drawPathWidth !== undefined && op.drawPathWidth > 0
+      ? op.drawPathWidth
+      : canonicalDrawPathWidth(pen, op.width),
     sampleScale: op.sampleScale,
     encoding: STROKE_ENCODING_F32X3,
     points,
@@ -156,6 +164,7 @@ export function normalizeDrawPathPenType(value: number): number | null {
   if (!Number.isInteger(value)) return null
   switch (value) {
     case 0: return 16 
+    case 10: return 15 
     case 14: return 15 
     case 17: return 11 
     case 11:
@@ -221,12 +230,6 @@ export function connectionFromCommand(op: Extract<BoardCommand, { type: 'connect
     label: '',
     locked: op.locked === true,
   };
-}
-
-export function whiteboardFromCommand(
-  op: Extract<BoardCommand, { type: 'whiteboardUpsert' }>,
-): WhiteboardAnchor {
-  return { id: op.id, name: op.name, x: op.x, y: op.y, width: op.width, height: op.height };
 }
 
 export function viewportFromCommand(op: Extract<BoardCommand, { type: 'viewport' }>): Viewport {

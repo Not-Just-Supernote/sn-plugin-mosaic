@@ -7,8 +7,6 @@ enum class PenStyle(
     val objType: Int,
 ) {
     
-    NEEDLE(DrawPathClient.PEN_TYPE_NEEDLE),
-    
     PEN(DrawPathClient.PEN_TYPE_PRESSURE),
     
     BRUSH(DrawPathClient.PEN_TYPE_BRUSH),
@@ -21,7 +19,7 @@ enum class PenStyle(
         
         fun normalizeStoredType(type: Int): Int = when (type) {
             0 -> DrawPathClient.PEN_TYPE_PRESSURE
-            10 -> DrawPathClient.PEN_TYPE_NEEDLE
+            10 -> DrawPathClient.PEN_TYPE_BRUSH
             14 -> DrawPathClient.PEN_TYPE_BRUSH
             17 -> DrawPathClient.PEN_TYPE_MARKER
             DrawPathClient.PEN_TYPE_MARKER,

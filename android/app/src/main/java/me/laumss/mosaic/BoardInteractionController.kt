@@ -1,20 +1,22 @@
 package me.laumss.mosaic
 
+import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Path
+import android.graphics.Point
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
+import android.view.WindowManager
 import android.widget.FrameLayout
 import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.WritableMap
 import java.io.File
-import java.io.FileOutputStream
 import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.Future
@@ -102,7 +104,13 @@ class BoardInteractionController(
         const val GESTURE_SETTLE_MS = 600L
 
         
-        const val SHOT_DIR = "/sdcard/EXPORT/mosaic"
+        const val NOTE_SHOT_DIR = "/sdcard/EXPORT/mosaic/shots"
+        private const val TAG_SHOT = "MosaicNoteShot"
+        
+        private const val NOTE_SHOT_FOCUS_RETRY_MS = 120L
+        private const val NOTE_SHOT_FOCUS_RETRIES = 20
+        
+        private const val NOTE_SHOT_MAX_SCREEN_FRACTION = 0.9f
 
         
         private const val EDGE_SWIPE_START_DP = 32f
@@ -135,9 +143,6 @@ class BoardInteractionController(
     private val edgeSwipeStartPx: Float get() = EDGE_SWIPE_START_DP * density
     private val edgeSwipeZonePx: Float get() = EDGE_SWIPE_ZONE_DP * density
     
-    private var clippedWhiteboardIds: Set<String> = emptySet()
-
-    
     private class PendingRecognition(val rect: RectF, val strokeIds: List<String>)
     private var pendingRecognition: PendingRecognition? = null
 
@@ -150,7 +155,7 @@ class BoardInteractionController(
 
     
 
-    private val whiteboard = WhiteboardSurface(emitter) { host.armCloseWatchdog("board-close") }
+    private val whiteboard = WhiteboardSurface(emitter) { host.armCloseWatchdog("board-close", noteShotSessionActive) }
     
     private var surface: BoardSurface = whiteboard
     
@@ -189,6 +194,8 @@ class BoardInteractionController(
     private fun enterSurface(next: BoardSurface, scene: BoardEngine.SceneSnapshot) {
         if (surface !== next) invalidateClipboardWork("surface:${next.name}")
         surface = next
+        
+        NoteLinks.setActive(next.showsBoardChrome)
         BoardEngine.replaceScene(scene)
         chrome.setNoteMode(!next.showsBoardChrome)
         content.setNoteHeader(if (next.showsBoardChrome) null else currentNoteHeader, currentNoteHeaderPlaceholder)
@@ -235,7 +242,7 @@ class BoardInteractionController(
                 
                 val scale = minOf(1f, (host.width / density) / ScrollingDocument.WIDTH)
                 val panY = toolbarHeightWorld() + currentNoteHeaderHeight * scale - doc.clampScroll(doc.scrollY, host.height / density)
-                val scene = BoardEngine.SceneSnapshot(doc.strokes, emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), 0f, panY, scale, null)
+                val scene = BoardEngine.SceneSnapshot(doc.strokes, emptyList(), emptyList(), emptyList(), emptyList(), 0f, panY, scale, null)
                 enterSurface(note, scene)
                 releasePaintHold("note-opened")
                 Log.i(TAG, "note opened ref=$ref height=${doc.contentHeight} scrollY=${doc.scrollY}")
@@ -581,7 +588,6 @@ class BoardInteractionController(
     private var regionsDirty = true
     private var regions: List<SparseNavigation.Region> = emptyList()
     private var chromeUpdatePosted = false
-    private var whiteboardAnchorGuardUntil = 0L
     private var launcherPullStartY = Float.NaN
     private var panZoomArmed = false
     
@@ -643,6 +649,8 @@ class BoardInteractionController(
     fun detach() {
         closeCardEditor()
         releasePaintHold("detach")
+        noteShotSessionActive = false
+        noteShotFocusToken++
         
         exportLassoStrokes(null)
         suspendedBoard?.let { suspended ->
@@ -689,6 +697,9 @@ class BoardInteractionController(
 
     
     private fun applyStylusCalibration() {
+        
+        DrawPathGate.stylusNearBlocks = gestureToolOf(settings.penButton) != null
+        DrawPathGate.sliderToolSide = if (gestureToolOf(settings.slidebarGesture) != null) settings.sliderSide else 0
         host.setStylusCalibration(settings.calibX, settings.calibY, settings.leftHand)
         InkAlign.setBaseline(0f, 0f)
     }
@@ -898,20 +909,6 @@ class BoardInteractionController(
                             commands?.add { emitter.connectionAdd(target) }
                         }
                     }
-                    is BoardHistory.Diff.Whiteboard -> {
-                        flushUpserts(); flushRemovals()
-                        val target = if (forward) diff.after else diff.before
-                        val source = if (forward) diff.before else diff.after
-                        if (target == null) {
-                            source?.let {
-                                removeWhiteboard(it.id)
-                                commands?.add { emitter.whiteboardsRemove(listOf(it.id)) }
-                            }
-                        } else {
-                            upsertWhiteboard(target)
-                            commands?.add { emitter.whiteboardUpsert(target) }
-                        }
-                    }
                 }
             }
             flushUpserts(); flushRemovals()
@@ -990,8 +987,6 @@ class BoardInteractionController(
                 }
                 eraseAt(session, wx, wy)
                 flushErase(session)
-                overlay.showEraserCursor(penLastX, penLastY, BoardEngine.scale, isOnDarkCard(wx, wy))
-                Log.i(TAG_PEN, "contact converted to eraser source=$source replayedPoints=$replayed")
             }
             state.lasso -> {
                 val session = PenSession.Lasso()
@@ -1057,7 +1052,6 @@ class BoardInteractionController(
         host.shapeDrag = shapeMode
         
         host.lassoEnabled = (lassoMode || shapeMode) && lasso == null && !chrome.blocksPen && !selectBelowArmed
-        if (!eraserMode) overlay.hideEraserCursor()
         
         
         
@@ -1081,6 +1075,25 @@ class BoardInteractionController(
     
 
     
+    fun preflightPenButtonState() {
+        val rawHover = InputReader.isPenHovering()
+        val rawRubber = InputReader.isPenRubberActive()
+        val rawStylusButton = InputReader.isPenStylusButtonDown()
+        if (rawHover || rawRubber || rawStylusButton) {
+            Log.i(
+                TAG_TOOL,
+                "pen-button preflight hover=$rawHover rubber=$rawRubber stylus=$rawStylusButton " +
+                    "controllerHover=$penHovering contact=$penContact",
+            )
+        }
+        if (rawHover && !penHovering) onPenState(InputRouter.PenState.HOVER, true)
+        when {
+            rawRubber -> onPenState(InputRouter.PenState.RUBBER, true)
+            rawStylusButton -> onPenState(InputRouter.PenState.STYLUS, true)
+        }
+    }
+
+    
     fun onPen(event: MotionEvent) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> penDown(event)
@@ -1095,14 +1108,12 @@ class BoardInteractionController(
         penHoverX = penX(event)
         penHoverY = penY(event)
         if (exit) {
-            overlay.hideEraserCursor()
+            if (!penContact)
             return
         }
         if (penContact) return
         setNoteHeaderHoverBlocked(noteHeaderHit(penHoverY))
         if (eraserMode) {
-            overlay.showEraserCursor(penHoverX, penHoverY, BoardEngine.scale,
-                isOnDarkCard(worldX(penHoverX), worldY(penHoverY)))
         }
         
         reevaluateTrailColor("hover")
@@ -1272,7 +1283,6 @@ class BoardInteractionController(
             penSession = session
             eraseAt(session, wx, wy)
             flushErase(session)
-            overlay.showEraserCursor(x, y, BoardEngine.scale, isOnDarkCard(wx, wy))
             return
         }
 
@@ -1367,8 +1377,6 @@ class BoardInteractionController(
                 for (i in 0 until e.historySize) eraseAt(s, worldX(penHistX(e, i)), worldY(penHistY(e, i)))
                 eraseAt(s, worldX(penX(e)), worldY(penY(e)))
                 flushErase(s)
-                overlay.showEraserCursor(penX(e), penY(e), BoardEngine.scale,
-                    isOnDarkCard(worldX(penX(e)), worldY(penY(e))))
             }
             is PenSession.Lasso -> {
                 for (i in 0 until e.historySize) { s.pointsPx.add(penHistX(e, i)); s.pointsPx.add(penHistY(e, i)) }
@@ -1463,7 +1471,6 @@ class BoardInteractionController(
             }
         } finally {
             if (wasContact) applyTransition(arbiter.penUp(), "pen-up")
-            overlay.hideEraserCursor()
         }
     }
 
@@ -1894,15 +1901,19 @@ class BoardInteractionController(
         
         
         val kind = if (singleCard) BoardEngine.cards[current.cardIds[0]]?.kind else null
-        val types = when {
+        val baseTypes = when {
             
             singleCard && kind == "image" -> listOf("trash")
             singleCard && kind == "note" -> listOf("trash", "edit-text")
             singleCard && kind == "text" -> listOf("trash", "note", "black", "edit-text")
             singleCard -> listOf("trash", "note", "black")
             shapeKind != null -> listOf("trash") + shapeActionTypes(shapeKind, shapeFilled)
+            
+            isPureInkSelection(current) -> listOf("trash", "recognize")
             else -> listOf("trash")
         }
+        
+        val types = if (canInsertIntoHostNote()) baseTypes + "shot" else baseTypes
         
         val onDark = singleCard &&
             (BoardEngine.cards[current.cardIds[0]]?.colored == true)
@@ -1932,6 +1943,18 @@ class BoardInteractionController(
             Shapes.Kind.ELLIPSE -> listOf("circle", fillAction)
             Shapes.Kind.TRIANGLE -> listOf("iso", "equi", "right", fillAction)
             Shapes.Kind.LINE -> emptyList()
+        }
+    }
+
+    
+    private fun isPureInkSelection(sel: LassoSelection): Boolean {
+        if (sel.cardIds.isNotEmpty() || sel.strokeIds.isEmpty()) return false
+        return synchronized(BoardEngine.lock) {
+            sel.strokeIds.all { id ->
+                val s = BoardEngine.strokes[id] ?: return@all false
+                s.cardId == null && s.connectionId == null &&
+                    s.penStyle != PenStyle.FILLED_SHAPE.objType && !s.isShape
+            }
         }
     }
 
@@ -1989,6 +2012,8 @@ class BoardInteractionController(
             "trash" -> deleteLassoSelection()
             "note" -> onConvertCardToNote()
             "black" -> toggleSelectedCardBlack()
+            "recognize" -> onRecognizeLasso()
+            "shot" -> onInsertLassoIntoNote()
             "edit-text" -> {
                 val card = lasso?.cardIds?.singleOrNull()?.let { BoardEngine.cards[it] }
                 if (card?.kind == "text" || card?.kind == "note") editTextCard(card)
@@ -3335,16 +3360,36 @@ class BoardInteractionController(
     private fun pageHeaderRegionWorld(): RectF = RectF(0f, -currentNoteHeaderHeight, ScrollingDocument.WIDTH, 0f)
 
     
-    private fun editPageNoteHeader() {
+    private fun editPageNoteHeader(recognized: String? = null) {
         if (surface.showsBoardChrome) return
         val ref = noteController.document?.ref ?: return
         val source = suspendedBoard?.scene?.cards?.firstOrNull { it.noteRef == ref } ?: return
         closeCardEditor()
         host.inkEnabled = false
+        val header = BoardContentView.noteHeaderText(source)
+        
+        var initial = header
+        var selection: IntRange? = null
+        if (recognized != null) {
+            val text = recognized.replace(Regex("\\s*\\n\\s*"), " ").trim()
+            val split = header.indexOf('\n')
+            val title = if (split < 0) header else header.substring(0, split)
+            val body = if (split < 0) "" else header.substring(split + 1)
+            if (title.isBlank()) {
+                initial = text + if (body.isNotEmpty()) "\n" + body else ""
+                selection = 0 until text.length
+            } else {
+                val prefix = title + "\n" + body + if (body.isNotBlank()) " " else ""
+                initial = prefix + text
+                selection = prefix.length until initial.length
+            }
+        }
         val editor = CardTextEditor(
             host.context,
-            BoardContentView.noteHeaderText(source),
+            initial,
             false,
+            initialSelection = selection,
+            initialDirty = recognized != null,
             fill = Color.WHITE,
             headerMode = true,
             onKeyboard = { obscuredTop -> avoidKeyboard(pageHeaderRegionWorld(), obscuredTop) },
@@ -3656,7 +3701,7 @@ class BoardInteractionController(
         when (state) {
             InputRouter.PenState.HOVER -> {
                 penHovering = value
-                if (!value) overlay.hideEraserCursor()
+                if (!value && !penContact)
                 else when (fingerGesture) {
                     
                     
@@ -3670,15 +3715,34 @@ class BoardInteractionController(
                 val physical = if (state == InputRouter.PenState.RUBBER) ToolArbiter.Physical.RUBBER else ToolArbiter.Physical.STYLUS
                 if (value) {
                     
+                    
+                    if (arbiter.hasOverride(ToolArbiter.Source.PEN_BUTTON)) {
+                        if (physical == ToolArbiter.Physical.RUBBER &&
+                            arbiter.overrideTool(ToolArbiter.Source.PEN_BUTTON) != ToolArbiter.Tool.ERASER
+                        ) {
+                            applyTransition(
+                                arbiter.replaceOverride(ToolArbiter.Source.PEN_BUTTON, ToolArbiter.Tool.ERASER, ToolArbiter.Settle.ON_NEXT_PEN_DOWN),
+                                "pen-button-rubber",
+                            )
+                        }
+                        Log.i(TAG_TOOL, "pen-button down repeat physical=$physical ${arbiter.describe()}")
+                        return
+                    }
+                    
+                    
+                    val near = penContact ||
+                        (if (physical == ToolArbiter.Physical.STYLUS) InputReader.isPenStylusPressNear() else penHovering)
                     val bound = if (physical == ToolArbiter.Physical.RUBBER) ToolArbiter.Tool.ERASER else gestureToolOf(settings.penButton)
-                    val tool = if (penHovering || penContact) bound else ToolArbiter.Tool.ERASER
+                    val tool = if (near) bound else ToolArbiter.Tool.ERASER
                     if (tool == null) return
-                    val armed = !(penHovering || penContact)
+                    val armed = !near
                     presentation.acquire(BoardPresentation.Reason.PEN_BUTTON)
                     applyTransition(
                         arbiter.pushOverride(ToolArbiter.Source.PEN_BUTTON, tool, ToolArbiter.Settle.ON_NEXT_PEN_DOWN, armed = armed, physical = physical),
                         "pen-button-down",
                     )
+                    Log.i(TAG_TOOL, "pen-button down physical=$physical tool=$tool near=$near hover=$penHovering contact=$penContact armed=$armed")
+                    host.reassertPenBlock("pen-button:$tool")
                 } else {
                     if (arbiter.penButtonPhysical() != null && arbiter.penButtonPhysical() != physical) return
                     applyTransition(arbiter.releaseOverride(ToolArbiter.Source.PEN_BUTTON), "pen-button-up")
@@ -3759,30 +3823,17 @@ class BoardInteractionController(
         if (host.width == 0) return
         chrome.setZoom(BoardEngine.scale)
         val view = viewWorld()
-        val current = synchronized(BoardEngine.lock) { BoardGeometry.findCurrentWhiteboard(BoardEngine.whiteboards.values, view) }
-        
-        BoardEngine.mutate {
-            for (wb in BoardEngine.whiteboards.values.toList()) {
-                val shouldBeCurrent = wb.id == current?.id
-                if (wb.current != shouldBeCurrent) {
-                    upsertWhiteboard(BoardEngine.WhiteboardRec(wb.id, wb.name, wb.x, wb.y, wb.width, wb.height, shouldBeCurrent))
-                }
-            }
-        }
         val selected = selectedCardId?.let { BoardEngine.cards[it] }
         val levels = if (selected == null) emptyList() else synchronized(BoardEngine.lock) {
             BoardGeometry.computeSizeLevels(selected, BoardEngine.cards, BoardEngine.connections.values)
         }
         chrome.setMode(
-            currentWhiteboard = current != null,
             selectedCard = selected != null,
             selectedCardColored = selected?.colored == true,
             selectedCardKind = selected?.kind,
             sizeLevels = levels,
             
             lassoCards = selected == null && lasso?.cardIds?.isNotEmpty() == true,
-            
-            lassoStrokes = selected == null && lasso?.strokeIds?.isNotEmpty() == true,
         )
         val jumps = if (fingerGesture is FingerGesture.PanZoom) emptyList()
         else SparseNavigation.findRegionJumps(currentRegions(), view, SparseNavigation.PAN_MARGIN)
@@ -4019,45 +4070,6 @@ class BoardInteractionController(
 
     override fun onPenBlockChanged() = refreshHostToolFlags()
 
-    override fun onSetWhiteboard() {
-        if (BoardChromeView.MENU_SWITCHER_MIDDLE_HIDDEN) return
-        val now = SystemClock.uptimeMillis()
-        if (now < whiteboardAnchorGuardUntil) return
-        whiteboardAnchorGuardUntil = now + BoardGeometry.WHITEBOARD_ANCHOR_GUARD_MS
-        val view = viewWorld()
-        val cx = view.centerX()
-        val cy = view.centerY()
-        val halfW = host.width / density / BoardGeometry.WHITEBOARD_CREATION_SCALE / 2f
-        val halfH = host.height / density / BoardGeometry.WHITEBOARD_CREATION_SCALE / 2f
-        val rect = RectF(cx - halfW, cy - halfH, cx + halfW, cy + halfH)
-        if (rect.width() <= 0f || rect.height() <= 0f) return
-        val existing = synchronized(BoardEngine.lock) { BoardEngine.whiteboards.values.toList() }
-        if (existing.size >= 5) {
-            Log.i(TAG, "[Whiteboard] anchor rejected: limit=5")
-            return
-        }
-        for (wb in existing) {
-            if (BoardGeometry.coverage(rect, wb.rect()) >= BoardGeometry.WHITEBOARD_DUPLICATE_COVERAGE) {
-                Log.i(TAG, "[Whiteboard] anchor reused ${wb.id}")
-                return
-            }
-        }
-        val wb = BoardEngine.WhiteboardRec(newId("wb-"), chrome.newWhiteboardName(existing), rect.left, rect.top, rect.width(), rect.height(), current = true)
-        apply(BoardHistory.Change("whiteboard-add").whiteboard(null, wb), record = false)
-        if (chrome.switcherOpen) {
-            
-            
-            openSwitcher()
-        }
-        Log.i(TAG, "[Whiteboard] anchored ${wb.id} \"${wb.name}\" $rect")
-    }
-
-    override fun onDeleteWhiteboard() {
-        val target = synchronized(BoardEngine.lock) { BoardGeometry.findCurrentWhiteboard(BoardEngine.whiteboards.values, viewWorld()) } ?: return
-        apply(BoardHistory.Change("whiteboard-delete").whiteboard(target, null), record = false)
-        Log.i(TAG, "[Whiteboard] deleted ${target.id}")
-    }
-
     override fun onDeleteSelectedCard() {
         val id = selectedCardId ?: return
         val change = BoardHistory.Change("card-delete")
@@ -4088,12 +4100,13 @@ class BoardInteractionController(
     override fun onDeleteLassoSelection() = deleteLassoSelection()
 
     
-    override fun onRecognizeLasso() {
+    private fun onRecognizeLasso() {
         val sel = lasso ?: return
-        val strokeIds = synchronized(BoardEngine.lock) {
-            sel.strokeIds.filter { BoardEngine.strokes[it]?.cardId == null }
+        if (!isPureInkSelection(sel)) {
+            Log.i(TAG_LASSO, "recognize skipped: selection not pure ink cards=${sel.cardIds.size} strokes=${sel.strokeIds.size}")
+            return
         }
-        if (strokeIds.isEmpty()) { Log.i(TAG_LASSO, "recognize skipped: no loose ink"); return }
+        val strokeIds = sel.strokeIds.toList()
         pendingRecognition = PendingRecognition(RectF(sel.rect), strokeIds)
         chrome.hideSwitcher()
         refreshHostToolFlags()
@@ -4109,6 +4122,13 @@ class BoardInteractionController(
         pendingRecognition = null
         val trimmed = text.trim()
         if (trimmed.isEmpty()) { Log.i(TAG_LASSO, "recognize empty text; scene unchanged"); return }
+        if (!surface.showsBoardChrome) {
+            
+            setLasso(null)
+            editPageNoteHeader(recognized = trimmed)
+            Log.i(TAG_LASSO, "recognize note header strokes=${pending.strokeIds.size} chars=${trimmed.length}")
+            return
+        }
         val r = pending.rect
         val left = r.left
         val top = r.top
@@ -4165,23 +4185,18 @@ class BoardInteractionController(
     }
 
     private fun openSwitcher() {
-        val list = synchronized(BoardEngine.lock) { BoardEngine.whiteboards.values.toList() }
         val notes = synchronized(BoardEngine.lock) {
             BoardEngine.cardsByZ.filter { it.kind == "note" }
         }
-        chrome.showSwitcher(list, notes, clippedWhiteboardIds)
+        
+        val links = NoteLinks.list().filter { NoteLinks.regionOf(it.id) != null }
+        chrome.showSwitcher(notes, links)
         refreshHostToolFlags()
     }
 
     override fun onSwitcherDismissed() {
         chrome.hideSwitcher()
         refreshHostToolFlags()
-    }
-
-    
-    fun setClippedWhiteboards(ids: Set<String>) {
-        clippedWhiteboardIds = ids
-        if (chrome.switcherOpen) openSwitcher()
     }
 
     
@@ -4214,112 +4229,239 @@ class BoardInteractionController(
     }
 
     
-    override fun onRemoveClip(id: String) {
-        val wb = BoardEngine.whiteboards[id] ?: return
-        emitter.begin()
-        emitter.action("removeClip") { putString("wbId", wb.id) }
-        emitter.commit()
-        Log.i(TAG, "[MosaicNoteShot] removeClip requested wb=${wb.id}")
+    override fun onLocateNoteLink(shotId: String) {
+        val region = NoteLinks.regionOf(shotId) ?: return
+        cancelFingerGestures("locate-note-link")
+        val top = chrome.toolbarHeightPx() / density
+        val w = host.width / density
+        val h = max(1f, host.height / density - top)
+        val fit = min(w / max(region.width(), 1f), h / max(region.height(), 1f))
+        val scale = BoardGeometry.clampZoom(min(BoardEngine.scale, fit))
+        val centered = SparseNavigation.panToCenterRect(region, w, h, scale)
+        chrome.hideSwitcher()
+        refreshHostToolFlags()
+        commitViewport(centered[0], centered[1] + top, scale)
+        Log.i(TAG_SHOT, "locate link id=$shotId region=$region scale=$scale")
     }
 
     
 
     
-    private var captureBusy = false
+    private var noteShotBusy = false
+    
+    private var noteShotFocusToken = 0
+    
+    private var noteShotSessionActive = false
 
     
-    override fun onCaptureWhiteboard(id: String) {
+    private class NoteShotPng(val path: String, val width: Int, val height: Int, val hotspot: NoteShotExport.Hotspot)
+
+    
+    private fun canInsertIntoHostNote(): Boolean =
+        surface.showsBoardChrome && MosaicNoteShotModule.currentHostNotePath() != null
+
+    
+    private fun onInsertLassoIntoNote() {
+        val sel = lasso ?: return
+        if (!canInsertIntoHostNote()) {
+            Log.i(TAG_SHOT, "insert skipped: host file is not a note or surface=${surface.name}")
+            return
+        }
+        if (noteShotBusy) {
+            Log.i(TAG_SHOT, "insert ignored: previous snapshot still rendering")
+            return
+        }
+        val anchored = synchronized(BoardEngine.lock) { NoteShotExport.capture(sel.cardIds, sel.strokeIds) } ?: return
+        val layout = NoteShotExport.layout(
+            anchored.region, BoardEngine.scale * density, density,
+            host.width * NOTE_SHOT_MAX_SCREEN_FRACTION, host.height * NOTE_SHOT_MAX_SCREEN_FRACTION,
+        )
+        val fingerprint = NoteShotExport.fingerprint(anchored.region)
+        val shotId = newId("shot-")
+        val screen = realDisplaySize()
+        Log.i(
+            TAG_SHOT,
+            "insert render id=$shotId region=${anchored.region} cards=${anchored.cards.size} " +
+                "strokes=${anchored.strokes.size} pxPerWorld=${layout.pxPerWorld} out=${layout.widthPx}x${layout.heightPx}",
+        )
+        renderNoteShotPng(shotId, layout) { png ->
+            if (png == null) return@renderNoteShotPng
+            
+            
+            setLasso(null)
+            emitter.begin()
+            emitter.action("noteShotReady") {
+                putString("shotId", shotId)
+                putNoteShotPng(this, png, anchored, fingerprint, layout.pxPerWorld)
+                putInt("screenW", screen.x)
+                putInt("screenH", screen.y)
+            }
+            emitter.commit()
+        }
+    }
+
+    
+    fun focusNoteShot(json: String) {
+        val shot = NoteShotExport.Shot.parse(json)
+        if (shot == null) {
+            Log.w(TAG_SHOT, "focus skipped: unreadable shot")
+            return
+        }
+        noteShotSessionActive = true
+        val token = ++noteShotFocusToken
+        focusNoteShotWhenReady(shot, token, NOTE_SHOT_FOCUS_RETRIES)
+    }
+
+    private fun focusNoteShotWhenReady(shot: NoteShotExport.Shot, token: Int, retries: Int) {
+        if (token != noteShotFocusToken) return
+        if (host.width == 0 || host.height == 0 || surfaceSwitching || !surface.showsBoardChrome) {
+            if (retries > 0) {
+                handler.postDelayed({ focusNoteShotWhenReady(shot, token, retries - 1) }, NOTE_SHOT_FOCUS_RETRY_MS)
+            } else {
+                Log.w(TAG_SHOT, "focus gave up id=${shot.id} width=${host.width} surface=${surface.name}")
+            }
+            return
+        }
+        val region = synchronized(BoardEngine.lock) { NoteShotExport.resolve(shot) }?.region ?: return
+        cancelFingerGestures("note-shot")
+        setLasso(null)
         chrome.hideSwitcher()
         refreshHostToolFlags()
-        if (captureBusy) {
-            Log.i(TAG, "[MosaicNoteShot] capture ignored: busy wb=$id")
+        
+        val top = chrome.toolbarHeightPx() / density
+        val w = host.width / density
+        val h = max(1f, host.height / density - top)
+        val fit = min(w / max(region.width(), 1f), h / max(region.height(), 1f))
+        val captured = if (shot.pxPerWorld > 0f) shot.pxPerWorld / density else BoardEngine.scale
+        val scale = BoardGeometry.clampZoom(min(captured, fit))
+        val centered = SparseNavigation.panToCenterRect(region, w, h, scale)
+        commitViewport(centered[0], centered[1] + top, scale)
+        Log.i(TAG_SHOT, "focus id=${shot.id} region=$region scale=$scale")
+    }
+
+    
+    fun renderNoteShot(json: String, done: (WritableMap?) -> Unit) {
+        val shot = NoteShotExport.Shot.parse(json)
+        if (shot == null || !surface.showsBoardChrome || noteShotBusy) {
+            Log.i(TAG_SHOT, "render skipped id=${shot?.id} surface=${surface.name} busy=$noteShotBusy")
+            done(null)
             return
         }
-        val wb = BoardEngine.whiteboards[id] ?: return
-        val plan = synchronized(BoardEngine.lock) {
-            WhiteboardExport.plan(wb, BoardEngine.cards.values, BoardEngine.strokes.values)
-        }
-        if (plan == null) {
-            Log.i(TAG, "[MosaicNoteShot] export skipped empty content wb=$id")
+        val anchored = synchronized(BoardEngine.lock) { NoteShotExport.resolve(shot) }
+        if (anchored == null) {
+            done(null)
             return
         }
-        val densityValue = density
-        val scale = WhiteboardExport.exportScale(plan.bounds, host.width / densityValue, host.height / densityValue)
-        val scalePx = scale * densityValue
-        val displayName = chrome.whiteboardDisplayName(wb.name)
-        val outPath = "$SHOT_DIR/${wb.id}-${System.currentTimeMillis()}.png"
-        Log.i(
-            TAG,
-            "[MosaicNoteShot] export bounds=${plan.bounds} items=cards:${plan.cardCount},ink:${plan.strokeCount} " +
-                "scale=$scale output=${Math.ceil((plan.bounds.width() * scalePx).toDouble()).toInt()}x" +
-                "${Math.ceil((plan.bounds.height() * scalePx).toDouble()).toInt()} path=$outPath",
+        val fingerprint = NoteShotExport.fingerprint(anchored.region)
+        if (fingerprint == shot.fingerprint) {
+            Log.i(TAG_SHOT, "render id=${shot.id} unchanged")
+            done(Arguments.createMap().apply { putBoolean("unchanged", true) })
+            return
+        }
+        val pxPerWorld = if (shot.pxPerWorld > 0f) shot.pxPerWorld else BoardEngine.scale * density
+        val layout = NoteShotExport.layout(
+            anchored.region, pxPerWorld, density,
+            host.width * NOTE_SHOT_MAX_SCREEN_FRACTION, host.height * NOTE_SHOT_MAX_SCREEN_FRACTION,
         )
-        captureBusy = true
+        Log.i(
+            TAG_SHOT,
+            "render id=${shot.id} region=${anchored.region} cards=${anchored.cards.size} " +
+                "strokes=${anchored.strokes.size} out=${layout.widthPx}x${layout.heightPx}",
+        )
+        renderNoteShotPng(shot.id, layout) { png ->
+            if (png == null) {
+                done(null)
+                return@renderNoteShotPng
+            }
+            done(Arguments.createMap().apply {
+                putBoolean("unchanged", false)
+                putNoteShotPng(this, png, anchored, fingerprint, layout.pxPerWorld)
+            })
+        }
+    }
+
+    private fun putNoteShotPng(
+        map: WritableMap,
+        png: NoteShotPng,
+        anchored: NoteShotExport.Anchored,
+        fingerprint: String,
+        pxPerWorld: Float,
+    ) {
+        val region = anchored.region
+        map.putString("path", png.path)
+        map.putInt("width", png.width)
+        map.putInt("height", png.height)
+        map.putMap("rect", Arguments.createMap().apply {
+            putDouble("x", region.left.toDouble())
+            putDouble("y", region.top.toDouble())
+            putDouble("w", region.width().toDouble())
+            putDouble("h", region.height().toDouble())
+        })
+        map.putMap("hotspot", Arguments.createMap().apply {
+            putDouble("x", png.hotspot.x.toDouble())
+            putDouble("y", png.hotspot.y.toDouble())
+            putDouble("w", png.hotspot.w.toDouble())
+            putDouble("h", png.hotspot.h.toDouble())
+        })
+        map.putString("anchors", anchored.anchorsJson())
+        map.putString("fingerprint", fingerprint)
+        map.putDouble("pxPerWorld", pxPerWorld.toDouble())
+    }
+
+    
+    private fun renderNoteShotPng(shotId: String, layout: NoteShotExport.Layout, done: (NoteShotPng?) -> Unit) {
+        noteShotBusy = true
+        val densityValue = density
+        val outPath = "$NOTE_SHOT_DIR/$shotId-${System.currentTimeMillis()}.png"
         val startedAt = SystemClock.uptimeMillis()
-        content.renderExport(plan.bounds, scalePx) { bitmap ->
+        content.renderExport(layout.region, layout.pxPerWorld, layout.stripPx) { bitmap ->
             if (bitmap == null) {
-                Log.w(TAG, "[MosaicNoteShot] export raster failed wb=$id")
-                handler.post { captureBusy = false }
+                Log.w(TAG_SHOT, "raster failed id=$shotId")
+                handler.post {
+                    noteShotBusy = false
+                    done(null)
+                }
                 return@renderExport
             }
-            val hotspot = WhiteboardExport.drawLabel(Canvas(bitmap), displayName, densityValue, bitmap.width, bitmap.height)
+            val hotspot = NoteShotExport.drawTag(Canvas(bitmap), densityValue, bitmap.width, bitmap.height)
             Thread({
-                var ok = false
+                var png: NoteShotPng? = null
                 try {
                     val file = File(outPath)
                     file.parentFile?.mkdirs()
                     val tmp = File("$outPath.tmp")
-                    FileOutputStream(tmp).use { stream -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream) }
+                    NoteShotExport.writeGrayPng(bitmap, tmp)
                     if (!tmp.renameTo(file)) throw IllegalStateException("rename failed $tmp -> $file")
-                    ok = true
+                    png = NoteShotPng(outPath, bitmap.width, bitmap.height, hotspot)
                     Log.i(
-                        TAG,
-                        "[MosaicNoteShot] capture ok ${bitmap.width}x${bitmap.height}px ${file.length() / 1024}KB " +
+                        TAG_SHOT,
+                        "png ok ${bitmap.width}x${bitmap.height}px ${file.length() / 1024}KB " +
                             "in ${SystemClock.uptimeMillis() - startedAt}ms -> $outPath",
                     )
                 } catch (error: Throwable) {
-                    Log.e(TAG, "[MosaicNoteShot] capture: png write failed", error)
+                    Log.e(TAG_SHOT, "png write failed id=$shotId", error)
                 } finally {
                     bitmap.recycle()
                 }
                 handler.post {
-                    captureBusy = false
-                    if (!ok) return@post
-                    emitter.begin()
-                    emitter.action("captureReady") {
-                        putString("path", outPath)
-                        putString("wbId", wb.id)
-                        putString("wbName", wb.name)
-                        putMap("rect", Arguments.createMap().apply {
-                            putDouble("x", wb.x.toDouble())
-                            putDouble("y", wb.y.toDouble())
-                            putDouble("w", wb.width.toDouble())
-                            putDouble("h", wb.height.toDouble())
-                        })
-                        putMap("hotspot", Arguments.createMap().apply {
-                            putDouble("x", hotspot.x.toDouble())
-                            putDouble("y", hotspot.y.toDouble())
-                            putDouble("w", hotspot.w.toDouble())
-                            putDouble("h", hotspot.h.toDouble())
-                        })
-                    }
-                    emitter.commit()
+                    noteShotBusy = false
+                    done(png)
                 }
             }, "MosaicNoteShotPng").start()
         }
     }
 
-    override fun onNavigateWhiteboard(id: String) {
-        val wb = BoardEngine.whiteboards[id] ?: return
-        val w = host.width / density
-        val h = host.height / density
-        val fit = min(w / wb.width, h / wb.height)
-        val scale = BoardGeometry.clampZoom(fit)
-        val centered = SparseNavigation.panToCenterRect(wb.rect(), w, h, scale)
-        chrome.hideSwitcher()
-        refreshHostToolFlags()
-        commitViewport(centered[0], centered[1], scale)
-        Log.i(TAG, "[Whiteboard] navigated to ${wb.name} scale=$scale")
+    
+    @Suppress("DEPRECATION")
+    private fun realDisplaySize(): Point {
+        val point = Point()
+        try {
+            (host.context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay?.getRealSize(point)
+        } catch (error: Throwable) {
+            Log.w(TAG_SHOT, "display size read failed: $error")
+        }
+        if (point.x <= 0 || point.y <= 0) point.set(host.width, host.height)
+        return point
     }
 
     

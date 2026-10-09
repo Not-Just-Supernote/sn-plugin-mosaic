@@ -11,7 +11,6 @@ class BoardHistory(private val limit: Int = MAX_UNDO_STACK) {
         class Stroke(val before: BoardEngine.StrokeRec?, val after: BoardEngine.StrokeRec?) : Diff()
         class Card(val before: BoardEngine.CardRec?, val after: BoardEngine.CardRec?) : Diff()
         class Connection(val before: BoardEngine.ConnectionRec?, val after: BoardEngine.ConnectionRec?) : Diff()
-        class Whiteboard(val before: BoardEngine.WhiteboardRec?, val after: BoardEngine.WhiteboardRec?) : Diff()
     }
 
     class Change(val label: String) {
@@ -21,7 +20,6 @@ class BoardHistory(private val limit: Int = MAX_UNDO_STACK) {
         fun stroke(before: BoardEngine.StrokeRec?, after: BoardEngine.StrokeRec?) = apply { diffs.add(Diff.Stroke(before, after)) }
         fun card(before: BoardEngine.CardRec?, after: BoardEngine.CardRec?) = apply { diffs.add(Diff.Card(before, after)) }
         fun connection(before: BoardEngine.ConnectionRec?, after: BoardEngine.ConnectionRec?) = apply { diffs.add(Diff.Connection(before, after)) }
-        fun whiteboard(before: BoardEngine.WhiteboardRec?, after: BoardEngine.WhiteboardRec?) = apply { diffs.add(Diff.Whiteboard(before, after)) }
 
         
         fun absorb(other: Change) = apply { diffs.addAll(other.diffs) }

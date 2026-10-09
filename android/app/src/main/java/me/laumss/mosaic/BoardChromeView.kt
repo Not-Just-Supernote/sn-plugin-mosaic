@@ -21,6 +21,7 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.content.res.ColorStateList
 import android.widget.TextView
+import kotlin.math.min
 
 class BoardChromeView(context: Context) : FrameLayout(context) {
 
@@ -39,7 +40,9 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         
         private const val MENU_SCREEN_MARGIN_DP = 20f
         
-        const val MENU_SWITCHER_MIDDLE_HIDDEN = true
+        private const val LINKS_GAP_DP = 16f
+        
+        private const val LINKS_MIN_HEIGHT_DP = 150f
         
         private const val MENU_EXTRA_WIDTH_DP = 40f
         
@@ -71,25 +74,18 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         fun onZoomStep(direction: Int)
         fun onZoomReset()
         fun onToggleTouch()
-        fun onSetWhiteboard()
-        fun onDeleteWhiteboard()
         fun onDeleteSelectedCard()
         fun onToggleCardAccent()
         fun onApplySizeLevel(level: BoardGeometry.SizeLevel)
         fun onDeleteLassoSelection()
-        
-        fun onRecognizeLasso()
         fun onClose()
         fun onJumpToRegion(region: SparseNavigation.Region)
-        fun onNavigateWhiteboard(id: String)
-        
-        fun onCaptureWhiteboard(id: String)
-        
-        fun onRemoveClip(id: String)
         
         fun onOpenNoteCard(cardId: String)
         
         fun onLocateNoteCard(cardId: String)
+        
+        fun onLocateNoteLink(shotId: String)
         fun onSwitcherDismissed()
         
         fun onPenStyle(style: PenStyle, width: Float)
@@ -119,12 +115,8 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
     private val zoomOut = textButton("－", 22f, bordered = false)
     private val zoomReadout = textButton("100%", 15f, bordered = false)
     private val zoomIn = textButton("＋", 22f, bordered = false)
-    private val setWhiteboardButton = textButton("", 17f)
-    private val deleteWhiteboardButton = textButton("", 17f)
     private val lassoEditButton = textButton("", 17f).apply { alpha = 0.35f; isEnabled = false }
     private val lassoDeleteButton = textButton("", 17f)
-    
-    private val recognizeLassoButton = textButton("", 17f)
     
     private val syncAddressInput = EditText(context).apply {
         isSingleLine = true
@@ -210,14 +202,16 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
 
     private val switcherRoot = FrameLayout(context)
     private val switcherPanel = LinearLayout(context)
-    private val switcherList = LinearLayout(context)
-    private val switcherEmpty = TextView(context)
     
     private val switcherNotesTitle = TextView(context)
     private val switcherNotesList = LinearLayout(context)
     private val switcherNotesEmpty = TextView(context)
-    private lateinit var switcherWhiteboardScroll: ScrollView
     private lateinit var switcherNotesScroll: ScrollView
+    
+    private val linksPanel = LinearLayout(context)
+    private val linksTitle = TextView(context)
+    private val linksList = LinearLayout(context)
+    private val linksScroll = ScrollView(context)
 
     private var touchEnabled = false
     private var translucentActive = false
@@ -480,21 +474,12 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
 
     @Suppress("UNUSED_PARAMETER")
     fun setMode(
-        currentWhiteboard: Boolean,
         selectedCard: Boolean,
         selectedCardColored: Boolean,
         sizeLevels: List<BoardGeometry.SizeLevel>,
         lassoCards: Boolean,
         selectedCardKind: String? = null,
-        lassoStrokes: Boolean = false,
     ) {
-        val plain = !selectedCard && !lassoCards
-        
-        recognizeLassoButton.visibility = if (lassoStrokes && !selectedCard) View.VISIBLE else View.GONE
-        setWhiteboardButton.visibility =
-            if (MENU_SWITCHER_MIDDLE_HIDDEN) View.GONE
-            else if (plain && !currentWhiteboard) View.VISIBLE else View.GONE
-        deleteWhiteboardButton.visibility = if (plain && currentWhiteboard) View.VISIBLE else View.GONE
         lassoEditButton.visibility = if (lassoCards) View.VISIBLE else View.GONE
         lassoDeleteButton.visibility = if (lassoCards) View.VISIBLE else View.GONE
         val showGlobalTools = !selectedCard
@@ -608,6 +593,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
                 topMargin = dp(MENU_SCREEN_MARGIN_DP)
             },
         )
+        buildLinksPanel()
 
         zoomBar.orientation = LinearLayout.HORIZONTAL
         zoomBar.gravity = Gravity.CENTER_VERTICAL
@@ -621,7 +607,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         val toolsScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
         toolsRow.orientation = LinearLayout.HORIZONTAL
         toolsRow.gravity = Gravity.CENTER_VERTICAL
-        for (button in listOf(translucentButton, setWhiteboardButton, deleteWhiteboardButton, recognizeLassoButton, lassoEditButton, lassoDeleteButton)) {
+        for (button in listOf(translucentButton, lassoEditButton, lassoDeleteButton)) {
             toolsRow.addView(button, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48f)).apply { marginEnd = dp(10f) })
         }
         translucentLevelGroup.addView(translucentSlider, LinearLayout.LayoutParams(dp(180f), dp(48f)))
@@ -662,18 +648,15 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             false
         }
         translucentButton.setOnClickListener { listener?.onToggleTranslucent() }
-        setWhiteboardButton.setOnClickListener { listener?.onSetWhiteboard() }
-        deleteWhiteboardButton.setOnClickListener { listener?.onDeleteWhiteboard() }
         lassoDeleteButton.setOnClickListener { listener?.onDeleteLassoSelection() }
-        recognizeLassoButton.setOnClickListener { listener?.onRecognizeLasso() }
 
         
-        val whiteboardHeader = LinearLayout(context).apply {
+        val menuHeader = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(8f), 0, dp(8f))
         }
-        whiteboardHeader.addView(
+        menuHeader.addView(
             zoomBar,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT),
         )
@@ -682,19 +665,19 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         val loadArchiveButton = textButton(MosaicStrings.t(MosaicStrings.Key.archiveLoad), 15f)
         loadArchiveButton.setOnClickListener { listener?.onLoadArchive() }
         
-        whiteboardHeader.addView(saveArchiveButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(12f) })
-        whiteboardHeader.addView(loadArchiveButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(8f) })
-        whiteboardHeader.addView(
+        menuHeader.addView(saveArchiveButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(12f) })
+        menuHeader.addView(loadArchiveButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(8f) })
+        menuHeader.addView(
             View(context),
             LinearLayout.LayoutParams(0, 0, 1f),
         )
         val templateMenuButton = textButton(MosaicStrings.t(MosaicStrings.Key.template), 15f)
         templateMenuButton.setOnClickListener { toggleMenuTemplatePopup() }
-        whiteboardHeader.addView(
+        menuHeader.addView(
             templateMenuButton,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)),
         )
-        switcherPanel.addView(whiteboardHeader)
+        switcherPanel.addView(menuHeader)
 
         
         val syncRow = LinearLayout(context).apply {
@@ -706,21 +689,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         syncRow.addView(syncButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(8f) })
         syncRow.addView(syncStatus, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(10f) })
         switcherPanel.addView(syncRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-
-        switcherEmpty.textSize = 16f
-        switcherEmpty.setTextColor(MUTED)
-        switcherPanel.addView(switcherEmpty)
-
-        switcherWhiteboardScroll = ScrollView(context)
-        switcherList.orientation = LinearLayout.VERTICAL
-        switcherWhiteboardScroll.addView(
-            switcherList,
-            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-        )
-        switcherPanel.addView(
-            switcherWhiteboardScroll,
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0).apply { weight = 1f },
-        )
 
         
         switcherNotesTitle.textSize = 18f
@@ -752,30 +720,19 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         )
 
         applyMenuRowStrings()
-        applySwitcherMiddleVisibility()
-        setMode(currentWhiteboard = false, selectedCard = false, selectedCardColored = false, sizeLevels = emptyList(), lassoCards = false)
+        setMode(selectedCard = false, selectedCardColored = false, sizeLevels = emptyList(), lassoCards = false)
         setZoom(BoardGeometry.DEFAULT_ZOOM)
-    }
-
-    
-    private fun applySwitcherMiddleVisibility() {
-        if (!MENU_SWITCHER_MIDDLE_HIDDEN) return
-        switcherEmpty.visibility = View.GONE
-        switcherWhiteboardScroll.visibility = View.GONE
     }
 
     
     private fun applyMenuRowStrings() {
         applySyncButton()
         translucentButton.text = MosaicStrings.t(MosaicStrings.Key.translucent)
-        setWhiteboardButton.text = MosaicStrings.t(MosaicStrings.Key.setWhiteboard)
-        deleteWhiteboardButton.text = MosaicStrings.t(MosaicStrings.Key.deleteWhiteboard)
         lassoEditButton.text = MosaicStrings.t(MosaicStrings.Key.edit)
         lassoDeleteButton.text = MosaicStrings.t(MosaicStrings.Key.deleteCard)
-        recognizeLassoButton.text = MosaicStrings.t(MosaicStrings.Key.recognizeCard)
-        switcherEmpty.text = MosaicStrings.t(MosaicStrings.Key.whiteboardSwitcherEmpty)
         switcherNotesTitle.text = MosaicStrings.t(MosaicStrings.Key.notes)
         switcherNotesEmpty.text = MosaicStrings.t(MosaicStrings.Key.notesEmpty)
+        linksTitle.text = MosaicStrings.t(MosaicStrings.Key.noteLinks)
         zoomOut.contentDescription = MosaicStrings.t(MosaicStrings.Key.zoomOut)
         zoomIn.contentDescription = MosaicStrings.t(MosaicStrings.Key.zoomIn)
         zoomReadout.contentDescription = MosaicStrings.t(MosaicStrings.Key.zoomDefault)
@@ -783,60 +740,9 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
 
     val switcherOpen: Boolean get() = switcherRoot.visibility == View.VISIBLE
 
-    fun showSwitcher(
-        whiteboards: List<BoardEngine.WhiteboardRec>,
-        noteCards: List<BoardEngine.CardRec>,
-        clipped: Set<String>,
-    ) {
-        switcherList.removeAllViews()
-        if (!MENU_SWITCHER_MIDDLE_HIDDEN) {
-            switcherEmpty.visibility = if (whiteboards.isEmpty()) View.VISIBLE else View.GONE
-        }
-        for (wb in whiteboards) {
-            val row = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, dp(10f), 0, dp(10f))
-                isClickable = true
-                setOnClickListener { listener?.onNavigateWhiteboard(wb.id) }
-            }
-            val name = displayName(wb.name)
-            val thumb = TextView(context).apply {
-                text = name.take(2)
-                textSize = 18f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(INK)
-                gravity = Gravity.CENTER
-                background = borderDrawable(Color.WHITE, 2f, 6f)
-            }
-            row.addView(thumb, LinearLayout.LayoutParams(dp(56f), dp(56f)).apply { marginEnd = dp(14f) })
-            val meta = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-            meta.addView(TextView(context).apply {
-                text = name
-                textSize = 18f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(INK)
-            })
-            meta.addView(TextView(context).apply {
-                text = "(${Math.round(wb.x)}, ${Math.round(wb.y)}) ${Math.round(wb.width)}×${Math.round(wb.height)}"
-                textSize = 13f
-                setTextColor(MUTED)
-            })
-            row.addView(meta, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            
-            val removable = clipped.contains(wb.id)
-            val clip = GlyphButton(
-                context,
-                { c, s, p -> ToolIcons.clip(c, s, p, removable) },
-                { if (removable) listener?.onRemoveClip(wb.id) else listener?.onCaptureWhiteboard(wb.id) },
-            )
-            clip.contentDescription = MosaicStrings.t(
-                if (removable) MosaicStrings.Key.removeQuickAccess else MosaicStrings.Key.quickAccess,
-            )
-            row.addView(clip, LinearLayout.LayoutParams(dp(48f), dp(48f)).apply { marginStart = dp(10f) })
-            switcherList.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        }
+    fun showSwitcher(noteCards: List<BoardEngine.CardRec>, links: List<NoteLinks.Link>) {
         showNoteCards(noteCards)
+        showNoteLinks(links)
         applyMenuRowStrings()
         hidePopups()
         
@@ -904,6 +810,76 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         }
     }
 
+    private fun buildLinksPanel() {
+        linksPanel.orientation = LinearLayout.VERTICAL
+        linksPanel.setPadding(dp(24f), dp(12f), dp(24f), dp(12f))
+        linksPanel.isClickable = true
+        linksPanel.visibility = View.GONE
+        linksPanel.background = GradientDrawable().apply {
+            setColor(Color.WHITE)
+            setStroke(dp(2f), INK)
+        }
+        linksTitle.textSize = 18f
+        linksTitle.typeface = Typeface.DEFAULT_BOLD
+        linksTitle.setTextColor(INK)
+        linksTitle.setPadding(0, dp(4f), 0, dp(4f))
+        linksPanel.addView(linksTitle)
+        linksList.orientation = LinearLayout.VERTICAL
+        linksScroll.addView(
+            linksList,
+            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+        )
+        linksPanel.addView(
+            linksScroll,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+        )
+        switcherRoot.addView(
+            linksPanel,
+            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START),
+        )
+    }
+
+    
+    private fun showNoteLinks(links: List<NoteLinks.Link>) {
+        linksList.removeAllViews()
+        linksPanel.visibility = if (links.isEmpty()) View.GONE else View.VISIBLE
+        val thumbSize = dp(56f)
+        for (link in links) {
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(10f), 0, dp(10f))
+                isClickable = true
+                setOnClickListener { listener?.onLocateNoteLink(link.id) }
+            }
+            val thumb = TextView(context).apply {
+                text = if (link.page >= 0) "P${link.page + 1}" else "↗"
+                textSize = 16f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(INK)
+                gravity = Gravity.CENTER
+                background = borderDrawable(Color.WHITE, 2f, 6f)
+            }
+            row.addView(thumb, LinearLayout.LayoutParams(thumbSize, thumbSize).apply { marginEnd = dp(14f) })
+            val meta = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+            meta.addView(TextView(context).apply {
+                text = NoteLinks.displayName(link)
+                textSize = 18f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(INK)
+                isSingleLine = true
+            })
+            meta.addView(TextView(context).apply {
+                text = MosaicStrings.noteLinkDetail(link.page, link.updatedAt)
+                textSize = 13f
+                setTextColor(MUTED)
+                isSingleLine = true
+            })
+            row.addView(meta, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            linksList.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (switcherOpen) layoutSwitcherPanel()
@@ -915,30 +891,46 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         val margin = dp(MENU_SCREEN_MARGIN_DP)
         
         val panelWidth = if (cachedSwitcherWidthPx > 0) cachedSwitcherWidthPx else switcherPanelWidthPx()
-        val maxHeight = (height - 2 * margin).coerceAtLeast(dp(160f))
-        val lp = switcherPanel.layoutParams as LayoutParams
-        lp.width = panelWidth
-        lp.height = if (MENU_SWITCHER_MIDDLE_HIDDEN) {
-            
-            val notesLp = switcherNotesScroll.layoutParams as LinearLayout.LayoutParams
-            notesLp.weight = 0f
-            notesLp.height = LinearLayout.LayoutParams.WRAP_CONTENT
-            switcherNotesScroll.layoutParams = notesLp
-            switcherPanel.measure(
+        val showLinks = linksPanel.visibility == View.VISIBLE
+        val gap = dp(LINKS_GAP_DP)
+        val available = (height - 2 * margin).coerceAtLeast(dp(160f))
+        var linksNatural = 0
+        if (showLinks) {
+            val scrollLp = linksScroll.layoutParams as LinearLayout.LayoutParams
+            scrollLp.weight = 0f
+            scrollLp.height = LinearLayout.LayoutParams.WRAP_CONTENT
+            linksScroll.layoutParams = scrollLp
+            linksPanel.measure(
                 MeasureSpec.makeMeasureSpec(panelWidth, MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
             )
-            val natural = switcherPanel.measuredHeight
-            if (natural <= maxHeight) {
-                LayoutParams.WRAP_CONTENT
-            } else {
-                
-                notesLp.weight = 1f
-                notesLp.height = 0
-                switcherNotesScroll.layoutParams = notesLp
-                maxHeight
-            }
+            linksNatural = linksPanel.measuredHeight
+        }
+        
+        val maxHeight = if (showLinks) {
+            (available - gap - min(linksNatural, dp(LINKS_MIN_HEIGHT_DP))).coerceAtLeast(dp(160f))
         } else {
+            available
+        }
+        val lp = switcherPanel.layoutParams as LayoutParams
+        lp.width = panelWidth
+        
+        val notesLp = switcherNotesScroll.layoutParams as LinearLayout.LayoutParams
+        notesLp.weight = 0f
+        notesLp.height = LinearLayout.LayoutParams.WRAP_CONTENT
+        switcherNotesScroll.layoutParams = notesLp
+        switcherPanel.measure(
+            MeasureSpec.makeMeasureSpec(panelWidth, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+        )
+        val natural = switcherPanel.measuredHeight
+        lp.height = if (natural <= maxHeight) {
+            LayoutParams.WRAP_CONTENT
+        } else {
+            
+            notesLp.weight = 1f
+            notesLp.height = 0
+            switcherNotesScroll.layoutParams = notesLp
             maxHeight
         }
         lp.gravity = Gravity.TOP or Gravity.START
@@ -946,6 +938,30 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         lp.topMargin = margin
         switcherPanel.layoutParams = lp
         switcherPanel.requestLayout()
+        if (showLinks) {
+            val mainHeight = min(natural, maxHeight)
+            layoutLinksPanel(panelWidth, margin + mainHeight + gap, available - mainHeight - gap, linksNatural)
+        }
+    }
+
+    
+    private fun layoutLinksPanel(panelWidth: Int, top: Int, room: Int, natural: Int) {
+        val lp = linksPanel.layoutParams as LayoutParams
+        lp.width = panelWidth
+        lp.gravity = Gravity.TOP or Gravity.START
+        lp.leftMargin = dp(MENU_SCREEN_MARGIN_DP)
+        lp.topMargin = top
+        val scrollLp = linksScroll.layoutParams as LinearLayout.LayoutParams
+        if (natural <= room) {
+            lp.height = LayoutParams.WRAP_CONTENT
+        } else {
+            scrollLp.weight = 1f
+            scrollLp.height = 0
+            lp.height = room.coerceAtLeast(dp(80f))
+        }
+        linksScroll.layoutParams = scrollLp
+        linksPanel.layoutParams = lp
+        linksPanel.requestLayout()
     }
 
     private fun switcherPanelWidthPx(): Int {
@@ -955,7 +971,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         val lassoRight = base + inkToolbar.lassoCellRightPx()
         val margin = dp(MENU_SCREEN_MARGIN_DP)
         
-        val extra = if (MENU_SWITCHER_MIDDLE_HIDDEN) dp(MENU_EXTRA_WIDTH_DP) else 0
+        val extra = dp(MENU_EXTRA_WIDTH_DP)
         return (lassoRight - margin + extra).coerceIn(dp(160f), (width - 2 * margin).coerceAtLeast(dp(160f)))
     }
 
@@ -973,19 +989,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
 
     private fun bringChromeToFront() {
         if (switcherOpen && indexOfChild(switcherRoot) != childCount - 1) switcherRoot.bringToFront()
-    }
-
-    private fun displayName(name: String): String {
-        val number = BoardGeometry.defaultWhiteboardNumber(name)
-        return if (number == null) name else MosaicStrings.whiteboardName(number)
-    }
-
-    fun whiteboardDisplayName(name: String): String =
-        displayName(name).ifEmpty { MosaicStrings.t(MosaicStrings.Key.whiteboard) }
-
-    fun newWhiteboardName(existing: Collection<BoardEngine.WhiteboardRec>): String {
-        val n = BoardGeometry.nextWhiteboardNumber(existing)
-        return MosaicStrings.whiteboardName(n)
     }
 
     

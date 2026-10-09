@@ -1,74 +1,131 @@
-import { DeviceEventEmitter, Dimensions, NativeModules } from 'react-native';
+import { NativeModules } from 'react-native';
 import RNFS from 'react-native-fs';
 import {
+  NativePluginManager,
   PluginCommAPI,
   PluginFileAPI,
   PluginManager,
-  PluginNoteAPI,
-  type Rect,
 } from 'sn-plugin-lib';
 
+
+
 const LOG = '[MosaicNoteShot]';
-export const NOTE_SHOT_USERDATA_PREFIX = 'MOSAIC:';
 export const RESTORE_TARGET_EVENT = 'MosaicRestoreTarget';
-const BOARD_VISIBILITY_EVENT = 'MosaicBoardVisibility';
 
 const TYPE_PICTURE = 200;
+
+const MAIN_LAYER = 0;
 const FILE_READ_PERMISSION = 'plugin.permission.FILE:READ';
 const FILE_WRITE_PERMISSION = 'plugin.permission.FILE:WRITE';
 const GRANTED_PERMISSION_STATUSES = new Set([1, 2]);
-const TAP_MAX_DISTANCE_PX = 16;
-const TAP_MAX_DURATION_MS = 450;
-const TAP_HIT_PAD_PX = 8;
-const FINGER_TOOL_TYPE = 1;
-const REGISTRY_FILENAME = 'mosaic-note-shot-links.json';
-const MAX_REGISTRY_LINKS = 512;
+
+const USERDATA_MARKER = 'mosaicShot';
+const STORE_FILENAME = 'note-shots.json';
+
+const MAX_RECORDS = 300;
+
+const MAX_VERSIONS = 12;
+
+const PAGE_MARGIN = 48;
+
+const LASSO_PAD = 4;
+
+const RENDER_TIMEOUT_MS = 4000;
+
+const SHOT_DIR_FRAGMENT = '/EXPORT/mosaic/shots/';
 
 type MosaicNoteShotNativeModule = {
   takePendingRestore(): Promise<string | null>;
+  
+  pictureSignature?(path: string, aspect: number): Promise<{ width: number; height: number; sig: string } | null>;
+};
+
+type MosaicBoardEngineShotModule = {
+  focusNoteShot?(viewTag: number, shotJson: string): void;
+  renderNoteShot?(viewTag: number, shotJson: string): Promise<any>;
 };
 
 const MosaicNoteShot = NativeModules.MosaicNoteShot as MosaicNoteShotNativeModule | undefined;
+const MosaicBoardEngine = NativeModules.MosaicBoardEngine as MosaicBoardEngineShotModule | undefined;
 
-export interface NoteShotMeta {
-  v: 1;
-  wbId: string;
-  wbName: string;
+export type ShotRect = { x: number; y: number; w: number; h: number };
+
+export type ShotBox = [number, number, number, number];
+
+export type ShotXYWH = [number, number, number, number];
+
+
+export interface NoteShotVersion {
   
-  rect: { x: number; y: number; w: number; h: number };
+  w: number;
+  h: number;
+  sig: string;
   
-  hotspot?: { x: number; y: number; w: number; h: number };
-  capturedAt: string;
+  hs: ShotXYWH;
+  
+  r: ShotXYWH;
+  f: string;
 }
 
-type NoteShotLink = {
+
+export interface NoteShotRecord {
   id: string;
+  
+  rect: ShotRect;
+  
+  cards: Record<string, ShotBox>;
+  strokes: Record<string, ShotBox>;
+  
+  fingerprint: string;
+  
+  pxPerWorld: number;
+  
+  versions: NoteShotVersion[];
+  notePath: string;
+  
+  page: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+
+export interface NoteShotPng {
+  path: string;
+  width: number;
+  height: number;
+  rect: ShotRect;
+  
+  hotspot: ShotRect;
+  cards: Record<string, ShotBox>;
+  strokes: Record<string, ShotBox>;
+  fingerprint: string;
+  pxPerWorld: number;
+}
+
+
+export interface NoteShotTarget {
+  id: string;
+  
+  rect: ShotRect | null;
+  
+  fingerprint: string | null;
   notePath: string;
   page: number;
-  pngBasename: string;
-  baselinePictureKeys: string[];
-  elementKey?: string;
   
-  insertedBasename?: string;
+  num: number;
   
-  insertedUuid?: string;
-  meta: NoteShotMeta;
-  createdAt: string;
-};
+  adopt: boolean;
+}
 
-type NoteShotRegistry = {
-  v: 1;
-  links: NoteShotLink[];
-};
+export type NoteShotInsertResult = 'ok' | 'not-note' | 'permission' | 'failed';
 
-type PictureRecord = {
-  element: any;
-  key: string;
-  basename: string;
-};
+type PageRect = { left: number; top: number; right: number; bottom: number };
+type PageSize = { width: number; height: number };
+type ShotStore = { v: 1; shots: Record<string, NoteShotRecord> };
 
-let registryPathPromise: Promise<string> | null = null;
-let registryQueue: Promise<unknown> = Promise.resolve();
+let storeQueue: Promise<unknown> = Promise.resolve();
+
+
 
 async function ensurePermission(permission: string, description: string): Promise<boolean> {
   try {
@@ -94,42 +151,206 @@ export async function ensureArchivePermissions(readReason: string, writeReason: 
 }
 
 export async function ensureNoteShotPermissions(): Promise<boolean> {
-  const readGranted = await ensurePermission(
-    FILE_READ_PERMISSION,
-    '读取白板截图并插入当前笔记',
-  );
-  if (!readGranted) return false;
-  return ensurePermission(
-    FILE_WRITE_PERMISSION,
-    '将白板截图写入当前笔记',
-  );
+  if (!(await ensurePermission(FILE_READ_PERMISSION, '读取白板截图并插入当前笔记'))) return false;
+  return ensurePermission(FILE_WRITE_PERMISSION, '将白板截图写入当前笔记');
 }
 
-function decodeNoteShotMeta(userData: unknown): NoteShotMeta | null {
-  if (typeof userData !== 'string' || !userData.startsWith(NOTE_SHOT_USERDATA_PREFIX)) return null;
-  return parseNoteShotMeta(userData.slice(NOTE_SHOT_USERDATA_PREFIX.length));
+
+
+async function resolveStorePath(): Promise<string> {
+  return `${await NativePluginManager.getPluginDirPath()}/${STORE_FILENAME}`;
 }
 
-function parseNoteShotMeta(json: string): NoteShotMeta | null {
+async function readStoreNow(): Promise<ShotStore> {
   try {
-    const parsed = JSON.parse(json) as NoteShotMeta;
-    if (parsed?.v !== 1 || typeof parsed.wbId !== 'string' || typeof parsed.rect?.w !== 'number') return null;
+    const path = await resolveStorePath();
+    if (!(await RNFS.exists(path))) return { v: 1, shots: {} };
+    const parsed = JSON.parse(await RNFS.readFile(path, 'utf8')) as ShotStore;
+    if (parsed?.v !== 1 || typeof parsed.shots !== 'object' || parsed.shots === null) return { v: 1, shots: {} };
     return parsed;
+  } catch (err) {
+    console.log(`${LOG} store read reset: ${err}`);
+    return { v: 1, shots: {} };
+  }
+}
+
+async function writeStoreNow(store: ShotStore): Promise<void> {
+  const records = Object.values(store.shots)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, MAX_RECORDS);
+  const shots: Record<string, NoteShotRecord> = {};
+  for (const record of records) shots[record.id] = record;
+  const path = await resolveStorePath();
+  const tmpPath = `${path}.tmp`;
+  await RNFS.writeFile(tmpPath, JSON.stringify({ v: 1, shots }), 'utf8');
+  if (await RNFS.exists(path)) await RNFS.unlink(path);
+  await RNFS.moveFile(tmpPath, path);
+}
+
+async function updateStore(mutate: (store: ShotStore) => void): Promise<void> {
+  const operation = storeQueue.then(async () => {
+    const store = await readStoreNow();
+    mutate(store);
+    await writeStoreNow(store);
+  });
+  storeQueue = operation.catch(() => {});
+  await operation;
+}
+
+async function getShotRecord(id: string): Promise<NoteShotRecord | null> {
+  await storeQueue.catch(() => {});
+  return (await readStoreNow()).shots[id] ?? null;
+}
+
+async function saveShotRecord(
+  id: string,
+  notePath: string,
+  page: number,
+  png: NoteShotPng,
+  version: NoteShotVersion | null,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await updateStore(store => {
+    const previous = store.shots[id];
+    const versions = (previous?.versions ?? []).filter(v => v.sig !== version?.sig);
+    if (version !== null) versions.push(version);
+    store.shots[id] = {
+      id,
+      rect: png.rect,
+      cards: png.cards,
+      strokes: png.strokes,
+      fingerprint: png.fingerprint,
+      pxPerWorld: png.pxPerWorld,
+      versions: versions.slice(-MAX_VERSIONS),
+      notePath,
+      page,
+      createdAt: previous?.createdAt ?? now,
+      updatedAt: now,
+    };
+  });
+}
+
+
+function shotJsonForNative(
+  id: string,
+  record: NoteShotRecord | null,
+  fallbackRect: ShotRect | null,
+  fingerprint?: string | null,
+): string {
+  return JSON.stringify({
+    id,
+    rect: record?.rect ?? fallbackRect,
+    cards: record?.cards ?? {},
+    strokes: record?.strokes ?? {},
+    fingerprint: fingerprint || record?.fingerprint || '',
+    pxPerWorld: record?.pxPerWorld ?? 0,
+  });
+}
+
+async function pictureSignature(
+  path: unknown,
+  aspect = 0,
+): Promise<{ width: number; height: number; sig: string } | null> {
+  if (typeof path !== 'string' || !path || MosaicNoteShot?.pictureSignature === undefined) return null;
+  try {
+    const result = await MosaicNoteShot.pictureSignature(path, Number.isFinite(aspect) && aspect > 0 ? aspect : 0);
+    return result && result.width > 0 && result.height > 0 && typeof result.sig === 'string' ? result : null;
+  } catch (err) {
+    console.log(`${LOG} picture signature failed path=${path}: ${err}`);
+    return null;
+  }
+}
+
+
+function signatureDistance(a: string, b: string): number {
+  if (!a || a.length !== b.length) return -1;
+  let bits = 0;
+  for (let i = 0; i < a.length; i++) {
+    let x = parseInt(a[i], 16) ^ parseInt(b[i], 16);
+    while (x) { bits += x & 1; x >>= 1; }
+  }
+  return bits;
+}
+
+
+async function versionOf(
+  png: NoteShotPng,
+  signature?: { width: number; height: number; sig: string } | null,
+): Promise<NoteShotVersion | null> {
+  const sig = signature ?? await pictureSignature(png.path, png.width / png.height);
+  if (sig === null) return null;
+  return {
+    w: sig.width,
+    h: sig.height,
+    sig: sig.sig,
+    hs: [round4(png.hotspot.x), round4(png.hotspot.y), round4(png.hotspot.w), round4(png.hotspot.h)],
+    r: [Math.round(png.rect.x), Math.round(png.rect.y), Math.round(png.rect.w), Math.round(png.rect.h)],
+    f: png.fingerprint,
+  };
+}
+
+
+
+function round4(value: number): number {
+  return Math.round(value * 10000) / 10000;
+}
+
+
+function encodeUserData(id: string, png: NoteShotPng): string {
+  const { hotspot, rect } = png;
+  return JSON.stringify({
+    [USERDATA_MARKER]: 1,
+    id,
+    hs: [round4(hotspot.x), round4(hotspot.y), round4(hotspot.w), round4(hotspot.h)],
+    r: [Math.round(rect.x), Math.round(rect.y), Math.round(rect.w), Math.round(rect.h)],
+    f: png.fingerprint,
+  });
+}
+
+function shotIdOf(userData: unknown): string | null {
+  if (typeof userData !== 'string' || !userData.includes(USERDATA_MARKER)) return null;
+  try {
+    const parsed = JSON.parse(userData);
+    return parsed?.[USERDATA_MARKER] && typeof parsed.id === 'string' && parsed.id ? parsed.id : null;
   } catch {
     return null;
   }
 }
 
-export async function consumeNativePendingRestore(): Promise<NoteShotMeta | null> {
-  if (MosaicNoteShot === undefined) return null;
-  try {
-    const json = await MosaicNoteShot.takePendingRestore();
-    return typeof json === 'string' ? parseNoteShotMeta(json) : null;
-  } catch (err) {
-    console.log(`${LOG} native pending restore read failed: ${err}`);
-    return null;
-  }
+
+
+function readRect(value: any): ShotRect | null {
+  const x = Number(value?.x), y = Number(value?.y), w = Number(value?.w), h = Number(value?.h);
+  return [x, y, w, h].every(Number.isFinite) && w > 0 && h > 0 ? { x, y, w, h } : null;
 }
+
+
+export function noteShotPngFrom(value: any): NoteShotPng | null {
+  const rect = readRect(value?.rect);
+  const hotspot = readRect(value?.hotspot);
+  const width = Number(value?.width);
+  const height = Number(value?.height);
+  if (typeof value?.path !== 'string' || rect === null || hotspot === null || !(width > 0) || !(height > 0)) return null;
+  let anchors: any = {};
+  try {
+    anchors = typeof value.anchors === 'string' ? JSON.parse(value.anchors) : {};
+  } catch {
+    anchors = {};
+  }
+  return {
+    path: value.path,
+    width,
+    height,
+    rect,
+    hotspot,
+    cards: anchors?.cards ?? {},
+    strokes: anchors?.strokes ?? {},
+    fingerprint: typeof value.fingerprint === 'string' ? value.fingerprint : '',
+    pxPerWorld: Number(value.pxPerWorld) > 0 ? Number(value.pxPerWorld) : 0,
+  };
+}
+
+
 
 async function currentFileAndPage(): Promise<{ filePath: string; page: number } | null> {
   const fileRes: any = await PluginCommAPI.getCurrentFilePath();
@@ -145,556 +366,376 @@ async function currentFileAndPage(): Promise<{ filePath: string; page: number } 
   return { filePath: fileRes.result, page: pageRes.result };
 }
 
-const delay = (ms: number): Promise<void> => new Promise<void>(resolve => setTimeout(resolve, ms));
-
-function pathBasename(path: string): string {
-  const index = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-  return index >= 0 ? path.slice(index + 1) : path;
-}
-
-function pictureKey(element: any): string {
-  if (typeof element?.numInPage === 'number') return `n:${element.numInPage}`;
-  return `p:${pathBasename(String(element?.picture?.picturePath ?? 'unknown'))}`;
-}
-
-function pictureRecords(elements: any[]): PictureRecord[] {
-  return elements
-    .filter(element => element?.type === TYPE_PICTURE)
-    .map(element => ({
-      element,
-      key: pictureKey(element),
-      basename: pathBasename(String(element?.picture?.picturePath ?? '')),
-    }));
-}
-
-function emrPointToPage(
-  x: number,
-  y: number,
-  pageWidth: number,
-  pageHeight: number,
-  maxX: number,
-  maxY: number,
-): { x: number; y: number } | null {
-  if (!(pageWidth > 1 && pageHeight > 1 && maxX > 0 && maxY > 0)) return null;
-  const sourceX = x / (maxX / (pageHeight - 1));
-  const sourceY = y / (maxY / (pageWidth - 1));
-  return { x: pageWidth - 1 - sourceY, y: sourceX };
-}
-
-
-function pictureRectToScreen(
-  element: any,
-  pageSize: { width: number; height: number },
-  screenSize: { width: number; height: number },
-): Rect | null {
-  const rect = element?.picture?.rect;
-  const maxX = Number(element?.maxX);
-  const maxY = Number(element?.maxY);
-  if (!rect || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
-  const corners = [
-    emrPointToPage(rect.left, rect.top, pageSize.width, pageSize.height, maxX, maxY),
-    emrPointToPage(rect.right, rect.top, pageSize.width, pageSize.height, maxX, maxY),
-    emrPointToPage(rect.left, rect.bottom, pageSize.width, pageSize.height, maxX, maxY),
-    emrPointToPage(rect.right, rect.bottom, pageSize.width, pageSize.height, maxX, maxY),
-  ];
-  if (corners.some(point => point === null)) return null;
-  const pagePoints = corners.filter((point): point is { x: number; y: number } => point !== null);
-  return {
-    left: Math.min(...pagePoints.map(point => point.x)) * screenSize.width / pageSize.width,
-    top: Math.min(...pagePoints.map(point => point.y)) * screenSize.height / pageSize.height,
-    right: Math.max(...pagePoints.map(point => point.x)) * screenSize.width / pageSize.width,
-    bottom: Math.max(...pagePoints.map(point => point.y)) * screenSize.height / pageSize.height,
-  };
-}
-
-async function resolveRegistryPath(): Promise<string> {
-  if (registryPathPromise === null) {
-    registryPathPromise = (async () => {
-      return `${RNFS.DocumentDirectoryPath}/${REGISTRY_FILENAME}`;
-    })();
-  }
-  return registryPathPromise;
-}
-
-async function readRegistryNow(): Promise<NoteShotRegistry> {
+async function pageSizeOf(notePath: string, page: number): Promise<PageSize | null> {
   try {
-    const path = await resolveRegistryPath();
-    if (!(await RNFS.exists(path))) return { v: 1, links: [] };
-    const parsed = JSON.parse(await RNFS.readFile(path, 'utf8')) as NoteShotRegistry;
-    if (parsed?.v !== 1 || !Array.isArray(parsed.links)) return { v: 1, links: [] };
-    return parsed;
-  } catch (err) {
-    console.log(`${LOG} registry read reset: ${err}`);
-    return { v: 1, links: [] };
-  }
-}
-
-async function writeRegistryNow(registry: NoteShotRegistry): Promise<void> {
-  const path = await resolveRegistryPath();
-  const tmpPath = `${path}.tmp`;
-  const links = [...registry.links]
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-    .slice(-MAX_REGISTRY_LINKS);
-  await RNFS.writeFile(tmpPath, JSON.stringify({ v: 1, links }), 'utf8');
-  if (await RNFS.exists(path)) await RNFS.unlink(path);
-  await RNFS.moveFile(tmpPath, path);
-}
-
-async function readRegistry(): Promise<NoteShotRegistry> {
-  await registryQueue.catch(() => {});
-  return readRegistryNow();
-}
-
-async function updateRegistry(
-  mutate: (registry: NoteShotRegistry) => void | Promise<void>,
-): Promise<void> {
-  const operation = registryQueue.then(async () => {
-    const registry = await readRegistryNow();
-    await mutate(registry);
-    await writeRegistryNow(registry);
-  });
-  registryQueue = operation.catch(() => {});
-  await operation;
-}
-
-async function pagePictureKeys(filePath: string, page: number): Promise<string[]> {
-  try {
-    const response: any = await PluginFileAPI.getElements(page, filePath);
-    if (!response?.success) return [];
-    const elements: any[] = response.result ?? [];
-    try {
-      return pictureRecords(elements).map(record => record.key);
-    } finally {
-      for (const element of elements) {
-        try { element.recycle?.(); } catch {  }
-      }
+    const res: any = await PluginFileAPI.getPageSize(notePath, page);
+    if (res?.success && res.result?.width > 0 && res.result?.height > 0) {
+      return { width: res.result.width, height: res.result.height };
     }
+    console.log(`${LOG} getPageSize failed res=${JSON.stringify(res)}`);
   } catch (err) {
-    console.log(`${LOG} baseline read skipped: ${err}`);
-    return [];
-  }
-}
-
-async function registerPendingLink(
-  notePath: string,
-  page: number,
-  pngPath: string,
-  baselinePictureKeys: string[],
-  meta: NoteShotMeta,
-): Promise<string> {
-  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-  await updateRegistry(registry => {
-    registry.links.push({
-      id,
-      notePath,
-      page,
-      pngBasename: pathBasename(pngPath),
-      baselinePictureKeys,
-      meta,
-      createdAt: meta.capturedAt,
-    });
-  });
-  console.log(`${LOG} registry pending id=${id} page=${page} baseline=${baselinePictureKeys.length} wb=${meta.wbId}`);
-  return id;
-}
-
-
-async function bindInsertedShot(
-  filePath: string,
-  page: number,
-  baselinePictureKeys: string[],
-  linkId: string,
-): Promise<void> {
-  try {
-    const res: any = await PluginFileAPI.getElements(page, filePath);
-    if (!res?.success) return;
-    const elements: any[] = res.result ?? [];
-    try {
-      const added = pictureRecords(elements).filter(picture => !baselinePictureKeys.includes(picture.key));
-      const chosen = added.length > 0 ? added[added.length - 1] : undefined;
-      if (chosen === undefined) return;
-      const uuid = typeof chosen.element?.uuid === 'string' ? chosen.element.uuid : undefined;
-      await updateRegistry(latest => {
-        const link = latest.links.find(candidate => candidate.id === linkId);
-        if (link === undefined) return;
-        link.insertedBasename = chosen.basename;
-        link.elementKey = chosen.key;
-        if (uuid !== undefined) link.insertedUuid = uuid;
-      });
-      console.log(`${LOG} registry bound-insert id=${linkId} basename=${chosen.basename} uuid=${uuid ?? 'n/a'}`);
-    } finally {
-      for (const element of elements) {
-        try { element.recycle?.(); } catch {  }
-      }
-    }
-  } catch (err) {
-    console.log(`${LOG} bind-insert failed: ${err}`);
-  }
-}
-
-async function registryMetaByPicture(
-  filePath: string,
-  page: number,
-  pictures: PictureRecord[],
-): Promise<Map<string, NoteShotMeta>> {
-  const registry = await readRegistry();
-  const pageLinks = registry.links
-    .filter(link => link.notePath === filePath && link.page === page)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const resolved = new Map<string, NoteShotMeta>();
-  const claimed = new Set<string>();
-  const bindings = new Map<string, string>();
-
-  for (const link of pageLinks) {
-    if (link.elementKey === undefined) continue;
-    const picture = pictures.find(candidate => candidate.key === link.elementKey);
-    if (picture === undefined) continue;
-    resolved.set(picture.key, link.meta);
-    claimed.add(picture.key);
-  }
-
-  for (const link of pageLinks) {
-    if (link.elementKey !== undefined) continue;
-    const available = pictures.filter(picture => (
-      !claimed.has(picture.key) && !link.baselinePictureKeys.includes(picture.key)
-    ));
-    const basenameMatches = available.filter(picture => picture.basename === link.pngBasename);
-    const match = basenameMatches.length === 1
-      ? basenameMatches[0]
-      : available.length === 1
-        ? available[0]
-        : undefined;
-    if (match === undefined) continue;
-    resolved.set(match.key, link.meta);
-    claimed.add(match.key);
-    bindings.set(link.id, match.key);
-  }
-
-  if (bindings.size > 0) {
-    await updateRegistry(latest => {
-      for (const link of latest.links) {
-        const key = bindings.get(link.id);
-        if (key !== undefined) link.elementKey = key;
-      }
-    });
-    console.log(`${LOG} registry bound page=${page} count=${bindings.size}`);
-  }
-
-  return resolved;
-}
-
-
-export async function insertCaptureIntoNote(pngPath: string, meta: NoteShotMeta): Promise<boolean> {
-  const startedAt = Date.now();
-  const target = await currentFileAndPage();
-  if (target === null) return false;
-  const { filePath, page } = target;
-  const baselinePictureKeys = await pagePictureKeys(filePath, page);
-  console.log(`${LOG} insert begin file=${filePath} page=${page} png=${pngPath} wb=${meta.wbId} baseline=${baselinePictureKeys.length}`);
-
-  try {
-    const clearRes: any = await PluginCommAPI.setLassoBoxState(2);
-    console.log(`${LOG} pre-clear lasso box res=${JSON.stringify(clearRes)}`);
-  } catch (err) {
-    console.log(`${LOG} pre-clear lasso box skipped: ${err}`);
-  }
-
-  const insertRes: any = await PluginNoteAPI.insertImage(pngPath);
-  console.log(`${LOG} insertImage res=${JSON.stringify(insertRes)}`);
-  if (!insertRes?.success) {
-    console.log(`${LOG} insertImage FAILED`);
-    return false;
-  }
-
-  let linkId: string;
-  try {
-    linkId = await registerPendingLink(filePath, page, pngPath, baselinePictureKeys, meta);
-  } catch (err) {
-    console.log(`${LOG} registry pending write failed: ${err}`);
-    return false;
-  }
-
-  await delay(300);
-  await bindInsertedShot(filePath, page, baselinePictureKeys, linkId);
-  await logPageElements(filePath, page);
-  console.log(`${LOG} insert ok in ${Date.now() - startedAt}ms wb=${meta.wbId}`);
-  return true;
-}
-
-
-async function locateNoteShotPicture(
-  link: NoteShotLink,
-): Promise<{ page: number; numInPage: number } | null> {
-  const notePath = link.notePath;
-  const wantBasename = link.insertedBasename ?? link.pngBasename;
-  const wantUuid = link.insertedUuid;
-  let totalPages = 0;
-  try {
-    const res: any = await PluginFileAPI.getNoteTotalPageNum(notePath);
-    if (res?.success && typeof res.result === 'number') totalPages = res.result;
-  } catch (err) {
-    console.log(`${LOG} total pages read failed: ${err}`);
-  }
-  if (totalPages <= 0) return null;
-  for (let page = 0; page < totalPages; page++) {
-    let elements: any[] = [];
-    try {
-      const res: any = await PluginFileAPI.getElements(page, notePath);
-      if (!res?.success) continue;
-      elements = res.result ?? [];
-      for (const picture of pictureRecords(elements)) {
-        if (typeof picture.element?.numInPage !== 'number') continue;
-        const uuidHit = wantUuid !== undefined && picture.element?.uuid === wantUuid;
-        const basenameHit = picture.basename === wantBasename;
-        if (uuidHit || basenameHit) {
-          return { page, numInPage: picture.element.numInPage };
-        }
-      }
-    } catch (err) {
-      console.log(`${LOG} locate scan failed page=${page}: ${err}`);
-    } finally {
-      for (const element of elements) {
-        try { element.recycle?.(); } catch {  }
-      }
-    }
+    console.log(`${LOG} getPageSize threw: ${err}`);
   }
   return null;
 }
 
 
-export async function removeCaptureFromNote(wbId: string): Promise<boolean> {
-  const granted = await ensureNoteShotPermissions();
-  if (!granted) {
-    console.log(`${LOG} removeClip paused while file permission awaits approval wb=${wbId}`);
-    return false;
-  }
-  const target = await currentFileAndPage();
-  const currentPath = target?.filePath ?? null;
-  const registry = await readRegistry();
-  const links = registry.links
-    .filter(link => link.meta.wbId === wbId && (currentPath === null || link.notePath === currentPath))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  if (links.length === 0) {
-    console.log(`${LOG} removeClip no link wb=${wbId} note=${currentPath}`);
-    return false;
-  }
-  let deletedAny = false;
-  const clearedIds = new Set<string>();
-  for (const link of links) {
-    const located = await locateNoteShotPicture(link);
-    if (located !== null) {
-      try {
-        const res: any = await PluginFileAPI.deleteElements(link.notePath, located.page, [located.numInPage]);
-        if (res?.success && res.result === true) {
-          deletedAny = true;
-          console.log(`${LOG} removeClip deleted wb=${wbId} note=${link.notePath} page=${located.page} num=${located.numInPage}`);
-        } else {
-          console.log(`${LOG} removeClip delete failed res=${JSON.stringify(res)}`);
-        }
-      } catch (err) {
-        console.log(`${LOG} removeClip delete error: ${err}`);
-      }
-    } else {
-      console.log(`${LOG} removeClip picture already gone wb=${wbId} basename=${link.pngBasename}`);
+async function findShotElement(
+  notePath: string,
+  page: number,
+  shotId: string,
+  num?: number,
+  adopt = false,
+): Promise<{ element: any; release: () => void } | null> {
+  
+  if (typeof num === 'number' && num > 0) {
+    const single = await readSingleElement(PluginFileAPI.getElement(notePath, page, num));
+    const singleId = single !== null ? shotIdOf(single.userData) : null;
+    if (single !== null && single.type === TYPE_PICTURE && (singleId === shotId || (adopt && singleId === null))) {
+      return { element: single, release: () => recycleElement(single) };
     }
-    clearedIds.add(link.id);
+    if (single !== null) recycleElement(single);
   }
-  if (clearedIds.size > 0) {
-    await updateRegistry(latest => {
-      latest.links = latest.links.filter(link => !clearedIds.has(link.id));
-    });
+  const res: any = await PluginFileAPI.getElements(page, notePath);
+  if (!res?.success) {
+    console.log(`${LOG} getElements failed page=${page} res=${JSON.stringify(res)}`);
+    return null;
   }
-  if (deletedAny) {
-    try { await PluginCommAPI.reloadFile(); } catch (err) { console.log(`${LOG} removeClip reload skipped: ${err}`); }
-  }
-  return deletedAny;
-}
-
-
-export async function clippedWhiteboardIds(): Promise<string[]> {
-  const target = await currentFileAndPage();
-  const currentPath = target?.filePath ?? null;
-  const registry = await readRegistry();
-  const ids = new Set<string>();
-  for (const link of registry.links) {
-    if (currentPath === null || link.notePath === currentPath) ids.add(link.meta.wbId);
-  }
-  return [...ids];
-}
-
-async function logPageElements(filePath: string, page: number): Promise<void> {
-  try {
-    const pageRes: any = await PluginCommAPI.getCurrentPageNum();
-    const res: any = await PluginFileAPI.getElements(page, filePath);
-    if (!res?.success) {
-      console.log(`${LOG} dump getElements failed res=${JSON.stringify(res)}`);
-      return;
-    }
-    const elements: any[] = res.result ?? [];
-    const summary = elements
-      .map(element => element?.type === TYPE_PICTURE
-        ? `pic#${element.numInPage}@${JSON.stringify(element.picture?.rect)}f=${pathBasename(String(element.picture?.picturePath ?? '?'))}`
-        : `t${element?.type}#${element?.numInPage}`)
-      .join(', ');
-    console.log(`${LOG} dump insertPage=${page} currentPage=${pageRes?.result} count=${elements.length} [${summary}]`);
-    for (const element of elements) {
-      try { element.recycle?.(); } catch {  }
-    }
-  } catch (err) {
-    console.log(`${LOG} dump failed: ${err}`);
-  }
-}
-
-let boardVisible = false;
-let pendingRestore: NoteShotMeta | null = null;
-let tapBusy = false;
-let motionSeen = false;
-let tapDown: { x: number; y: number; toolType: number; at: number } | null = null;
-
-export function setBoardVisible(visible: boolean, source = 'app'): void {
-  if (boardVisible === visible) {
-    console.log(`${LOG} boardVisible=${visible} source=${source} unchanged`);
-    return;
-  }
-  boardVisible = visible;
-  console.log(`${LOG} boardVisible=${visible} source=${source}`);
-}
-
-export function attachBoardVisibilityListener(): void {
-  DeviceEventEmitter.addListener(BOARD_VISIBILITY_EVENT, (event: any) => {
-    setBoardVisible(event?.visible === true, 'native-view');
-  });
-  console.log(`${LOG} board visibility listener registered`);
-}
-
-export function consumePendingRestore(): NoteShotMeta | null {
-  const target = pendingRestore;
-  pendingRestore = null;
-  return target;
-}
-
-function rectContains(rect: Rect, x: number, y: number, pad: number): boolean {
-  return x >= rect.left - pad && x <= rect.right + pad && y >= rect.top - pad && y <= rect.bottom + pad;
-}
-
-function noteShotHotspotRect(rect: Rect, meta: NoteShotMeta): Rect {
-  const hotspot = meta.hotspot ?? { x: 0, y: 0, w: 0.36, h: 0.08 };
-  const width = rect.right - rect.left;
-  const height = rect.bottom - rect.top;
-  return {
-    left: rect.left + width * hotspot.x,
-    top: rect.top + height * hotspot.y,
-    right: rect.left + width * (hotspot.x + hotspot.w),
-    bottom: rect.top + height * (hotspot.y + hotspot.h),
+  const elements: any[] = res.result ?? [];
+  const release = () => {
+    for (const element of elements) recycleElement(element);
   };
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const element = elements[i];
+    if (element?.type === TYPE_PICTURE && shotIdOf(element.userData) === shotId) return { element, release };
+  }
+  release();
+  return null;
 }
 
-async function handleNoteTap(x: number, y: number, toolType: number): Promise<void> {
-  if (tapBusy) return;
-  tapBusy = true;
-  const startedAt = Date.now();
+function recycleElement(element: any): void {
+  try { element?.recycle?.(); } catch {  }
+}
+
+async function readSingleElement(request: Promise<unknown>): Promise<any | null> {
   try {
+    const res: any = await request;
+    return res?.success && res.result ? res.result : null;
+  } catch (err) {
+    console.log(`${LOG} single element read failed: ${err}`);
+    return null;
+  }
+}
+
+
+async function findInsertedShot(
+  notePath: string,
+  page: number,
+  shotId: string,
+): Promise<{ element: any; release: () => void } | null> {
+  const last = await readSingleElement(PluginFileAPI.getLastElement());
+  if (last !== null && last.type === TYPE_PICTURE && shotIdOf(last.userData) === shotId) {
+    return { element: last, release: () => recycleElement(last) };
+  }
+  if (last !== null) recycleElement(last);
+  return findShotElement(notePath, page, shotId);
+}
+
+function toPageRect(rect: any): PageRect | null {
+  const left = Math.round(Number(rect?.left)), top = Math.round(Number(rect?.top));
+  const right = Math.round(Number(rect?.right)), bottom = Math.round(Number(rect?.bottom));
+  return [left, top, right, bottom].every(Number.isFinite) && right > left && bottom > top
+    ? { left, top, right, bottom }
+    : null;
+}
+
+
+function hostKeepsOwnCopy(storedPath: unknown): boolean {
+  return typeof storedPath === 'string' && storedPath.length > 0 && !storedPath.includes(SHOT_DIR_FRAGMENT);
+}
+
+async function deleteFile(path: string): Promise<void> {
+  try {
+    if (await RNFS.exists(path)) await RNFS.unlink(path);
+  } catch (err) {
+    console.log(`${LOG} delete ${path} failed: ${err}`);
+  }
+}
+
+const clamp = (value: number, lo: number, hi: number): number => (hi < lo ? lo : Math.min(hi, Math.max(lo, value)));
+
+
+function placeInPage(png: NoteShotPng, screen: PageSize, page: PageSize): PageRect {
+  const k = screen.width > 0 && screen.height > 0 ? Math.min(page.width / screen.width, page.height / screen.height) : 1;
+  let w = png.width * k;
+  let h = png.height * k;
+  const s = Math.min(1, (page.width - 2 * PAGE_MARGIN) / w, (page.height - 2 * PAGE_MARGIN) / h);
+  w = Math.max(1, Math.round(w * s));
+  h = Math.max(1, Math.round(h * s));
+  const left = Math.round((page.width - w) / 2);
+  const top = Math.round((page.height - h) / 2);
+  return { left, top, right: left + w, bottom: top + h };
+}
+
+
+function refitInPage(old: PageRect, ratio: number, png: NoteShotPng, page: PageSize): PageRect {
+  const aspect = png.height / Math.max(1, png.width);
+  let w = (old.right - old.left) * (Number.isFinite(ratio) && ratio > 0 ? ratio : 1);
+  let h = w * aspect;
+  const s = Math.min(1, (page.width - 2 * PAGE_MARGIN) / w, (page.height - 2 * PAGE_MARGIN) / h);
+  w = Math.max(1, Math.round(w * s));
+  h = Math.max(1, Math.round(h * s));
+  const left = Math.round(clamp(old.left, 0, page.width - w));
+  const top = Math.round(clamp(old.top, 0, page.height - h));
+  return { left, top, right: left + w, bottom: top + h };
+}
+
+
+async function selectInsertedPicture(rect: PageRect, page: PageSize): Promise<void> {
+  const lassoRect = {
+    left: Math.max(0, rect.left - LASSO_PAD),
+    top: Math.max(0, rect.top - LASSO_PAD),
+    right: Math.min(Math.floor(page.width), rect.right + LASSO_PAD),
+    bottom: Math.min(Math.floor(page.height), rect.bottom + LASSO_PAD),
+  };
+  try {
+    const res: any = await PluginCommAPI.lassoElements(lassoRect);
+    const countsRes: any = await PluginCommAPI.getLassoElementTypeCounts();
+    const counts: Record<string, unknown> | null = countsRes?.success ? countsRes.result : null;
+    const others = counts === null
+      ? -1
+      : Object.keys(counts).filter(key => key !== 'bitmapNum').reduce((sum, key) => sum + (Number(counts[key]) || 0), 0);
+    console.log(`${LOG} lasso inserted picture res=${JSON.stringify(res)} counts=${JSON.stringify(counts)}`);
+    if (res?.success && res.result === true && counts?.bitmapNum === 1 && others === 0) return;
+    const clearRes: any = await PluginCommAPI.setLassoBoxState(2);
+    console.log(`${LOG} lasso cleared (picture not alone) res=${JSON.stringify(clearRes)}`);
+  } catch (err) {
+    console.log(`${LOG} lasso inserted picture failed: ${err}`);
+  }
+}
+
+
+export async function insertNoteShot(
+  shotId: string,
+  png: NoteShotPng,
+  screen: PageSize,
+): Promise<NoteShotInsertResult> {
+  const startedAt = Date.now();
+  let keepPng = false;
+  try {
+    if (!(await ensureNoteShotPermissions())) return 'permission';
     const target = await currentFileAndPage();
-    if (target === null) return;
-    const { filePath, page } = target;
-    const elementsRes: any = await PluginFileAPI.getElements(page, filePath);
-    if (!elementsRes?.success) {
-      console.log(`${LOG} tap getElements failed res=${JSON.stringify(elementsRes)}`);
-      return;
+    if (target === null) return 'failed';
+    if (!target.filePath.toLowerCase().endsWith('.note')) {
+      console.log(`${LOG} insert refused: not a note file=${target.filePath}`);
+      return 'not-note';
     }
-    const elements: any[] = elementsRes.result ?? [];
-    const pictures = pictureRecords(elements);
-    const pageSizeRes: any = await PluginFileAPI.getPageSize(filePath, page);
-    const pageSize = pageSizeRes?.success && pageSizeRes.result?.width > 0 && pageSizeRes.result?.height > 0
-      ? { width: pageSizeRes.result.width, height: pageSizeRes.result.height }
-      : null;
-    const windowSize = Dimensions.get('window');
-    const screenSize = { width: windowSize.width, height: windowSize.height };
-    if (!pageSize) console.log(`${LOG} tap page size unavailable file=${filePath} page=${page}`);
-    const registryMeta = await registryMetaByPicture(filePath, page, pictures);
-    let hit: NoteShotMeta | null = null;
-    let shotCount = 0;
+    const pageSize = await pageSizeOf(target.filePath, target.page);
+    if (pageSize === null) return 'failed';
+    const rect = placeInPage(png, screen, pageSize);
+
+    const created: any = await PluginCommAPI.createElement(TYPE_PICTURE);
+    if (!created?.success || !created.result) {
+      console.log(`${LOG} createElement(picture) failed res=${JSON.stringify(created)}`);
+      return 'failed';
+    }
+    const element: any = created.result;
+    let inserted = false;
     try {
-      for (const picture of pictures) {
-        const meta = decodeNoteShotMeta(picture.element.userData) ?? registryMeta.get(picture.key) ?? null;
-        if (meta === null) continue;
-        shotCount++;
-        if (hit !== null || !picture.element.picture?.rect) continue;
-        const screenRect = pageSize
-          ? pictureRectToScreen(picture.element, pageSize, screenSize)
-          : null;
-        if (!screenRect) continue;
-        const hotspotRect = noteShotHotspotRect(screenRect, meta);
-        const contains = rectContains(hotspotRect, x, y, TAP_HIT_PAD_PX);
-        console.log(`${LOG} tap test wb=${meta.wbId} key=${picture.key} hotspot=(${hotspotRect.left.toFixed(0)},${hotspotRect.top.toFixed(0)},${hotspotRect.right.toFixed(0)},${hotspotRect.bottom.toFixed(0)}) tap=(${x.toFixed(0)},${y.toFixed(0)}) hit=${contains}`);
-        if (contains) hit = meta;
+      element.pageNum = target.page;
+      element.layerNum = MAIN_LAYER;
+      element.picture = { picturePath: png.path, rect };
+      element.userData = encodeUserData(shotId, png);
+      const res: any = await PluginCommAPI.insertPageElements([element], target.page, MAIN_LAYER);
+      console.log(`${LOG} insertPageElements res=${JSON.stringify(res)} page=${target.page} rect=${JSON.stringify(rect)} pageSize=${pageSize.width}x${pageSize.height} png=${png.width}x${png.height}`);
+      inserted = res?.success === true && res.result === true;
+    } finally {
+      recycleElement(element);
+    }
+    if (!inserted) return 'failed';
+    keepPng = true;
+
+    
+    
+    let pictureRect = rect;
+    let hostSignature: { width: number; height: number; sig: string } | null = null;
+    try {
+      const found = await findInsertedShot(target.filePath, target.page, shotId);
+      if (found === null) {
+        console.log(`${LOG} insert verify: picture with userData not found on page=${target.page}`);
+      } else {
+        try {
+          const stored = found.element.picture;
+          pictureRect = toPageRect(stored?.rect) ?? rect;
+          keepPng = !hostKeepsOwnCopy(stored?.picturePath);
+          const storedPath = typeof stored?.picturePath === 'string' ? stored.picturePath : '';
+          const exists = storedPath ? await RNFS.exists(storedPath) : false;
+          hostSignature = await pictureSignature(storedPath, png.width / png.height);
+          console.log(`${LOG} insert verify num=${found.element.numInPage} rect=${JSON.stringify(stored?.rect)} path=${storedPath} exists=${exists} userData=${found.element.userData}`);
+        } finally {
+          found.release();
+        }
+      }
+    } catch (err) {
+      console.log(`${LOG} insert verify failed: ${err}`);
+    }
+    const ownSignature = await pictureSignature(png.path, png.width / png.height);
+    console.log(`${LOG} insert signature own=${ownSignature?.width}x${ownSignature?.height} host=${hostSignature?.width}x${hostSignature?.height} distance=${ownSignature && hostSignature ? signatureDistance(ownSignature.sig, hostSignature.sig) : 'n/a'}`);
+    await saveShotRecord(shotId, target.filePath, target.page, png, await versionOf(png, hostSignature ?? ownSignature));
+    await selectInsertedPicture(pictureRect, pageSize);
+    console.log(`${LOG} insert ok id=${shotId} note=${target.filePath} page=${target.page} in ${Date.now() - startedAt}ms`);
+    return 'ok';
+  } catch (err) {
+    console.log(`${LOG} insert failed: ${err}`);
+    return 'failed';
+  } finally {
+    if (!keepPng) await deleteFile(png.path);
+  }
+}
+
+
+async function updateNoteShot(target: NoteShotTarget, record: NoteShotRecord | null, png: NoteShotPng): Promise<boolean> {
+  const startedAt = Date.now();
+  let keepPng = false;
+  let staleOwnPng: string | null = null;
+  try {
+    const current = await currentFileAndPage();
+    if (current === null || current.filePath !== target.notePath) {
+      console.log(`${LOG} update skipped: current file=${current?.filePath} shot note=${target.notePath}`);
+      return false;
+    }
+    const pageSize = await pageSizeOf(target.notePath, target.page);
+    if (pageSize === null) return false;
+    
+    const found = await findShotElement(target.notePath, target.page, target.id, target.num, target.adopt);
+    if (found === null) {
+      console.log(`${LOG} update skipped: picture id=${target.id} num=${target.num} no longer on page=${target.page}`);
+      return false;
+    }
+    let modified = false;
+    try {
+      const element = found.element;
+      const old = toPageRect(element.picture?.rect);
+      if (old === null) return false;
+      const oldPath = element.picture?.picturePath;
+      
+      const previousWidth = target.rect?.w ?? record?.rect.w ?? png.rect.w;
+      const next = refitInPage(old, previousWidth > 0 ? png.rect.w / previousWidth : 1, png, pageSize);
+      element.picture = { picturePath: png.path, rect: next };
+      
+      element.userData = encodeUserData(target.id, png);
+      
+      
+      element.pageNum = target.page;
+      const layer = typeof element.layerNum === 'number' && element.layerNum >= 0 ? element.layerNum : MAIN_LAYER;
+      element.layerNum = layer;
+      const res: any = await PluginCommAPI.modifyPageElements([element], target.page, layer);
+      modified = res?.success === true && Array.isArray(res.result) && res.result.length > 0;
+      console.log(`${LOG} modifyPageElements res=${JSON.stringify(res)} id=${target.id} num=${target.num} adopt=${target.adopt} rect=${JSON.stringify(old)} -> ${JSON.stringify(next)}`);
+      if (modified) {
+        const ownCopy = hostKeepsOwnCopy(oldPath);
+        keepPng = !ownCopy;
+        
+        if (!ownCopy && typeof oldPath === 'string' && oldPath !== png.path) staleOwnPng = oldPath;
       }
     } finally {
-      for (const element of elements) {
-        try { element.recycle?.(); } catch {  }
-      }
+      found.release();
     }
-
-    console.log(`${LOG} tap scan page=${page} tool=${toolType} pictures=${pictures.length} shots=${shotCount} hit=${hit?.wbId ?? 'none'} in ${Date.now() - startedAt}ms`);
-    if (hit === null) return;
-
-    pendingRestore = hit;
-    DeviceEventEmitter.emit(RESTORE_TARGET_EVENT);
-    const showRes: any = await PluginManager.showPluginView();
-    console.log(`${LOG} showPluginView res=${JSON.stringify(showRes)}`);
+    if (!modified) return false;
+    
+    let hostSignature: { width: number; height: number; sig: string } | null = null;
+    try {
+      const back = await findShotElement(target.notePath, target.page, target.id, target.num);
+      if (back !== null) {
+        try {
+          hostSignature = await pictureSignature(back.element.picture?.picturePath, png.width / png.height);
+        } finally {
+          back.release();
+        }
+      }
+    } catch (err) {
+      console.log(`${LOG} update read-back failed id=${target.id}: ${err}`);
+    }
+    await saveShotRecord(target.id, target.notePath, target.page, png, await versionOf(png, hostSignature));
+    console.log(`${LOG} update ok id=${target.id} page=${target.page} in ${Date.now() - startedAt}ms`);
+    return true;
   } catch (err) {
-    console.log(`${LOG} tap handling failed: ${err}`);
+    console.log(`${LOG} update failed id=${target.id}: ${err}`);
+    return false;
   } finally {
-    tapBusy = false;
+    if (!keepPng) await deleteFile(png.path);
+    if (staleOwnPng !== null) await deleteFile(staleOwnPng);
   }
 }
 
-function supportedTapTool(toolType: unknown): toolType is number {
-  return toolType === FINGER_TOOL_TYPE;
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | null> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      console.log(`${LOG} ${label} timed out after ${ms}ms`);
+      resolve(null);
+    }, ms);
+    promise.then(
+      value => { clearTimeout(timer); resolve(value); },
+      err => { clearTimeout(timer); console.log(`${LOG} ${label} failed: ${err}`); resolve(null); },
+    );
+  });
 }
 
 
-export function attachNoteTapListener(): void {
+export async function consumeNativePendingRestore(): Promise<NoteShotTarget | null> {
+  if (MosaicNoteShot === undefined) return null;
   try {
-    PluginManager.registerMotionListener(1, {
-      onMsg: (event: any) => {
-        if (!motionSeen) {
-          motionSeen = true;
-          console.log(`${LOG} first motion event action=${event?.action} tool=${event?.toolType} pointers=${event?.pointerCount}`);
-        }
-        if (boardVisible) return;
-        const action = event?.action;
-        if (action === 0) {
-          if (supportedTapTool(event?.toolType) && event?.pointerCount === 1) {
-            tapDown = {
-              x: event?.x ?? 0,
-              y: event?.y ?? 0,
-              toolType: event.toolType,
-              at: Date.now(),
-            };
-          } else {
-            tapDown = null;
-          }
-          return;
-        }
-        if (action === 3) {
-          tapDown = null;
-          return;
-        }
-        if (action !== 1) return;
-
-        const down = tapDown;
-        tapDown = null;
-        if (down === null || event?.pointerCount !== 1 || event?.toolType !== down.toolType) return;
-        const x = event?.x ?? 0;
-        const y = event?.y ?? 0;
-        if (Date.now() - down.at > TAP_MAX_DURATION_MS) return;
-        if (Math.hypot(x - down.x, y - down.y) > TAP_MAX_DISTANCE_PX) return;
-        void handleNoteTap(x, y, down.toolType);
-      },
-    });
-    console.log(`${LOG} note tap listener registered tools=finger`);
+    const json = await MosaicNoteShot.takePendingRestore();
+    if (typeof json !== 'string') return null;
+    const raw = JSON.parse(json);
+    if (typeof raw?.id !== 'string' || !raw.id) return null;
+    const r = Array.isArray(raw.r) && raw.r.length >= 4
+      ? readRect({ x: raw.r[0], y: raw.r[1], w: raw.r[2], h: raw.r[3] })
+      : null;
+    return {
+      id: raw.id,
+      rect: r,
+      fingerprint: typeof raw.f === 'string' && raw.f ? raw.f : null,
+      notePath: typeof raw.notePath === 'string' ? raw.notePath : '',
+      page: Number(raw.page),
+      num: Number(raw.num),
+      adopt: raw.adopt === true,
+    };
   } catch (err) {
-    console.log(`${LOG} registerMotionListener failed: ${err}`);
+    console.log(`${LOG} native pending restore read failed: ${err}`);
+    return null;
   }
+}
+
+
+export async function focusNoteShot(viewTag: number, target: NoteShotTarget): Promise<void> {
+  const record = await getShotRecord(target.id);
+  console.log(`${LOG} focus id=${target.id} record=${record !== null} note=${target.notePath} page=${target.page} num=${target.num} adopt=${target.adopt}`);
+  MosaicBoardEngine?.focusNoteShot?.(viewTag, shotJsonForNative(target.id, record, target.rect));
+}
+
+
+export async function refreshNoteShot(viewTag: number, target: NoteShotTarget): Promise<void> {
+  const engine = MosaicBoardEngine;
+  if (engine?.renderNoteShot === undefined) return;
+  const record = await getShotRecord(target.id);
+  const result: any = await withTimeout(
+    engine.renderNoteShot(viewTag, shotJsonForNative(target.id, record, target.rect, target.fingerprint)),
+    RENDER_TIMEOUT_MS,
+    'render',
+  );
+  if (result === null || result === undefined) {
+    console.log(`${LOG} refresh id=${target.id}: no render`);
+    return;
+  }
+  if (result.unchanged === true) {
+    console.log(`${LOG} refresh id=${target.id}: content unchanged`);
+    return;
+  }
+  const png = noteShotPngFrom(result);
+  if (png === null) {
+    console.log(`${LOG} refresh id=${target.id}: bad render payload`);
+    return;
+  }
+  await updateNoteShot(target, record, png);
 }

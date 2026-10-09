@@ -17,9 +17,10 @@ class MosaicEinkRefreshModule(
     companion object {
         private const val TAG = "MosaicEinkRefresh"
         const val MODE_DTH = 5
+        
         const val MODE_DEFAULT = 7
         
-        const val MODE_DUX = 4
+        const val MODE_A2 = 4
 
         @Volatile private var instance: WeakReference<MosaicEinkRefreshModule>? = null
 
@@ -52,7 +53,7 @@ class MosaicEinkRefreshModule(
     }
 
     private fun effectiveMode(): Int? =
-        if (requests.containsValue(MODE_DUX)) MODE_DUX else requests.values.lastOrNull()
+        if (requests.containsValue(MODE_A2)) MODE_A2 else requests.values.lastOrNull()
 
     private fun applyOwned(mode: Int, owner: String) {
         requests.remove(owner)
@@ -76,7 +77,7 @@ class MosaicEinkRefreshModule(
     @ReactMethod
     fun setRefreshMode(mode: Int, promise: Promise) {
         UiThreadUtil.runOnUiThread {
-            if (mode != MODE_DTH && mode != MODE_DEFAULT && mode != MODE_DUX) {
+            if (mode != MODE_DTH && mode != MODE_DEFAULT && mode != MODE_A2) {
                 Log.w(TAG, "unsupported E-ink mode=$mode")
                 promise.resolve(false)
                 return@runOnUiThread

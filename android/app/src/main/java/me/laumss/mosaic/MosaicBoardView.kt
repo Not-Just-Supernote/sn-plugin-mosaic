@@ -28,6 +28,8 @@ class MosaicBoardView(
 ) : FrameLayout(reactContext), InklingLink.Host {
 
     companion object {
+        
+        private val PEN_BLOCK_REASSERT_MS = longArrayOf(0L, 60L, 200L, 500L)
         private const val TAG = "MosaicBoardView"
         private const val NATIVE_BUILD_TAG = "pressure-clock-20260928a"
 
@@ -48,6 +50,8 @@ class MosaicBoardView(
         private const val BACKGROUND_SYNC_IDLE_DELAY_MS = 2000L
         
         private const val CLOSE_WATCHDOG_MS = 3000L
+        
+        private const val CLOSE_WATCHDOG_NOTE_SHOT_MS = 8000L
         
         private const val HOST_PLUGIN_MANAGER_MODULE = "NativePluginManager"
         
@@ -197,6 +201,12 @@ class MosaicBoardView(
     @Volatile private var attached = false
     private var configured = false
     private var drawPathActive = false
+        set(value) {
+            field = value
+            DrawPathGate.inkExpected = value
+        }
+    
+    private var drawPathGateHeld = false
     private var drawPathBinder: IBinder? = null
     
     private enum class SyncUrgency { NONE, IDLE, PROMPT }
@@ -374,10 +384,16 @@ class MosaicBoardView(
         lastWriteInfoSent = null
         handler.removeCallbacksAndMessages(null)
         inkView.release()
+        DrawPathGate.detach()
         val releaseBinder = drawPathBinder ?: DrawPathClient.getBinder()
         releaseBinder?.let { binder ->
-            try { DrawPathClient.release(binder, drawPathAppName) }
-            catch (e: Throwable) { Log.w(TAG, "drawPath release on detach failed", e) }
+            try {
+                val settings = GestureSettings.readCached() ?: GestureSettings.read(context)
+                synchronized(DrawPathGate.writeLock) {
+                    DrawPathClient.restoreHostPenButtonStyle(binder, drawPathAppName, settings.raw["lamy_button"] == "1")
+                    DrawPathClient.release(binder, drawPathAppName)
+                }
+            } catch (e: Throwable) { Log.w(TAG, "drawPath release on detach failed", e) }
         }
         drawPathActive = false
         configured = false
@@ -397,6 +413,15 @@ class MosaicBoardView(
     }
 
     
+    
+    private fun reloadNoteLinks() {
+        val file = NoteLinks.storeFile(reactContext) ?: return
+        Thread({
+            val dirty = NoteLinks.reload(file)
+            if (dirty.isNotEmpty()) contentView.markWorldDirty(dirty)
+        }, "MosaicNoteLinks").start()
+    }
+
     fun redrawAfterHostRefresh() {
         if (!attached) return
         contentView.forceRedrawAfterHostRefresh()
@@ -409,6 +434,7 @@ class MosaicBoardView(
     }
 
     private fun publishBoardVisibility(visible: Boolean) {
+        if (visible) reloadNoteLinks()
         InputReader.setPluginViewVisible(visible)
         MosaicNoteShotModule.updateBoardVisibility(visible)
         InklingLink.setBoardVisible(visible, "board-view")
@@ -586,11 +612,12 @@ class MosaicBoardView(
         
         Log.i(TAG, "[CloseWatchdog] fired attached=$attached sinceArmMs=${SystemClock.uptimeMillis() - closeWatchdogArmedUptime}")
         if (!attached) return@Runnable
-        Log.w(TAG, "[CloseWatchdog] JS did not close within ${CLOSE_WATCHDOG_MS}ms; forcing host closePluginView")
+        Log.w(TAG, "[CloseWatchdog] JS did not close within ${closeWatchdogDelayMs}ms; forcing host closePluginView")
         forceHostClosePluginView("watchdog")
     }
     private var closeWatchdogArmedUptime = 0L
     private var closeWatchdogArmedWall = 0L
+    private var closeWatchdogDelayMs = CLOSE_WATCHDOG_MS
 
     
     private val closeHeartbeat = object : Runnable {
@@ -603,15 +630,16 @@ class MosaicBoardView(
     }
 
     
-    fun armCloseWatchdog(reason: String) {
+    fun armCloseWatchdog(reason: String, noteShotSession: Boolean = false) {
         if (!attached) return
         closeWatchdogArmedUptime = SystemClock.uptimeMillis()
         closeWatchdogArmedWall = System.currentTimeMillis()
+        closeWatchdogDelayMs = if (noteShotSession) CLOSE_WATCHDOG_NOTE_SHOT_MS else CLOSE_WATCHDOG_MS
         handler.removeCallbacks(closeWatchdog)
         handler.removeCallbacks(closeHeartbeat)
-        handler.postDelayed(closeWatchdog, CLOSE_WATCHDOG_MS)
+        handler.postDelayed(closeWatchdog, closeWatchdogDelayMs)
         handler.postDelayed(closeHeartbeat, 1000L)
-        Log.i(TAG, "[CloseWatchdog] armed reason=$reason delay=${CLOSE_WATCHDOG_MS}ms")
+        Log.i(TAG, "[CloseWatchdog] armed reason=$reason delay=${closeWatchdogDelayMs}ms")
     }
 
     
@@ -759,7 +787,10 @@ class MosaicBoardView(
         }
         val binder = drawPathBinder ?: return
         try {
-            DrawPathClient.sendPenInfo(binder, drawPathAppName, drawPathPenType(), drawPathPenWidth(), color)
+            synchronized(DrawPathGate.writeLock) {
+                DrawPathClient.sendPenInfo(binder, drawPathAppName, drawPathPenType(), drawPathPenWidth(), color)
+                DrawPathClient.sendPenButtonOverride(binder, drawPathAppName, drawPathPenType(), drawPathPenWidth(), color)
+            }
             penConfigDirty = false
             Log.i(TAG, "[MosaicTrail] color=$color sent reason=$reason")
         } catch (error: Throwable) {
@@ -911,15 +942,32 @@ class MosaicBoardView(
         }
     }
 
+    
+    fun reassertPenBlock(reason: String) {
+        Log.i(TAG, "[MosaicPenButton] block reason=$reason ink=$inkEnabled lasso=$lassoEnabled active=$drawPathActive configured=$configured contact=$stylusContact")
+        if (!attached || !configured || inkEnabled || drawPathActive) return
+        
+        
+        DrawPathGate.reblock("pen-block:$reason", PEN_BLOCK_REASSERT_MS)
+    }
+
     private fun disableDrawPath(reason: String) {
         drawPathActive = false
         val binder = drawPathBinder ?: return
         try {
-            DrawPathClient.disableAll(binder, drawPathAppName)
+            synchronized(DrawPathGate.writeLock) { DrawPathClient.disableAll(binder, drawPathAppName) }
             Log.i(TAG, "drawPath disabled: reason=$reason")
         } catch (error: Throwable) {
             drawPathBinder = null
             Log.w(TAG, "drawPath disable failed: reason=$reason", error)
+        }
+    }
+
+    private fun attachDrawPathGate(binder: IBinder) {
+        DrawPathGate.attach(binder, drawPathAppName)
+        DrawPathGate.inkExpected = drawPathActive
+        DrawPathGate.onReleased = {
+            if (attached && configured && drawPathActive && drawPathGateHeld) rearmDrawPath("pen-gate-release")
         }
     }
 
@@ -932,16 +980,30 @@ class MosaicBoardView(
 
     private fun configureDrawPath(binder: IBinder, active: Boolean, reason: String) {
         lastWriteInfoSent = null
-        DrawPathClient.configure(
-            binder = binder,
-            appName = drawPathAppName,
-            penType = drawPathPenType(),
-            penWidth = drawPathPenWidth(),
-            penColor = drawPathPenColor,
-            areas = drawPathDisableAreas(),
-        )
-        DrawPathClient.sendStylusCalibration(binder, drawPathAppName, stylusCalibX, stylusCalibY, stylusLeftHand)
-        if (!active) DrawPathClient.disableAll(binder, drawPathAppName)
+        attachDrawPathGate(binder)
+        synchronized(DrawPathGate.writeLock) {
+            
+            val held = active && DrawPathGate.blocked()
+            drawPathGateHeld = held
+            if (active && !held) {
+                DrawPathClient.configure(
+                    binder = binder,
+                    appName = drawPathAppName,
+                    penType = drawPathPenType(),
+                    penWidth = drawPathPenWidth(),
+                    penColor = drawPathPenColor,
+                    areas = drawPathDisableAreas(),
+                )
+                DrawPathClient.sendStylusCalibration(binder, drawPathAppName, stylusCalibX, stylusCalibY, stylusLeftHand)
+            } else {
+                
+                
+                DrawPathClient.disableAll(binder, drawPathAppName)
+                if (held) Log.i(TAG, "drawPath enable held by pen gate reason=$reason ${DrawPathGate.describe()}")
+            }
+            
+            DrawPathClient.sendPenButtonOverride(binder, drawPathAppName, drawPathPenType(), drawPathPenWidth(), drawPathPenColor)
+        }
         reassertCachedWriteInfo(binder, reason)
         refreshWriteInfo(reason, force = true)
     }
@@ -1175,9 +1237,15 @@ class MosaicBoardView(
             cancelBackgroundSync()
             lastStylusX = event.x
             lastStylusY = event.y
+            
+            
+            
+            controller.preflightPenButtonState()
             controller.onPen(event)
             
             feedInkView(event)
+            
+            if (toolLassoActive && !inkEnabled) reassertPenBlock("lasso-down")
         } else {
             val counterBefore = sceneChangeCounter
             feedInkView(event)
@@ -1200,8 +1268,8 @@ class MosaicBoardView(
     
     private fun applyPenRefreshMode() {
         val mode = when {
-            !inkEnabled && !lassoEnabled -> MosaicEinkRefreshModule.MODE_DUX
-            lassoEnabled -> MosaicEinkRefreshModule.MODE_DUX
+            !inkEnabled && !lassoEnabled -> MosaicEinkRefreshModule.MODE_DEFAULT
+            lassoEnabled -> MosaicEinkRefreshModule.MODE_DEFAULT
             else -> null
         }
         if (mode == null) {

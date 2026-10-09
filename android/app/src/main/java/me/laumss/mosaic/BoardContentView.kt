@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
@@ -42,10 +41,10 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         
         private const val CARD_COLORED_FILL_COLOR = 0xFF000000.toInt()
         
-        private const val CARD_SHADOW_COLOR = 0xFF77838D.toInt()
-        private const val CARD_SHADOW_EDGE_COLOR = 0xFF9BA5B1.toInt()
-        private const val CARD_SHADOW_OFFSET = 8f
-        private const val CARD_SHADOW_EDGE = 3f
+        private const val CARD_SHADOW_COLOR = Color.BLACK
+        private const val CARD_SHADOW_EDGE_COLOR = Color.BLACK
+        private const val CARD_SHADOW_OFFSET = 5f
+        private const val CARD_SHADOW_EDGE = 2f
         private const val CARD_SHADOW_EXTENT = CARD_SHADOW_OFFSET + CARD_SHADOW_EDGE
         
         private const val CARD_OUTLINE_WIDTH = 3f
@@ -56,7 +55,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         private const val CARD_SELECTED_WIDTH = 2f
         private const val CARD_RADIUS = 0f
         private const val CARD_HANDLE_SIZE = 18f
-        private const val TITLE_COLOR = 0xFF111111.toInt()
         
         private const val CARD_TEXT_SIZE = CardTextFormat.BODY_SIZE
         private const val CARD_TEXT_COLOR = Color.BLACK
@@ -208,13 +206,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             paint.isFakeBoldText = false
             paint.textSkewX = 0f
         }
-
-        
-        private const val WB_CORNER_LEN = 44f
-        private const val WB_CORNER_STROKE = 5f
-        private const val WB_CORNER_OFFSET = 4f
-        private const val WB_NAME_SIZE = 20f
-        private const val WB_NAME_COLOR = 0xFF555555.toInt()
 
         
         private const val TRANSLUCENT_BG_COLOR = 0xD0FFFFFF.toInt()
@@ -416,22 +407,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val shadowPathFar = Path()
         val shadowFarUnion = Path()
         val outlineOccluders = Path()
-        val wbCornerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            color = TITLE_COLOR
-            strokeWidth = WB_CORNER_STROKE
-        }
-        val wbDashPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            color = WB_NAME_COLOR
-            strokeWidth = 2f
-            pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f)
-        }
-        val wbNamePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = WB_NAME_SIZE
-            isFakeBoldText = true
-        }
-        val wbBadgePaint = Paint().apply { color = TITLE_COLOR }
         val emphasisStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             color = CARD_OUTLINE_EMPHASIS_COLOR
@@ -455,10 +430,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private val shadowEdgePaint get() = rasterScratch.get().shadowEdgePaint
     private val shadowPathNear get() = rasterScratch.get().shadowPathNear
     private val shadowPathFar get() = rasterScratch.get().shadowPathFar
-    private val wbCornerPaint get() = rasterScratch.get().wbCornerPaint
-    private val wbDashPaint get() = rasterScratch.get().wbDashPaint
-    private val wbNamePaint get() = rasterScratch.get().wbNamePaint
-    private val wbBadgePaint get() = rasterScratch.get().wbBadgePaint
     private val emphasisStrokePaint get() = rasterScratch.get().emphasisStrokePaint
     private val cardImagePaint get() = rasterScratch.get().cardImagePaint
     private val cardTextPaint get() = rasterScratch.get().cardTextPaint
@@ -738,33 +709,44 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     
 
     override fun onSceneChanged(dirtyWorld: RectF?, contentMoved: Boolean) {
+        
+        val frameDirty = NoteLinks.refresh(dirtyWorld)
         synchronized(cacheLock) {
             if (dirtyWorld == null) {
                 for (entry in cache.values) entry.dirty = true
                 if (rasteringKeys.isNotEmpty()) rasteringDirtyKeys.addAll(rasteringKeys)
             } else {
-                for ((key, entry) in cache) {
-                    if (entry.dirty) continue
-                    if (tileWorldRect(key).intersects(
-                            dirtyWorld.left, dirtyWorld.top, dirtyWorld.right, dirtyWorld.bottom,
-                        )
-                    ) {
-                        entry.dirty = true
-                    }
-                }
-                for (active in rasteringKeys) {
-                    if (!rasteringDirtyKeys.contains(active) && tileWorldRect(active).intersects(
-                            dirtyWorld.left, dirtyWorld.top, dirtyWorld.right, dirtyWorld.bottom,
-                        )
-                    ) {
-                        rasteringDirtyKeys.add(active)
-                    }
-                }
+                markWorldDirtyLocked(dirtyWorld)
+                for (rect in frameDirty) markWorldDirtyLocked(rect)
             }
         }
         settleRequested = true
         if (!deferRefresh) postInvalidateOnAnimation()
         onContentChanged?.invoke("scene", contentMoved)
+    }
+
+    
+    fun markWorldDirty(rects: List<RectF>) {
+        if (rects.isEmpty()) return
+        synchronized(cacheLock) { for (rect in rects) markWorldDirtyLocked(rect) }
+        settleRequested = true
+        if (!deferRefresh) postInvalidateOnAnimation()
+    }
+
+    private fun markWorldDirtyLocked(dirtyWorld: RectF) {
+        for ((key, entry) in cache) {
+            if (entry.dirty) continue
+            if (tileWorldRect(key).intersects(dirtyWorld.left, dirtyWorld.top, dirtyWorld.right, dirtyWorld.bottom)) {
+                entry.dirty = true
+            }
+        }
+        for (active in rasteringKeys) {
+            if (!rasteringDirtyKeys.contains(active) &&
+                tileWorldRect(active).intersects(dirtyWorld.left, dirtyWorld.top, dirtyWorld.right, dirtyWorld.bottom)
+            ) {
+                rasteringDirtyKeys.add(active)
+            }
+        }
     }
 
     override fun onViewportChanged() {
@@ -1170,7 +1152,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         if (!gestureTemplateHidden) {
             TemplatePaper.draw(canvas, worldRect, backgroundTemplate, templatePageWidth)
         }
-        drawWhiteboardFrames(canvas, worldRect, scene)
+        
+        NoteLinks.draw(canvas, worldRect)
         drawPageNoteHeader(canvas, worldRect)
         drawCanvasStrokes(canvas, worldRect, scene)
         drawLiquidAndCards(canvas, worldRect, scene)
@@ -1181,7 +1164,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     
 
     
-    fun renderExport(world: RectF, scalePx: Float, onDone: (Bitmap?) -> Unit) {
+    fun renderExport(world: RectF, scalePx: Float, headerPx: Int = 0, onDone: (Bitmap?) -> Unit) {
         val handler = rasterHandler
         if (handler == null || scalePx <= 0f || world.width() <= 0f || world.height() <= 0f) {
             onDone(null)
@@ -1192,7 +1175,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             val active = synchronized(cacheLock) { generation == rasterGeneration }
             if (!active) { onDone(null); return@post }
             val widthPx = ceil(world.width() * scalePx).toInt().coerceAtLeast(1)
-            val heightPx = ceil(world.height() * scalePx).toInt().coerceAtLeast(1)
+            val heightPx = ceil(world.height() * scalePx).toInt().coerceAtLeast(1) + headerPx.coerceAtLeast(0)
             val bitmap = try {
                 Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
             } catch (error: OutOfMemoryError) {
@@ -1205,6 +1188,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             }
             val canvas = Canvas(bitmap)
             canvas.drawColor(Color.WHITE)
+            canvas.translate(0f, headerPx.coerceAtLeast(0).toFloat())
             canvas.scale(scalePx, scalePx)
             canvas.translate(-world.left, -world.top)
             val scene = BoardEngine.renderSnapshot(world)
@@ -1216,61 +1200,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
                 bitmap.recycle()
                 onDone(null)
             }
-        }
-    }
-
-    private fun drawWhiteboardFrames(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot) {
-        for (wb in scene.whiteboards) {
-            val frame = RectF(wb.x, wb.y, wb.x + wb.width, wb.y + wb.height)
-            val padded = RectF(frame).apply { inset(-8f, -8f) }
-            if (!RectF.intersects(padded, world)) continue
-            if (wb.current) canvas.drawRect(frame, wbDashPaint)
-            drawWhiteboardCorners(canvas, frame)
-            drawWhiteboardName(canvas, wb, frame)
-        }
-    }
-
-    private fun drawWhiteboardCorners(canvas: Canvas, frame: RectF) {
-        val len = WB_CORNER_LEN
-        val offset = WB_CORNER_OFFSET
-        val half = WB_CORNER_STROKE / 2f
-        
-        val left = frame.left - offset
-        val top = frame.top - offset
-        val right = frame.right + offset
-        val bottom = frame.bottom + offset
-        
-        canvas.drawLine(left, top + half, left + len, top + half, wbCornerPaint)
-        canvas.drawLine(left + half, top, left + half, top + len, wbCornerPaint)
-        
-        canvas.drawLine(right - len, top + half, right, top + half, wbCornerPaint)
-        canvas.drawLine(right - half, top, right - half, top + len, wbCornerPaint)
-        
-        canvas.drawLine(left, bottom - half, left + len, bottom - half, wbCornerPaint)
-        canvas.drawLine(left + half, bottom - len, left + half, bottom, wbCornerPaint)
-        
-        canvas.drawLine(right - len, bottom - half, right, bottom - half, wbCornerPaint)
-        canvas.drawLine(right - half, bottom - len, right - half, bottom, wbCornerPaint)
-    }
-
-    private fun drawWhiteboardName(canvas: Canvas, wb: BoardEngine.WhiteboardRec, frame: RectF) {
-        if (wb.name.isEmpty()) return
-        val textX = frame.left + 52f
-        val textTop = frame.top + 8f
-        if (wb.current) {
-            val textWidth = wbNamePaint.measureText(wb.name)
-            val badge = RectF(
-                textX,
-                textTop,
-                textX + textWidth + 20f,
-                textTop + WB_NAME_SIZE * 1.25f + 4f,
-            )
-            canvas.drawRect(badge, wbBadgePaint)
-            wbNamePaint.color = Color.WHITE
-            canvas.drawText(wb.name, textX + 10f, textTop + 2f - wbNamePaint.ascent(), wbNamePaint)
-        } else {
-            wbNamePaint.color = WB_NAME_COLOR
-            canvas.drawText(wb.name, textX, textTop - wbNamePaint.ascent(), wbNamePaint)
         }
     }
 

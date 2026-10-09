@@ -147,7 +147,7 @@ class ClipboardStrokeIo {
     private fun pastePenStyle(obj: JSONObject): Int {
         if (obj.has("sdkPenType")) {
             return when (obj.optInt("sdkPenType")) {
-                DrawPathClient.PEN_TYPE_NEEDLE -> PenStyle.NEEDLE.objType
+                DrawPathClient.PEN_TYPE_NEEDLE -> PenStyle.BRUSH.objType
                 DrawPathClient.PEN_TYPE_MARKER -> PenStyle.MARKER.objType
                 else -> PenStyle.PEN.objType
             }
@@ -292,7 +292,6 @@ class ClipboardStrokeIo {
             
             
             val sdkPenType = when (stroke.penStyle) {
-                PenStyle.NEEDLE.objType,
                 PenStyle.BRUSH.objType -> DrawPathClient.PEN_TYPE_NEEDLE
                 PenStyle.MARKER.objType -> DrawPathClient.PEN_TYPE_MARKER
                 else -> NOTE_PEN_TYPE_CALLIGRAPHY

@@ -2,7 +2,6 @@ import { NativeModules } from 'react-native';
 import {
   STROKE_ENCODING_F32X3,
   type InkStroke,
-  type WhiteboardAnchor,
 } from './React/src/boardFormat';
 import { bytesToBase64 } from './React/src/base64';
 import { resolveCardSize } from './React/src/cardGeometry';
@@ -19,7 +18,7 @@ const OP_REMOVE_STROKES = 2;
 const OP_UPSERT_CARD = 3;
 const OP_REMOVE_CARDS = 4;
 
-const OP_SET_WHITEBOARDS = 6;
+
 const OP_SET_CONNECTIONS = 8;
 
 type EngineModule = {
@@ -225,14 +224,12 @@ function writeIdList(writer: OpsWriter, op: number, ids: string[]) {
 export class EngineSyncSession {
   private lastInk = new Map<string, InkStroke>();
   private lastCards = new Map<string, Card>();
-  private lastWhiteboardsSignature = '';
   private lastConnectionsSignature = '';
 
   
   reset() {
     this.lastInk = new Map();
     this.lastCards = new Map();
-    this.lastWhiteboardsSignature = '';
     this.lastConnectionsSignature = '';
     MosaicBoardEngine?.clearScene();
   }
@@ -375,27 +372,5 @@ export class EngineSyncSession {
     }
     MosaicBoardEngine.applyOps(writer.finish());
   }
-
-  
-  syncWhiteboards(whiteboards: WhiteboardAnchor[], names: (wb: WhiteboardAnchor) => string) {
-    if (MosaicBoardEngine === undefined) return;
-    const signature = whiteboards
-      .map(wb => `${wb.id}:${names(wb)}:${wb.x}:${wb.y}:${wb.width}:${wb.height}`)
-      .join(';');
-    if (signature === this.lastWhiteboardsSignature) return;
-    this.lastWhiteboardsSignature = signature;
-    const writer = new OpsWriter();
-    writer.beginOp(OP_SET_WHITEBOARDS);
-    writer.u32(whiteboards.length);
-    for (const wb of whiteboards) {
-      writer.str(wb.id);
-      writer.str(names(wb));
-      writer.f32(wb.x);
-      writer.f32(wb.y);
-      writer.f32(wb.width);
-      writer.f32(wb.height);
-      writer.u8(0);
-    }
-    MosaicBoardEngine.applyOps(writer.finish());
-  }
 }
+

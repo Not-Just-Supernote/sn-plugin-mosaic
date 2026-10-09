@@ -11,10 +11,10 @@ class TransientInkView(context: Context) : View(context) {
 
     companion object {
         private const val CLEAR_DELAY_MS = 160L
-        private const val LASSO_DOT_RADIUS_DP = 2.2f
-        private const val LASSO_DOT_SPACING_DP = 10f
+        private const val LASSO_DOT_RADIUS_DP = 1.5f
+        private const val LASSO_DOT_SPACING_DP = 6f
         
-        private const val LASSO_DOT_HALO_DP = 1.2f
+        private const val LASSO_DOT_HALO_DP = 0.8f
     }
 
     private var lastX = 0f

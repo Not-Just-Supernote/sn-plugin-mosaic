@@ -43,13 +43,6 @@ object BoardGeometry {
     val UI_ZOOM_LEVELS = intArrayOf(10, 25, 50, 75, 100, 125, 150, 175, 200)
     val ZOOM_LEVELS: FloatArray = FloatArray(UI_ZOOM_LEVELS.size) { scaleForZoomPercent(UI_ZOOM_LEVELS[it].toFloat()) }
     val DEFAULT_ZOOM: Float = scaleForZoomPercent(75f)
-    
-    val WHITEBOARD_CREATION_SCALE: Float = scaleForZoomPercent(100f)
-
-    
-    const val WHITEBOARD_CURRENT_COVERAGE = 0.5f
-    const val WHITEBOARD_DUPLICATE_COVERAGE = 0.8f
-    const val WHITEBOARD_ANCHOR_GUARD_MS = 700L
 
     enum class Handle(val movesLeft: Boolean, val movesRight: Boolean, val movesTop: Boolean, val movesBottom: Boolean) {
         TOP_LEFT(true, false, true, false),
@@ -398,48 +391,4 @@ object BoardGeometry {
         val worldY = (ay - panY) / s
         return floatArrayOf(ax - worldX * nextScale, ay - worldY * nextScale)
     }
-
-    
-
-    fun intersectionArea(a: RectF, b: RectF): Float {
-        val w = min(a.right, b.right) - max(a.left, b.left)
-        val h = min(a.bottom, b.bottom) - max(a.top, b.top)
-        return if (w > 0f && h > 0f) w * h else 0f
-    }
-
-    
-    fun coverage(candidate: RectF, existing: RectF): Float {
-        val area = candidate.width() * candidate.height()
-        return if (area > 0f) intersectionArea(candidate, existing) / area else 0f
-    }
-
-    
-    fun findCurrentWhiteboard(whiteboards: Collection<BoardEngine.WhiteboardRec>, view: RectF): BoardEngine.WhiteboardRec? {
-        val vcx = view.centerX()
-        val vcy = view.centerY()
-        var best: BoardEngine.WhiteboardRec? = null
-        var bestCoverage = 0f
-        var bestDistance = Float.MAX_VALUE
-        val r = RectF()
-        for (wb in whiteboards) {
-            if (wb.width <= 0f || wb.height <= 0f) continue
-            r.set(wb.x, wb.y, wb.x + wb.width, wb.y + wb.height)
-            val cov = intersectionArea(r, view) / (wb.width * wb.height)
-            if (cov < WHITEBOARD_CURRENT_COVERAGE) continue
-            val d = hypot(wb.x + wb.width / 2f - vcx, wb.y + wb.height / 2f - vcy)
-            if (cov > bestCoverage + 1e-6f || (abs(cov - bestCoverage) <= 1e-6f && d < bestDistance)) {
-                best = wb
-                bestCoverage = cov
-                bestDistance = d
-            }
-        }
-        return best
-    }
-
-    private val DEFAULT_WB_NAME = Regex("^(?:白板|Whiteboard) (\\d+)$")
-
-    fun defaultWhiteboardNumber(name: String): Int? = DEFAULT_WB_NAME.find(name)?.groupValues?.get(1)?.toIntOrNull()
-
-    fun nextWhiteboardNumber(whiteboards: Collection<BoardEngine.WhiteboardRec>): Int =
-        (whiteboards.mapNotNull { defaultWhiteboardNumber(it.name) }.maxOrNull() ?: 0) + 1
 }

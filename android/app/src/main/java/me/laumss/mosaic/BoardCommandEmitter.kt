@@ -233,30 +233,6 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
 
     
 
-    fun whiteboardUpsert(rec: BoardEngine.WhiteboardRec) {
-        op(
-            Arguments.createMap().apply {
-                putString("type", "whiteboardUpsert")
-                putString("id", rec.id)
-                putString("name", rec.name)
-                putDouble("x", rec.x.toDouble())
-                putDouble("y", rec.y.toDouble())
-                putDouble("width", rec.width.toDouble())
-                putDouble("height", rec.height.toDouble())
-            },
-        )
-    }
-
-    fun whiteboardsRemove(ids: Collection<String>) {
-        if (ids.isEmpty()) return
-        op(
-            Arguments.createMap().apply {
-                putString("type", "whiteboardsRemove")
-                putArray("ids", stringArray(ids))
-            },
-        )
-    }
-
     
     var viewMetricsDp: (() -> FloatArray)? = null
 

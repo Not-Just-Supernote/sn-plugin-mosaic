@@ -25,6 +25,14 @@ object DrawPathClient {
     private const val SYNC_BACKGROUND_TRANSACTION = 6
     
     private const val ADDRESS_MODE_TRANSACTION = 10
+    
+    private const val PEN_BUTTON_STYLE_TRANSACTION = 12
+    private const val PEN_TYPE_GRID_LINE = 3
+    private const val PEN_TYPE_SELECTION_LINE = 4
+    private const val PEN_BUTTON_DOUBLE_CLICK_MS = 500
+    
+    private const val HOST_ERASER_WIDTH = 1300
+    private const val HOST_ERASER_COLOR = 255
     const val PRIME_SIZE = 18888
     const val DISABLE_SIZE = 19999
 
@@ -62,7 +70,6 @@ object DrawPathClient {
     
     private fun paletteSteps(style: PenStyle): IntArray = when (style) {
         PenStyle.MARKER -> intArrayOf(paletteTable.marker)
-        PenStyle.NEEDLE -> paletteTable.needle
         PenStyle.BRUSH -> paletteTable.needle
         else -> paletteTable.needle.copyOfRange(2, paletteTable.needle.size)
     }
@@ -92,7 +99,7 @@ object DrawPathClient {
     fun liveWidthArgumentFromStdHundredths(stdWidth: Int, style: PenStyle = PenStyle.PEN): Int {
         val rawWidth = widthArgumentFromStdHundredths(stdWidth, style)
         return when (style) {
-            PenStyle.PEN -> rawWidth * LIVE_PEN_WIDTH_SCALE
+            PenStyle.PEN -> (rawWidth * LIVE_PEN_WIDTH_SCALE).roundToInt()
             PenStyle.BRUSH -> (rawWidth * BRUSH_LIVE_WIDTH_SCALE).roundToInt()
             else -> rawWidth
         }
@@ -106,16 +113,16 @@ object DrawPathClient {
     private const val LAMY_PEN_FACTOR_0 = -615
     private const val LAMY_PEN_FACTOR_1 = 183
     private const val LAMY_SCALE_TO_PIXELS_PEN = 0.004f
-    private const val MARKER_CANVAS_CALIBRATION = 3.4f
+    
+    private const val MARKER_CANVAS_CALIBRATION = 3.6f
     
     
     
-    private const val BRUSH_NOTE_ALIGN = 300f / 500f
-    private const val BRUSH_LIVE_WIDTH_SCALE = 1.7f * BRUSH_NOTE_ALIGN
-    private const val BRUSH_CANVAS_WIDTH_SCALE = 6f * BRUSH_NOTE_ALIGN
+    private const val BRUSH_LIVE_WIDTH_SCALE = 1f
+    private const val BRUSH_CANVAS_WIDTH_SCALE = 3.4f
     private const val LAMY_MIN_X1000 = 1500
     private const val DRAW_PATH_MIN_WIDTH = 4
-    private const val LIVE_PEN_WIDTH_SCALE = 4
+    private const val LIVE_PEN_WIDTH_SCALE = 2.1f
 
     private fun lamyX1000Width(lineType: Int, pressureRaw: Int, baseWidth: Float): Int {
         
@@ -147,7 +154,7 @@ object DrawPathClient {
         
         val baseWidth = (drawPathWidth * 0.01f).roundToInt().coerceAtLeast(1).toFloat()
         val lamy = lamyX1000Width(LAMY_LINE_TYPE_PEN, pressureRaw, baseWidth)
-        return (lamy * LAMY_SCALE_TO_PIXELS_PEN).roundToInt()
+        return ((lamy * LAMY_SCALE_TO_PIXELS_PEN) * 0.5f).roundToInt()
             .coerceAtLeast(DRAW_PATH_MIN_WIDTH).toFloat()
     }
 
@@ -201,11 +208,19 @@ object DrawPathClient {
         return null
     }
 
+    
+    @Volatile private var writeGateClosed = false
+
     fun disableAll(binder: IBinder, appName: String) {
+        if (writeGateClosed) {
+            sendDisableAreas(binder, appName, listOf(DisableArea(0, 0, DISABLE_SIZE, DISABLE_SIZE)))
+            return
+        }
         sendDisableAreas(binder, appName, listOf(DisableArea(0, 0, PRIME_SIZE, PRIME_SIZE)))
         
         
         sendDisableAreas(binder, appName, listOf(DisableArea(0, 0, DISABLE_SIZE, DISABLE_SIZE)))
+        writeGateClosed = true
         
         
         sendDisableAreas(binder, appName, emptyList())
@@ -222,6 +237,7 @@ object DrawPathClient {
         penColor: Int,
         areas: List<DisableArea>,
     ) {
+        writeGateClosed = false
         sendDisableAreas(binder, appName, listOf(DisableArea(0, 0, PRIME_SIZE, PRIME_SIZE)))
         
         
@@ -279,7 +295,71 @@ object DrawPathClient {
     }
 
     
+    fun sendPenButtonOverride(binder: IBinder, appName: String, penType: Int, penWidth: Int, penColor: Int) {
+        sendPenButtonStyle(
+            binder, appName,
+            PEN_TYPE_NEEDLE, paletteTable.needle[0], PEN_COLOR_WHITE,
+            penType, penWidth, penColor,
+        )
+    }
+
+    
+    fun restoreHostPenButtonStyle(binder: IBinder, appName: String, hostLasso: Boolean) {
+        if (hostLasso) {
+            sendPenButtonStyle(
+                binder, appName,
+                PEN_TYPE_SELECTION_LINE, 200, PEN_COLOR_BLACK,
+                PEN_TYPE_PRESSURE, HOST_ERASER_WIDTH, HOST_ERASER_COLOR,
+            )
+        } else {
+            sendPenButtonStyle(
+                binder, appName,
+                PEN_TYPE_GRID_LINE, 400, HOST_ERASER_COLOR,
+                PEN_TYPE_PRESSURE, HOST_ERASER_WIDTH, HOST_ERASER_COLOR,
+            )
+        }
+    }
+
+    private fun sendPenButtonStyle(
+        binder: IBinder,
+        appName: String,
+        pressType: Int,
+        pressWidth: Int,
+        pressColor: Int,
+        doubleType: Int,
+        doubleWidth: Int,
+        doubleColor: Int,
+    ) {
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        try {
+            data.writeInterfaceToken(INTERFACE_TOKEN)
+            data.writeString(appName)
+            data.writeInt(pressType)
+            data.writeInt(pressWidth)
+            data.writeInt(pressColor)
+            data.writeInt(doubleType)
+            data.writeInt(doubleWidth)
+            data.writeInt(doubleColor)
+            data.writeInt(PEN_BUTTON_DOUBLE_CLICK_MS)
+            val accepted = binder.transact(PEN_BUTTON_STYLE_TRANSACTION, data, reply, 0)
+            val response = readReply(reply, "sendPenButtonStyle")
+            Log.i(
+                TAG,
+                "sendPenButtonStyle app=$appName press=($pressType,$pressWidth,$pressColor) " +
+                    "double=($doubleType,$doubleWidth,$doubleColor) transact=$accepted reply=$response",
+            )
+        } catch (error: Throwable) {
+            Log.w(TAG, "sendPenButtonStyle failed app=$appName", error)
+        } finally {
+            data.recycle()
+            reply.recycle()
+        }
+    }
+
+    
     fun release(binder: IBinder, appName: String) {
+        writeGateClosed = false
         sendDisableAreas(binder, appName, listOf(DisableArea(0, 0, PRIME_SIZE, PRIME_SIZE)))
     }
 

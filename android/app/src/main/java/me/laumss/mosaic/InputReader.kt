@@ -41,6 +41,8 @@ class InputReader(
         private const val BTN_DIGI = 320
         private const val BTN_TOOL_RUBBER = 321
         private const val BTN_STYLUS = 331
+        
+        private const val NEAR_PRESS_MIN_HOVER_MS = 50L
         private const val ABS_TILT_X = 26
         private const val ABS_TILT_Y = 27
         private const val ABS_X = 0
@@ -205,6 +207,20 @@ class InputReader(
             hostDisplay = HostDisplay(rotation, width, height)
             Log.i(TAG, "host display rotation=$rotation size=${width}x$height")
         }
+
+        
+        @JvmStatic
+        fun isPenHovering(): Boolean = boardReader?.penHover == true
+
+        @JvmStatic
+        fun isPenRubberActive(): Boolean = boardReader?.penRubber == true
+
+        @JvmStatic
+        fun isPenStylusButtonDown(): Boolean = boardReader?.penStylusButton == true
+
+        
+        @JvmStatic
+        fun isPenStylusPressNear(): Boolean = boardReader?.penStylusPressNear == true
     }
 
     private var touchThread: Thread? = null
@@ -232,8 +248,11 @@ class InputReader(
 
     
     @Volatile private var penHover = false
-    private var penRubber = false
-    private var penStylusButton = false
+    @Volatile private var penRubber = false
+    @Volatile private var penStylusButton = false
+    @Volatile private var penStylusPressNear = false
+    
+    private var penHoverSinceMs = 0L
     private var penTiltX = 0
     private var penTiltY = 0
 
@@ -297,7 +316,7 @@ class InputReader(
             fingerDownPending[i] = false; fingerUpPending[i] = false
         }
         mtSlot = 0
-        penHover = false; penRubber = false; penStylusButton = false
+        penHover = false; penRubber = false; penStylusButton = false; penStylusPressNear = false
         penTiltX = 0; penTiltY = 0
         framePressure = null
         firstPressureFrame = true
@@ -312,6 +331,7 @@ class InputReader(
                 pressureSignal.notifyAll()
             }
             InputArbiter.onPenHover(false)
+            DrawPathGate.resetInputs()
             penTiltDirection = null
         }
     }
@@ -614,21 +634,27 @@ class InputReader(
             when (code) {
                 BTN_DIGI -> {
                     val hovering = value == 1
-                    if (hovering != penHover) setHover(hovering)
+                    if (hovering != penHover) setHover(hovering, eventTimeMs)
                 }
                 BTN_TOOL_RUBBER -> {
                     val active = value == 1
                     
-                    if (active && !penHover) setHover(true)
+                    if (active && !penHover) setHover(true, eventTimeMs)
                     if (active != penRubber) {
                         penRubber = active
+                        
+                        if (routeToBoard) DrawPathGate.onRubber(active)
                         emitPenState(InputRouter.PenState.RUBBER, active)
                     }
                 }
                 BTN_STYLUS -> {
                     val pressed = value == 1
                     if (pressed != penStylusButton) {
+                        if (pressed) {
+                            penStylusPressNear = penHover && eventTimeMs - penHoverSinceMs >= NEAR_PRESS_MIN_HOVER_MS
+                        }
                         penStylusButton = pressed
+                        if (routeToBoard) DrawPathGate.onStylus(pressed, penStylusPressNear)
                         emitPenState(InputRouter.PenState.STYLUS, pressed)
                     }
                 }
@@ -657,8 +683,9 @@ class InputReader(
         }
     }
 
-    private fun setHover(hovering: Boolean) {
+    private fun setHover(hovering: Boolean, eventTimeMs: Long) {
         penHover = hovering
+        if (hovering) penHoverSinceMs = eventTimeMs
         if (routeToBoard) InputArbiter.onPenHover(hovering)
         updateTiltDirection()
         emitPenState(InputRouter.PenState.HOVER, hovering)

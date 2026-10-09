@@ -66,18 +66,22 @@ object CardTextFormat {
         val lines = markdown.replace("\r\n", "\n").split('\n').map(::parse).toMutableList()
         fun text(): String = lines.joinToString("\n") { it.text }
         fun markdown(): String = lines.joinToString("\n") { it.markdown() }
-        fun rowAt(cursor: Int): Int = text().take(cursor.coerceAtLeast(0)).count { it == '\n' }.coerceAtMost(lines.lastIndex)
+        fun rowAt(cursor: Int, text: String = text()): Int {
+            var row = 0
+            for (i in 0 until cursor.coerceIn(0, text.length)) if (text[i] == '\n') row++
+            return row.coerceAtMost(lines.lastIndex)
+        }
         fun toggle(cursor: Int, kind: String) {
             val row = rowAt(cursor)
             lines[row] = lines[row].copy(style = lines[row].style.toggle(kind))
         }
         
-        fun replace(start: Int, removed: Int, inserted: String) {
+        fun replace(start: Int, removed: Int, inserted: String): Triple<Int, Int, Int> {
             val old = text()
             val from = start.coerceIn(0, old.length)
             val to = (from + removed).coerceIn(from, old.length)
-            val first = rowAt(from)
-            val last = rowAt(to)
+            val first = rowAt(from, old)
+            val last = rowAt(to, old)
             val firstStart = old.lastIndexOf('\n', from - 1) + 1
             val lastStart = old.lastIndexOf('\n', to - 1) + 1
             val joined = lines[first].text.take(from - firstStart) + inserted + lines[last].text.drop(to - lastStart)
@@ -88,6 +92,7 @@ object CardTextFormat {
             }
             repeat(last - first + 1) { lines.removeAt(first) }
             lines.addAll(first, replacement)
+            return Triple(first, last - first + 1, replacement.size)
         }
     }
 }

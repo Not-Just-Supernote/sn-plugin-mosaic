@@ -17,7 +17,6 @@ object BoardEngine {
     private const val OP_REMOVE_STROKES = 2
     private const val OP_UPSERT_CARD = 3
     private const val OP_REMOVE_CARDS = 4
-    private const val OP_SET_WHITEBOARDS = 6
     private const val OP_SET_SELECTION = 7
     private const val OP_SET_CONNECTIONS = 8
 
@@ -277,24 +276,6 @@ object BoardEngine {
         val bounds: RectF = RectF().also { path.computeBounds(it, true) }
     }
 
-    class WhiteboardRec(
-        val id: String,
-        val name: String,
-        val x: Float,
-        val y: Float,
-        val width: Float,
-        val height: Float,
-        val current: Boolean,
-    ) {
-        fun rect(out: RectF = RectF()): RectF {
-            out.set(x, y, x + width, y + height)
-            return out
-        }
-
-        fun same(o: WhiteboardRec): Boolean =
-            name == o.name && x == o.x && y == o.y && width == o.width && height == o.height && current == o.current
-    }
-
     interface Listener {
         
         fun onSceneChanged(dirtyWorld: RectF?, contentMoved: Boolean)
@@ -306,7 +287,7 @@ object BoardEngine {
 
     data class SceneSnapshot(
         val strokes: List<StrokeRec>, val cards: List<CardRec>, val connections: List<ConnectionRec>,
-        val necks: List<NeckRec>, val whiteboards: List<WhiteboardRec>, val selected: List<String>,
+        val necks: List<NeckRec>, val selected: List<String>,
         val panX: Float, val panY: Float, val scale: Float, val hiddenCardId: String?,
     )
 
@@ -319,7 +300,6 @@ object BoardEngine {
         val markers: Map<String, List<StrokeRec>>,
         val connections: Map<String, ConnectionRec>,
         val necks: List<NeckRec>,
-        val whiteboards: List<WhiteboardRec>,
         val hiddenCardId: String?,
         val scale: Float,
     )
@@ -355,17 +335,16 @@ object BoardEngine {
             markers = markers,
             connections = HashMap(connections),
             necks = necks.values.toList(),
-            whiteboards = whiteboards.values.toList(),
             hiddenCardId = hiddenCardId,
             scale = scale,
         )
     }
 
-    fun snapshotScene(): SceneSnapshot = synchronized(lock) { SceneSnapshot(strokes.values.toList(), cards.values.toList(), connections.values.toList(), necks.values.toList(), whiteboards.values.toList(), selectedCardIds.toList(), panX, panY, scale, hiddenCardId) }
+    fun snapshotScene(): SceneSnapshot = synchronized(lock) { SceneSnapshot(strokes.values.toList(), cards.values.toList(), connections.values.toList(), necks.values.toList(), selectedCardIds.toList(), panX, panY, scale, hiddenCardId) }
     fun replaceScene(snapshot: SceneSnapshot) {
         val m = Mutation(); synchronized(lock) {
-            strokes.clear(); cards.clear(); connections.clear(); necks.clear(); whiteboards.clear(); selectedCardIds.clear(); cardsByZ=emptyList(); canvasStrokeGrid.clear(); cardStrokes.clear()
-            snapshot.strokes.forEach { m.addStroke(it) }; snapshot.cards.forEach { m.upsertCard(it) }; snapshot.connections.forEach { connections[it.id]=it }; snapshot.necks.forEach { necks[it.id]=it }; snapshot.whiteboards.forEach { whiteboards[it.id]=it }; selectedCardIds.addAll(snapshot.selected); rebuildCardOrderLocked()
+            strokes.clear(); cards.clear(); connections.clear(); necks.clear(); selectedCardIds.clear(); cardsByZ=emptyList(); canvasStrokeGrid.clear(); cardStrokes.clear()
+            snapshot.strokes.forEach { m.addStroke(it) }; snapshot.cards.forEach { m.upsertCard(it) }; snapshot.connections.forEach { connections[it.id]=it }; snapshot.necks.forEach { necks[it.id]=it }; selectedCardIds.addAll(snapshot.selected); rebuildCardOrderLocked()
         }
         hiddenCardId = snapshot.hiddenCardId
         setViewport(snapshot.panX, snapshot.panY, snapshot.scale); m.invalidateAll(); m.dispatch()
@@ -377,7 +356,6 @@ object BoardEngine {
     val cards = LinkedHashMap<String, CardRec>()
     val connections = LinkedHashMap<String, ConnectionRec>()
     val necks = LinkedHashMap<String, NeckRec>()
-    val whiteboards = LinkedHashMap<String, WhiteboardRec>()
     val selectedCardIds = LinkedHashSet<String>()
 
     
@@ -424,7 +402,6 @@ object BoardEngine {
             cards.clear()
             connections.clear()
             necks.clear()
-            whiteboards.clear()
             selectedCardIds.clear()
             cardsByZ = emptyList()
             canvasStrokeGrid.clear()
@@ -704,36 +681,6 @@ object BoardEngine {
             return NeckRec(conn.id, path, a.colored)
         }
 
-        fun upsertWhiteboard(rec: WhiteboardRec) {
-            val previous = whiteboards[rec.id]
-            if (previous != null && previous.same(rec)) return
-            previous?.let { addDirty(whiteboardDirtyBounds(it)) }
-            whiteboards[rec.id] = rec
-            addDirty(whiteboardDirtyBounds(rec))
-            moved = true
-        }
-
-        fun removeWhiteboard(id: String): WhiteboardRec? {
-            val rec = whiteboards.remove(id) ?: return null
-            addDirty(whiteboardDirtyBounds(rec))
-            moved = true
-            return rec
-        }
-
-        fun replaceWhiteboards(next: LinkedHashMap<String, WhiteboardRec>) {
-            for ((id, previous) in whiteboards) {
-                val replacement = next[id]
-                if (replacement == null || !previous.same(replacement)) addDirty(whiteboardDirtyBounds(previous))
-            }
-            for ((id, wb) in next) {
-                val previous = whiteboards[id]
-                if (previous == null || !previous.same(wb)) addDirty(whiteboardDirtyBounds(wb))
-            }
-            whiteboards.clear()
-            whiteboards.putAll(next)
-            moved = true
-        }
-
         fun setSelection(ids: Collection<String>) {
             if (selectedCardIds.size == ids.size && selectedCardIds.containsAll(ids)) return
             selectedCardIds.clear()
@@ -806,31 +753,6 @@ object BoardEngine {
                         val ids = ArrayList<String>(k)
                         repeat(k) { ids.add(readString(buf)) }
                         decoded.add { ids.forEach { m.removeCard(it) } }
-                    }
-                    OP_SET_WHITEBOARDS -> {
-                        val k = buf.int
-                        val values = ArrayList<WhiteboardRec>(k)
-                        repeat(k) {
-                            val id = readString(buf)
-                            val name = readString(buf)
-                            val x = buf.float
-                            val y = buf.float
-                            val w = buf.float
-                            val h = buf.float
-                            
-                            buf.get()
-                            values.add(WhiteboardRec(id, name, x, y, w, h, false))
-                        }
-                        decoded.add {
-                            val next = LinkedHashMap<String, WhiteboardRec>(values.size)
-                            for (value in values) {
-                                next[value.id] = WhiteboardRec(
-                                    value.id, value.name, value.x, value.y, value.width, value.height,
-                                    whiteboards[value.id]?.current ?: false,
-                                )
-                            }
-                            m.replaceWhiteboards(next)
-                        }
                     }
                     OP_SET_SELECTION -> {
                         val k = buf.int
@@ -1036,9 +958,6 @@ object BoardEngine {
         }
         listener?.onSceneChanged(dirty ?: return, false)
     }
-
-    private fun whiteboardDirtyBounds(wb: WhiteboardRec): RectF =
-        RectF(wb.x - 8f, wb.y - 8f, wb.x + wb.width + 8f, wb.y + wb.height + 8f)
 
     private inline fun forEachCell(bounds: RectF, block: (Long) -> Unit) {
         val minCx = cellIndex(bounds.left - STROKE_PAD)

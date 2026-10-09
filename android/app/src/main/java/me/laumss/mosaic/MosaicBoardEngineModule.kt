@@ -2,6 +2,7 @@ package me.laumss.mosaic
 
 import android.os.Handler
 import android.os.Looper
+import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
@@ -79,10 +80,16 @@ class MosaicBoardEngineModule(
 
     
     @ReactMethod
-    fun setClippedWhiteboards(viewTag: Int, ids: ReadableArray) {
-        val set = HashSet<String>()
-        for (i in 0 until ids.size()) ids.getString(i)?.let { set.add(it) }
-        withView(viewTag) { it.controller.setClippedWhiteboards(set) }
+    fun focusNoteShot(viewTag: Int, shotJson: String) {
+        withView(viewTag) { it.controller.focusNoteShot(shotJson) }
+    }
+
+    
+    @ReactMethod
+    fun renderNoteShot(viewTag: Int, shotJson: String, promise: Promise) {
+        withView(viewTag, onMissing = { promise.resolve(null) }) { view ->
+            view.controller.renderNoteShot(shotJson) { result -> promise.resolve(result) }
+        }
     }
 
     
@@ -118,12 +125,13 @@ class MosaicBoardEngineModule(
     @ReactMethod
     fun removeListeners(count: Int) = Unit
 
-    private fun withView(viewTag: Int, block: (MosaicBoardView) -> Unit) {
+    private fun withView(viewTag: Int, onMissing: (() -> Unit)? = null, block: (MosaicBoardView) -> Unit) {
         Handler(Looper.getMainLooper()).post {
             val view = try {
                 reactApplicationContext.getNativeModule(UIManagerModule::class.java)?.resolveView(viewTag)
             } catch (_: Throwable) { null }
-            (view as? MosaicBoardView)?.let { WhiteboardSceneGate.dispatch { block(it) } }
+            val board = view as? MosaicBoardView
+            if (board == null) onMissing?.invoke() else WhiteboardSceneGate.dispatch { block(board) }
         }
     }
 }
