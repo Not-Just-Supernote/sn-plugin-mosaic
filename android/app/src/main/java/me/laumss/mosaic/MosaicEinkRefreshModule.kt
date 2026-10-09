@@ -22,8 +22,6 @@ class MosaicEinkRefreshModule(
         
         const val MODE_A2 = 4
 
-        private const val EINK_SERVICE = "eink"
-
         @Volatile private var instance: WeakReference<MosaicEinkRefreshModule>? = null
 
         
@@ -47,45 +45,21 @@ class MosaicEinkRefreshModule(
         @JvmStatic
         fun requestFullRefresh(view: View, reason: String): Boolean {
             val root = view.rootView
-            val forced = when {
-                invoke(root, "forceEinkFullUpdate") -> "root.forceEinkFullUpdate"
-                invoke(view, "forceEinkFullUpdate") -> "view.forceEinkFullUpdate"
-                else -> null
+            val method = root.javaClass.methods.firstOrNull { it.name == "forceEinkFullUpdate" && it.parameterTypes.isEmpty() }
+            if (method == null) {
+                Log.w(TAG, "full refresh unavailable reason=$reason: no forceEinkFullUpdate on ${root.javaClass.name}")
+                return false
             }
-            val manager = try {
-                view.context.getSystemService(EINK_SERVICE)
+            try {
+                method.invoke(root)
             } catch (e: Throwable) {
-                null
-            }
-            val frame = when {
-                manager == null -> null
-                invoke(manager, "sendOneFullFrame") -> "sendOneFullFrame"
-                invoke(manager, "screenRefresh", true, 1) -> "screenRefresh"
-                else -> null
-            }
-            if (forced == null && frame == null) {
-                Log.w(TAG, "full refresh unavailable reason=$reason")
+                Log.w(TAG, "full refresh failed reason=$reason: ${e.cause?.message ?: e.message}")
                 return false
             }
             view.postInvalidateOnAnimation()
             root.postInvalidateOnAnimation()
-            Log.i(TAG, "full refresh requested reason=$reason via=${listOfNotNull(forced, frame).joinToString("+")}")
+            Log.i(TAG, "full refresh requested reason=$reason via=root.forceEinkFullUpdate")
             return true
-        }
-
-        private fun invoke(target: Any, name: String, vararg args: Any): Boolean {
-            val type = target.javaClass
-            val method = (type.methods.asSequence() + type.declaredMethods.asSequence())
-                .firstOrNull { it.name == name && it.parameterTypes.size == args.size }
-                ?: return false
-            return try {
-                method.isAccessible = true
-                method.invoke(target, *args)
-                true
-            } catch (e: Throwable) {
-                Log.w(TAG, "eink $name failed: ${e.cause?.message ?: e.message}")
-                false
-            }
         }
     }
 

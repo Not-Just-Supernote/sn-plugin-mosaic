@@ -13,6 +13,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
 import android.view.WindowManager
+import android.widget.Toast
 import android.widget.FrameLayout
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
@@ -85,6 +86,9 @@ class BoardInteractionController(
         const val CARD_FINGER_MOVE_HOLD_SELECTION_MS = 100L
         
         private const val NOTE_HEADER_PENDING = "#note-header"
+        private const val NOTE_LINK_PENDING = "#note-link:"
+        private const val NOTE_LINK_TAP_SLOP_DP = 8f
+        private const val NOTE_LINK_MIN_HIT_DP = 40f
         
         private val IMPORT_CARD_WIDTHS = floatArrayOf(BoardGeometry.DEFAULT_CARD_WIDTH, 480f, 640f, 800f, 960f)
         
@@ -478,7 +482,7 @@ class BoardInteractionController(
             var curY = anchorY
         }
         object Consumed : PenSession()
-        class OpenNote(val ref: String, val downX: Float, val downY: Float) : PenSession()
+        class OpenNote(val ref: String, val downX: Float, val downY: Float, val shotId: String? = null) : PenSession()
     }
 
     private var penSession: PenSession? = null
@@ -1299,6 +1303,13 @@ class BoardInteractionController(
             return
         }
 
+        val linkId = noteLinkAt(wx, wy)
+        if (linkId != null) {
+            host.setDrawPathSuspended(true, "note-link-tap")
+            penSession = PenSession.OpenNote("", wx, wy, linkId)
+            Log.i(TAG_PEN, "DOWN on note link badge: open on tap id=$linkId")
+            return
+        }
         val card = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
         val connection = if (card == null) BoardEngine.connectionAt(wx, wy) else null
         if (card?.kind == "note") {
@@ -1467,7 +1478,13 @@ class BoardInteractionController(
                         applyTransition(arbiter.releaseOverride(ToolArbiter.Source.SHAPE), "shape-cancel")
                     }
                 }
-                is PenSession.OpenNote -> { host.setDrawPathSuspended(false, "note-tap-end"); if (!cancelled) openNote(s.ref) }
+                is PenSession.OpenNote -> {
+                    host.setDrawPathSuspended(false, "note-tap-end")
+                    if (!cancelled) {
+                        val shotId = s.shotId
+                        if (shotId != null) openNoteLink(shotId) else openNote(s.ref)
+                    }
+                }
                 PenSession.Consumed -> {}
             }
         } finally {
@@ -3060,6 +3077,12 @@ class BoardInteractionController(
 
         
         
+        val linkId = noteLinkAt(wx, wy)
+        if (linkId != null) {
+            fingerGesture = FingerGesture.CardPending(id, NOTE_LINK_PENDING + linkId)
+            cancelCardLongPress()
+            return
+        }
         val card = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
         if (card == null) {
             fingerGesture = FingerGesture.Idle
@@ -3169,7 +3192,9 @@ class BoardInteractionController(
                     cancelCardLongPress()
                     fingerGesture = FingerGesture.Idle
                     val card = BoardEngine.cards[g.cardId]
-                    if (!cancelled && card?.kind == "note" && card.noteRef.isNotEmpty()) {
+                    if (!cancelled && g.cardId.startsWith(NOTE_LINK_PENDING)) {
+                        openNoteLink(g.cardId.removePrefix(NOTE_LINK_PENDING))
+                    } else if (!cancelled && card?.kind == "note" && card.noteRef.isNotEmpty()) {
                         openNote(card.noteRef)
                     }
                 }
@@ -4233,6 +4258,29 @@ class BoardInteractionController(
     }
 
     
+    private fun noteLinkAt(wx: Float, wy: Float): String? {
+        if (!surface.showsBoardChrome) return null
+        val scale = BoardEngine.scale
+        return NoteLinks.badgeAt(wx, wy, NOTE_LINK_TAP_SLOP_DP / scale, NOTE_LINK_MIN_HIT_DP / scale)
+    }
+
+    private fun openNoteLink(shotId: String) {
+        val link = NoteLinks.list().firstOrNull { it.id == shotId } ?: return
+        if (surfaceSwitching || suspendedBoard != null) return
+        val current = MosaicNoteShotModule.currentHostNotePath()
+        val sameNote = current != null && current == link.notePath
+        val name = link.noteName.ifBlank { MosaicStrings.t(MosaicStrings.Key.noteLinkFallback) }
+        Log.i(TAG_SHOT, "open note link id=$shotId note=${link.notePath} page=${link.page} current=$current same=$sameNote")
+        MosaicNoteShotModule.logHostApisOnce()
+        cancelFingerGestures("note-link")
+        if (!sameNote) {
+            Toast.makeText(host.context, MosaicStrings.noteLinkElsewhere(name, link.page), Toast.LENGTH_LONG).show()
+            return
+        }
+        Toast.makeText(host.context, MosaicStrings.noteLinkArrived(name, link.page), Toast.LENGTH_LONG).show()
+        surface.onCloseRequested(BoardSurface.CloseSource.TOOLBAR)
+    }
+
     override fun onLocateNoteLink(shotId: String) {
         val region = NoteLinks.regionOf(shotId) ?: return
         cancelFingerGestures("locate-note-link")

@@ -179,6 +179,17 @@ object NoteLinks {
     
     fun regionOf(id: String): RectF? = frames.firstOrNull { it.id == id }?.let { RectF(it.rect) }
 
+    fun badgeAt(x: Float, y: Float, slop: Float, minSide: Float): String? {
+        val shown = frames
+        for (i in shown.indices.reversed()) {
+            val badge = shown[i].badge
+            val padX = maxOf(slop, (minSide - badge.width()) / 2f)
+            val padY = maxOf(slop, (minSide - badge.height()) / 2f)
+            if (x >= badge.left - padX && x <= badge.right + padX && y >= badge.top - padY && y <= badge.bottom + padY) return shown[i].id
+        }
+        return null
+    }
+
     fun displayName(link: Link): String {
         val name = link.noteName.ifBlank { MosaicStrings.t(MosaicStrings.Key.noteLinkFallback) }
         return if (name.length > LABEL_MAX_CHARS) name.take(LABEL_MAX_CHARS - 1) + "…" else name

@@ -85,6 +85,16 @@ object MosaicStrings {
         if (zh) "笔记 $number" else "Note $number"
 
     
+    fun noteLinkArrived(name: String, page: Int): String {
+        val where = if (page >= 0) (if (zh) "，截图在第 ${page + 1} 页" else ", shot on page ${page + 1}") else ""
+        return if (zh) "回到笔记《$name》$where" else "Back to note $name$where"
+    }
+
+    fun noteLinkElsewhere(name: String, page: Int): String {
+        val where = if (page >= 0) (if (zh) "第 ${page + 1} 页" else " page ${page + 1}") else ""
+        return if (zh) "截图在笔记《$name》$where，请先打开那篇笔记" else "This shot is in note $name$where. Open that note first."
+    }
+
     fun noteLinkDetail(page: Int, updatedAtIso: String): String {
         val parts = ArrayList<String>(2)
         if (page >= 0) parts.add(if (zh) "第 ${page + 1} 页" else "Page ${page + 1}")

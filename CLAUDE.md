@@ -46,7 +46,7 @@ Kotlin 负责画面和所有交互。每次改动后，它把结果发给 JS。J
 
 ## 白板
 
-缩放范围是 10% 到 200%，默认 75%。双指捏合只在 75% 到 150% 之间生效，也只能缩放到这个范围内。在这个范围外，双指只能平移，要用菜单里的加减按钮缩放。
+缩放范围是 10% 到 200%，默认 75%。双指捏合只在 75% 到 200% 之间生效。低于 75% 时双指只能平移，要用菜单里的加减按钮缩放。
 
 背景模板有空白、点、线、十字四种，每种有三种间距。白板和笔记卡片用同一个模板。
 
@@ -92,7 +92,7 @@ Kotlin 负责画面和所有交互。每次改动后，它把结果发给 JS。J
 
 这两种情况下，画的那一笔不会存成笔迹。系统画的轨迹留在它自己的图层里，Mosaic 重画画面盖不掉，只有整屏刷新能清掉。所以新卡片画好后，Mosaic 会请求一次整屏刷新，代码在 `MosaicEinkRefreshModule.requestFullRefresh`。如果那时笔还在写或有笔迹等着交接，会等这些笔迹画好再刷新。
 
-实测只调 `EinkManager.sendOneFullFrame()` 清不掉轨迹，手动按刷新键才行。有效的是对最外层的 `PluginContainer` 调 `View.forceEinkFullUpdate()`，再补一次 `sendOneFullFrame()`。对白板内容那一层调 `forceEinkFullUpdate()` 不行。设备上没有这些方法时，依次退回内容层的 `forceEinkFullUpdate()`、`sendOneFullFrame()`、`screenRefresh(true, 1)`。日志标签 `MosaicEinkRefresh`，成功时会打印 `full refresh requested ... via=...`。
+实测只调 `EinkManager.sendOneFullFrame()` 清不掉轨迹，手动按刷新键才行。有效的是对最外层的 `PluginContainer` 调 `View.forceEinkFullUpdate()`，对白板内容那一层调不行。日志标签 `MosaicEinkRefresh`，成功时会打印 `full refresh requested ... via=root.forceEinkFullUpdate`。
 
 单指长按卡片可以拖动。松手时如果靠近同色卡片，会贴上去并连接。
 
@@ -138,7 +138,7 @@ Notipal 浮动工具条所在的区域不能书写。
 
 在文档里选中文字后按 Mosaic 按钮，会在白板中央生成一张文字卡。
 
-选中的内容可以插入当前 Note。插入的是一张图片，白板上那块区域会留下标记。
+选中的内容可以插入当前 Note。插入的是一张图片，白板上那块区域会留下标记：四个角的边框，加一个黑底白字的标签，写着笔记名。点这个标签（手指或笔都行）会回到那篇 Note：如果就是当前打开的 Note，白板关闭并提示第几页；如果是别的 Note，只提示名字和页码，因为插件目前找不到让宿主跳转到别的文件或页码的接口。代码在 `BoardInteractionController.openNoteLink`，第一次点会在日志标签 `MosaicNoteShotNative` 下打印宿主接口列表（`host api ...`），用来找跳转接口。
 
 ## 保存和同步
 

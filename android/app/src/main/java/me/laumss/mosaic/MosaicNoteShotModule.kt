@@ -63,6 +63,22 @@ class MosaicNoteShotModule(
         private const val TOOL_TYPE_FINGER = 1
 
         @Volatile private var boardVisible = false
+        @Volatile private var hostApisLogged = false
+
+        @JvmStatic
+        fun logHostApisOnce() {
+            if (hostApisLogged) return
+            hostApisLogged = true
+            try {
+                for (type in listOf(HostCommonAPI::class.java, PluginAppAPI::class.java)) {
+                    type.methods.filter { it.declaringClass != Any::class.java }
+                        .map { it.toGenericString() }.sorted().chunked(4)
+                        .forEach { Log.i(TAG, "host api ${type.simpleName} $it") }
+                }
+            } catch (error: Throwable) {
+                Log.w(TAG, "host api dump failed: $error")
+            }
+        }
         @Volatile private var activeInstance: MosaicNoteShotModule? = null
 
         @JvmStatic
