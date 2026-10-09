@@ -44,120 +44,48 @@ class MosaicEinkRefreshModule(
             if (UiThreadUtil.isOnUiThread()) block() else UiThreadUtil.runOnUiThread(block)
         }
 
-        @Volatile private var einkApisLogged = false
-
-        class RefreshProbe(
-            val name: String,
-            val quietService: Boolean = false,
-            internal val run: (View, Any?) -> Boolean,
-        )
-
-        private val probes = listOf(
-            RefreshProbe("view.forceEinkFullUpdate") { view, _ -> callAuto(view, "forceEinkFullUpdate") },
-            RefreshProbe("root.forceEinkFullUpdate") { view, _ -> callAuto(view.rootView, "forceEinkFullUpdate") },
-            RefreshProbe("manager.screenRefresh") { _, manager -> callAuto(manager, "screenRefresh", 2) },
-            RefreshProbe("view.refreshCurrentView") { view, _ -> callAuto(view, "refreshCurrentView") },
-            RefreshProbe("quiet-service+sendOneFullFrame", quietService = true) { _, manager ->
-                callAuto(manager, "sendOneFullFrame")
-            },
-            RefreshProbe("force+sendOneFullFrame") { view, manager ->
-                val forced = callAuto(view, "forceEinkFullUpdate")
-                callAuto(manager, "sendOneFullFrame") || forced
-            },
-        )
-
-        private var probeCursor = 0
-
         @JvmStatic
-        fun nextFullRefreshProbe(): RefreshProbe = synchronized(probes) { probes[probeCursor++ % probes.size] }
-
-        @JvmStatic
-        fun requestFullRefresh(view: View, reason: String, probe: RefreshProbe): Boolean {
+        fun requestFullRefresh(view: View, reason: String): Boolean {
+            val root = view.rootView
+            val forced = when {
+                invoke(root, "forceEinkFullUpdate") -> "root.forceEinkFullUpdate"
+                invoke(view, "forceEinkFullUpdate") -> "view.forceEinkFullUpdate"
+                else -> null
+            }
             val manager = try {
                 view.context.getSystemService(EINK_SERVICE)
             } catch (e: Throwable) {
                 null
             }
-            logEinkApisOnce(manager)
-            val before = einkState(view, manager)
-            val ok = try {
-                probe.run(view, manager)
-            } catch (e: Throwable) {
-                Log.w(TAG, "full refresh probe ${probe.name} failed: ${e.cause?.message ?: e.message}")
-                false
+            val frame = when {
+                manager == null -> null
+                invoke(manager, "sendOneFullFrame") -> "sendOneFullFrame"
+                invoke(manager, "screenRefresh", true, 1) -> "screenRefresh"
+                else -> null
             }
-            view.postInvalidateOnAnimation()
-            view.rootView.postInvalidateOnAnimation()
-            val number = probes.indexOf(probe) + 1
-            Log.i(TAG, "full refresh probe=$number/${probes.size} ${probe.name} reason=$reason ok=$ok before=[$before]")
-            return ok
-        }
-
-        private fun callAuto(target: Any?, name: String, preferParams: Int = -1): Boolean {
-            if (target == null) return false
-            val type = target.javaClass
-            val found = (type.methods.asSequence() + type.declaredMethods.asSequence()).filter { it.name == name }.toList()
-            val method = found.firstOrNull { it.parameterTypes.size == preferParams }
-                ?: found.minByOrNull { it.parameterTypes.size }
-            if (method == null) {
-                Log.w(TAG, "probe call ${type.simpleName}.$name missing")
+            if (forced == null && frame == null) {
+                Log.w(TAG, "full refresh unavailable reason=$reason")
                 return false
             }
-            val args = method.parameterTypes.map { defaultArg(it) }.toTypedArray()
+            view.postInvalidateOnAnimation()
+            root.postInvalidateOnAnimation()
+            Log.i(TAG, "full refresh requested reason=$reason via=${listOfNotNull(forced, frame).joinToString("+")}")
+            return true
+        }
+
+        private fun invoke(target: Any, name: String, vararg args: Any): Boolean {
+            val type = target.javaClass
+            val method = (type.methods.asSequence() + type.declaredMethods.asSequence())
+                .firstOrNull { it.name == name && it.parameterTypes.size == args.size }
+                ?: return false
             return try {
                 method.isAccessible = true
-                val result = method.invoke(target, *args)
-                Log.i(TAG, "probe call ${type.simpleName}.$name(${args.joinToString()}) -> $result")
+                method.invoke(target, *args)
                 true
             } catch (e: Throwable) {
-                Log.w(TAG, "probe call ${type.simpleName}.$name failed: ${e.cause?.message ?: e.message}")
+                Log.w(TAG, "eink $name failed: ${e.cause?.message ?: e.message}")
                 false
             }
-        }
-
-        private fun defaultArg(type: Class<*>): Any? = when (type) {
-            Boolean::class.javaPrimitiveType -> true
-            Int::class.javaPrimitiveType -> 1
-            Long::class.javaPrimitiveType -> 0L
-            Float::class.javaPrimitiveType -> 0f
-            Double::class.javaPrimitiveType -> 0.0
-            String::class.java -> ""
-            else -> null
-        }
-
-        private fun callResult(target: Any?, name: String): Any? {
-            if (target == null) return null
-            return try {
-                target.javaClass.methods.firstOrNull { it.name == name && it.parameterTypes.isEmpty() }?.invoke(target)
-            } catch (e: Throwable) {
-                "err:${e.cause?.message ?: e.message}"
-            }
-        }
-
-        private fun einkState(view: View, manager: Any?): String =
-            "viewMode=${callResult(view, "getEinkUpdateMode")} final=${callResult(view, "getEinkFinalUpdateMode")} " +
-                "modeSet=${callResult(view, "isEinkModeSet")} a2Gate=${callResult(view, "getEinkA2Gate")} " +
-                "managerMode=${callResult(manager, "getMode")}"
-
-        private fun logEinkApisOnce(manager: Any?) {
-            if (einkApisLogged) return
-            einkApisLogged = true
-            val pattern = Regex("(?i)eink|epd|refresh|fullframe")
-            val viewMethods = View::class.java.methods.filter { pattern.containsMatchIn(it.name) }
-            val managerMethods = manager?.javaClass?.methods?.filter { it.declaringClass != Any::class.java } ?: emptyList()
-            Log.i(TAG, "eink apis manager=${manager?.javaClass?.name}")
-            (viewMethods + managerMethods).map { it.toGenericString() }.distinct().sorted().chunked(5)
-                .forEach { Log.i(TAG, "eink signatures $it") }
-            val constantPattern = Regex("(?i)eink|epd|a2|gc16|regal|dither|fullframe|update_mode|refresh_mode")
-            val constants = ArrayList<String>()
-            for (type in listOfNotNull(View::class.java, manager?.javaClass)) {
-                for (field in type.fields) {
-                    if (!java.lang.reflect.Modifier.isStatic(field.modifiers)) continue
-                    if (field.type != Int::class.javaPrimitiveType || !constantPattern.containsMatchIn(field.name)) continue
-                    constants.add("${type.simpleName}.${field.name}=${field.getInt(null)}")
-                }
-            }
-            constants.sorted().chunked(8).forEach { Log.i(TAG, "eink constants $it") }
         }
     }
 
