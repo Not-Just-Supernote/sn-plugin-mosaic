@@ -90,7 +90,9 @@ Kotlin 负责画面和所有交互。每次改动后，它把结果发给 JS。J
 
 从卡片里起笔，画到画布上，会在那里生成一张相连的新卡片。画到另一张同色卡片上，会把两张卡片连起来。
 
-这两种情况下，画的那一笔不会存成笔迹。系统画的轨迹留在它自己的图层里，Mosaic 重画画面盖不掉，只有整屏刷新能清掉。所以新卡片画好后，Mosaic 会请求一次整屏刷新，用的是 Rockchip 的 `EinkManager.sendOneFullFrame()`，代码在 `MosaicEinkRefreshModule.requestFullRefresh`。如果那时笔还在写或有笔迹等着交接，会等这些笔迹画好再刷新。
+这两种情况下，画的那一笔不会存成笔迹。系统画的轨迹留在它自己的图层里，Mosaic 重画画面盖不掉，只有整屏刷新能清掉。所以新卡片画好后，Mosaic 会请求一次整屏刷新，代码在 `MosaicEinkRefreshModule.requestFullRefresh`。如果那时笔还在写或有笔迹等着交接，会等这些笔迹画好再刷新。
+
+这件事还没解决。实测 `EinkManager.sendOneFullFrame()` 确实发出去了，但轨迹还在，手动按刷新键才会清掉。设备上还有 `View.forceEinkFullUpdate()`、`View.refreshCurrentView()` 和 `EinkManager.screenRefresh()`。现在是排查版本：每画一次卡片就换一种刷新方式，顺序在 `MosaicEinkRefreshModule.probes`，日志标签 `MosaicEinkRefresh`，每次会打印 `full refresh probe=第几种/共几种`。找到能清掉轨迹的那一种后，就把这个轮换删掉，只留它。
 
 单指长按卡片可以拖动。松手时如果靠近同色卡片，会贴上去并连接。
 

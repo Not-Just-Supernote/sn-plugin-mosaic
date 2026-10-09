@@ -47,6 +47,7 @@ class MosaicBoardView(
         private const val BACKGROUND_SYNC_PROMPT_DELAY_MS = 120L
         
         private const val PEN_MODE_RESET_MAX_MS = 1500L
+        private const val FULL_REFRESH_QUIET_MS = 700L
         private const val INK_HANDOFF_IDLE_MS = 3000L
         private const val BACKGROUND_SYNC_IDLE_DELAY_MS = 2000L
         
@@ -790,7 +791,15 @@ class MosaicBoardView(
             return
         }
         fullRefreshPending = false
-        MosaicEinkRefreshModule.requestFullRefresh(contentView, reason)
+        val probe = MosaicEinkRefreshModule.nextFullRefreshProbe()
+        val quiet = probe.quietService && drawPathActive
+        if (quiet) disableDrawPath("refresh-probe")
+        MosaicEinkRefreshModule.requestFullRefresh(contentView, reason, probe)
+        if (quiet) {
+            handler.postDelayed({
+                if (attached && !drawPathActive) enableDrawPath("refresh-probe:done")
+            }, FULL_REFRESH_QUIET_MS)
+        }
     }
 
     
