@@ -13,7 +13,6 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
     var onMarkerInk: (MarkerInk) -> Unit = {}
     
     var onTool: (String) -> Unit = {}
-    var onToggleTouch: () -> Unit = {}
     var onMore: () -> Unit = {}
     
     var onSelectBelow: () -> Unit = {}
@@ -59,14 +58,12 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
 
     private val styleCells = LinkedHashMap<PenStyle, IconCell>()
     private val toolCells = LinkedHashMap<String, IconCell>()
-    private lateinit var touchCell: IconCell
     private lateinit var moreCell: IconCell
     private lateinit var selectBelowCell: IconCell
     private lateinit var shapeCell: IconCell
     private var selectedStyle = PenStyle.PEN
     
     private val widthIndexByStyle = HashMap<PenStyle, Int>().apply { NIBS.forEach { put(it, PenPopup.defaultIndex(it)) } }
-    private var touchEnabled = false
     private var selectBelowActive = false
     
     private var activeTool: String? = null
@@ -76,7 +73,6 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
     fun cancelTransientPresses() {
         styleCells.values.forEach { it.cancelPress() }
         toolCells.values.forEach { it.cancelPress() }
-        touchCell.cancelPress()
         moreCell.cancelPress()
         selectBelowCell.cancelPress()
         shapeCell.cancelPress()
@@ -132,8 +128,6 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
         shapeCell = shape
         toolCells["shape"] = shape
         add(shape)
-        touchCell = IconCell(context, { c,s,p -> ToolIcons.touch(c,s,p,touchEnabled) }) { onToggleTouch() }
-        add(touchCell)
         refreshSelection()
     }
 
@@ -148,11 +142,6 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
         refreshSelection()
     }
 
-    fun setTouchEnabled(enabled: Boolean) {
-        if (touchEnabled == enabled) return
-        touchEnabled = enabled
-        touchCell.invalidate()
-    }
 
     
     fun setWidthIndex(index: Int) {

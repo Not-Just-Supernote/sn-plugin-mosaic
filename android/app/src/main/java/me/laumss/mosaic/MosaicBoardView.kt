@@ -522,6 +522,9 @@ class MosaicBoardView(
         }
         
         
+        chromeView.touchToggleBounds()?.let { r ->
+            areas.add(DrawPathClient.DisableArea(loc[0] + r.left, loc[1] + r.top, r.width(), r.height()))
+        }
         InklingLink.toolbarDisableArea()?.let(areas::add)
         
         

@@ -30,6 +30,8 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         private const val MUTED = 0xFF555555.toInt()
         private const val REGION_JUMP_SIZE_DP = 72f
         private const val REGION_JUMP_MARGIN_DP = 24f
+        private const val TOUCH_TOGGLE_SIZE_DP = 64f
+        private const val TOUCH_TOGGLE_MARGIN_DP = 12f
         
         private const val TOP_PULL_START_PX = 120f
         
@@ -177,6 +179,14 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         strokeScale = CLOSE_STROKE_SCALE,
         invertOnPress = false,
     )
+    private val touchToggle = GlyphButton(
+        context,
+        { c, s, p -> ToolIcons.touch(c, s, p, touchEnabled) },
+        { hidePopups(); listener?.onToggleTouch() },
+        useToolbarGlyphSize = true,
+        invertOnPress = false,
+        transparent = true,
+    )
     private val widthPopup = WidthPopupView(context)
     
     private val widthPopupRoot = FrameLayout(context).apply {
@@ -242,7 +252,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
                 else -> listener?.onSelectWriteTool()
             }
         }
-        inkToolbar.onToggleTouch = { hidePopups(); listener?.onToggleTouch() }
         inkToolbar.onMore = { hidePopups(); listener?.onOpenMenu() }
         inkToolbar.onSelectBelow = { hidePopups(); listener?.onSelectBelow() }
         inkToolbar.onNibWidthRequest = { cellLeft, cellWidth -> hideTemplatePopup(); hideShapePopup(); showWidthPopup(cellLeft, cellWidth) }
@@ -264,6 +273,10 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         addView(closeButton, LayoutParams(closeW, closeH, Gravity.TOP or Gravity.END).apply {
             rightMargin = dp(CLOSE_RIGHT_MARGIN_DP)
             topMargin = closeTop
+        })
+        addView(touchToggle, LayoutParams(dp(TOUCH_TOGGLE_SIZE_DP), dp(TOUCH_TOGGLE_SIZE_DP), Gravity.BOTTOM or Gravity.START).apply {
+            leftMargin = dp(TOUCH_TOGGLE_MARGIN_DP)
+            bottomMargin = dp(TOUCH_TOGGLE_MARGIN_DP)
         })
         widthPopupRoot.addView(
             widthPopup,
@@ -421,7 +434,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
     fun setTouchEnabled(enabled: Boolean) {
         if (touchEnabled == enabled) return
         touchEnabled = enabled
-        inkToolbar.setTouchEnabled(enabled)
+        touchToggle.invalidate()
     }
 
     
@@ -1010,7 +1023,15 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
 
     
     fun consumesPoint(xPx: Float, yPx: Float): Boolean =
-        blocksPen || yPx < toolbarHeightPx() || regionJumpContains(xPx, yPx)
+        blocksPen || yPx < toolbarHeightPx() || regionJumpContains(xPx, yPx) || touchToggleContains(xPx, yPx)
+
+    private fun touchToggleContains(xPx: Float, yPx: Float): Boolean =
+        touchToggle.visibility == View.VISIBLE &&
+            xPx >= touchToggle.left && xPx <= touchToggle.right && yPx >= touchToggle.top && yPx <= touchToggle.bottom
+
+    fun touchToggleBounds(): android.graphics.Rect? =
+        if (touchToggle.visibility != View.VISIBLE || touchToggle.width == 0) null
+        else android.graphics.Rect(touchToggle.left, touchToggle.top, touchToggle.right, touchToggle.bottom)
 
     
     val blocksPen: Boolean get() = switcherOpen || widthPopupRoot.visibility == View.VISIBLE ||
@@ -1119,6 +1140,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         private val strokeScale: Float = 1f,
         
         private val invertOnPress: Boolean = true,
+        private val transparent: Boolean = false,
     ) : View(context) {
         var active = false
             set(value) { if (field != value) { field = value; invalidate() } }
@@ -1134,7 +1156,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
 
         override fun onDraw(c: Canvas) {
             val inverted = active || (down && invertOnPress)
-            c.drawColor(if (inverted) Color.BLACK else Color.WHITE)
+            if (inverted || !transparent) c.drawColor(if (inverted) Color.BLACK else Color.WHITE)
             paint.strokeWidth = strokePx()
             paint.color = if (inverted) Color.WHITE else Color.BLACK
             val s = if (useToolbarGlyphSize) {
