@@ -288,7 +288,7 @@ object BoardEngine {
     data class SceneSnapshot(
         val strokes: List<StrokeRec>, val cards: List<CardRec>, val connections: List<ConnectionRec>,
         val necks: List<NeckRec>, val selected: List<String>,
-        val panX: Float, val panY: Float, val scale: Float, val hiddenCardId: String?,
+        val panX: Float, val panY: Float, val scale: Float,
     )
 
     
@@ -340,13 +340,13 @@ object BoardEngine {
         )
     }
 
-    fun snapshotScene(): SceneSnapshot = synchronized(lock) { SceneSnapshot(strokes.values.toList(), cards.values.toList(), connections.values.toList(), necks.values.toList(), selectedCardIds.toList(), panX, panY, scale, hiddenCardId) }
+    fun snapshotScene(): SceneSnapshot = synchronized(lock) { SceneSnapshot(strokes.values.toList(), cards.values.toList(), connections.values.toList(), necks.values.toList(), selectedCardIds.toList(), panX, panY, scale) }
     fun replaceScene(snapshot: SceneSnapshot) {
         val m = Mutation(); synchronized(lock) {
             strokes.clear(); cards.clear(); connections.clear(); necks.clear(); selectedCardIds.clear(); cardsByZ=emptyList(); canvasStrokeGrid.clear(); cardStrokes.clear()
             snapshot.strokes.forEach { m.addStroke(it) }; snapshot.cards.forEach { m.upsertCard(it) }; snapshot.connections.forEach { connections[it.id]=it }; snapshot.necks.forEach { necks[it.id]=it }; selectedCardIds.addAll(snapshot.selected); rebuildCardOrderLocked()
         }
-        hiddenCardId = snapshot.hiddenCardId
+        hiddenCardId = null
         setViewport(snapshot.panX, snapshot.panY, snapshot.scale); m.invalidateAll(); m.dispatch()
         listener?.onSelectionChanged()
     }

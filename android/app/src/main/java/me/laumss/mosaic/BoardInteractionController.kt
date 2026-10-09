@@ -242,7 +242,7 @@ class BoardInteractionController(
                 
                 val scale = minOf(1f, (host.width / density) / ScrollingDocument.WIDTH)
                 val panY = toolbarHeightWorld() + currentNoteHeaderHeight * scale - doc.clampScroll(doc.scrollY, host.height / density)
-                val scene = BoardEngine.SceneSnapshot(doc.strokes, emptyList(), emptyList(), emptyList(), emptyList(), 0f, panY, scale, null)
+                val scene = BoardEngine.SceneSnapshot(doc.strokes, emptyList(), emptyList(), emptyList(), emptyList(), 0f, panY, scale)
                 enterSurface(note, scene)
                 releasePaintHold("note-opened")
                 Log.i(TAG, "note opened ref=$ref height=${doc.contentHeight} scrollY=${doc.scrollY}")
@@ -677,6 +677,7 @@ class BoardInteractionController(
         penSession = null
         penMoveSession = null
         fingerMoveSession = null
+        BoardEngine.hiddenCardId = null
         fingers.clear()
         fingerGesture = FingerGesture.Idle
         sliderTwoDown = false
@@ -2674,6 +2675,7 @@ class BoardInteractionController(
             is MoveSession.CardResize -> {
                 overlay.hideCardPreview()
                 computeResizePreview(m, wx, wy)
+                unhideCardFromTiles()
                 val start = m.startRect
                 val changed = abs(m.preview.left - start.left) > 0.01f || abs(m.preview.top - start.top) > 0.01f ||
                     abs(m.preview.width() - start.width()) > 0.01f || abs(m.preview.height() - start.height()) > 0.01f
@@ -2683,7 +2685,6 @@ class BoardInteractionController(
                     apply(change, record = true)
                 }
                 refreshSingleCardFrame()
-                content.runWhenSettled(Runnable { unhideCardFromTiles() })
                 Log.i(TAG, "[CardPerf] kind=resize input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed handle=${m.handle}")
             }
             is MoveSession.Selection -> {

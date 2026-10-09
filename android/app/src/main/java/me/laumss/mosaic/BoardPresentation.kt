@@ -109,7 +109,7 @@ class BoardPresentation(
             val m = r.einkMode ?: continue
             if (eink == null || m == MosaicEinkRefreshModule.MODE_A2) eink = m
         }
-        val dark = flat || eink == MosaicEinkRefreshModule.MODE_A2
+        val dark = eink == MosaicEinkRefreshModule.MODE_A2
         return State(flat, dark, flat && isBoardSurface(), fog, eink)
     }
 

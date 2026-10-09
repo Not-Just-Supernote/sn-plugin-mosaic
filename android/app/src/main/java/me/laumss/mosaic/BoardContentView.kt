@@ -1310,7 +1310,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private fun drawLiquidAndCards(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot) {
         val hidden = scene.hiddenCardId
         val emphasis = outlineEmphasis
-        val dark = emphasis || darkCards
+        val dark = darkCards
         val cardRect = RectF()
         
         
@@ -1377,7 +1377,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             if (!RectF.intersects(cardRect, world)) continue
             val save = canvas.save()
             if (!outlineOccluders.isEmpty) canvas.clipOutPath(outlineOccluders)
-            emphasisStrokePaint.color = if (flatDark(card)) Color.WHITE else CARD_OUTLINE_EMPHASIS_COLOR
+            emphasisStrokePaint.color = if (darkCards && flatDark(card)) Color.WHITE else CARD_OUTLINE_EMPHASIS_COLOR
             canvas.drawRoundRect(cardRect, CARD_RADIUS, CARD_RADIUS, emphasisStrokePaint)
             canvas.restoreToCount(save)
             outlineOccluders.addRect(cardRect, Path.Direction.CW)
