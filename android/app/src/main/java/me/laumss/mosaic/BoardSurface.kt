@@ -50,8 +50,8 @@ class WhiteboardSurface(
     
     
     override fun constrainScale(next: Float, start: Float): Float =
-        if (start < BoardGeometry.NORMAL_ZOOM_SCALE - ZOOM_EPS) start
-        else next.coerceIn(BoardGeometry.NORMAL_ZOOM_SCALE, BoardGeometry.MAX_ZOOM_SCALE)
+        if (start < BoardGeometry.GESTURE_MIN_ZOOM - ZOOM_EPS || start > BoardGeometry.GESTURE_MAX_ZOOM + ZOOM_EPS) start
+        else next.coerceIn(BoardGeometry.GESTURE_MIN_ZOOM, BoardGeometry.GESTURE_MAX_ZOOM)
 
     companion object {
         

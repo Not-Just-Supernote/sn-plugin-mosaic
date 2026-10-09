@@ -43,6 +43,9 @@ object BoardGeometry {
     val UI_ZOOM_LEVELS = intArrayOf(10, 25, 50, 75, 100, 125, 150, 175, 200)
     val ZOOM_LEVELS: FloatArray = FloatArray(UI_ZOOM_LEVELS.size) { scaleForZoomPercent(UI_ZOOM_LEVELS[it].toFloat()) }
     val DEFAULT_ZOOM: Float = scaleForZoomPercent(75f)
+    val RESET_ZOOM: Float = scaleForZoomPercent(100f)
+    val GESTURE_MIN_ZOOM: Float = scaleForZoomPercent(75f)
+    val GESTURE_MAX_ZOOM: Float = scaleForZoomPercent(150f)
 
     enum class Handle(val movesLeft: Boolean, val movesRight: Boolean, val movesTop: Boolean, val movesBottom: Boolean) {
         TOP_LEFT(true, false, true, false),

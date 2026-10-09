@@ -115,6 +115,9 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
     private val zoomOut = textButton("－", 22f, bordered = false)
     private val zoomReadout = textButton("100%", 15f, bordered = false)
     private val zoomIn = textButton("＋", 22f, bordered = false)
+    private val undoButton = GlyphButton(context, { c, s, p -> ToolIcons.undo(c, s, p) }, { listener?.onUndo() })
+    private val redoButton = GlyphButton(context, { c, s, p -> ToolIcons.redo(c, s, p) }, { listener?.onRedo() })
+    private val historyBar = LinearLayout(context)
     private val lassoEditButton = textButton("", 17f).apply { alpha = 0.35f; isEnabled = false }
     private val lassoDeleteButton = textButton("", 17f)
     
@@ -239,8 +242,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
                 else -> listener?.onSelectWriteTool()
             }
         }
-        inkToolbar.onUndo = { hidePopups(); listener?.onUndo() }
-        inkToolbar.onRedo = { hidePopups(); listener?.onRedo() }
         inkToolbar.onToggleTouch = { hidePopups(); listener?.onToggleTouch() }
         inkToolbar.onMore = { hidePopups(); listener?.onOpenMenu() }
         inkToolbar.onSelectBelow = { hidePopups(); listener?.onSelectBelow() }
@@ -604,6 +605,13 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         zoomBar.addView(zoomReadout, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(38f)))
         zoomBar.addView(zoomIn, LinearLayout.LayoutParams(dp(40f), dp(38f)))
 
+        historyBar.orientation = LinearLayout.HORIZONTAL
+        historyBar.gravity = Gravity.CENTER_VERTICAL
+        historyBar.background = borderDrawable(Color.WHITE)
+        historyBar.setPadding(dp(2f), dp(2f), dp(2f), dp(2f))
+        historyBar.addView(undoButton, LinearLayout.LayoutParams(dp(38f), dp(34f)))
+        historyBar.addView(redoButton, LinearLayout.LayoutParams(dp(38f), dp(34f)))
+
         val toolsScroll = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
         toolsRow.orientation = LinearLayout.HORIZONTAL
         toolsRow.gravity = Gravity.CENTER_VERTICAL
@@ -660,13 +668,21 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             zoomBar,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT),
         )
+        menuHeader.addView(
+            historyBar,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(12f) },
+        )
         val saveArchiveButton = textButton(MosaicStrings.t(MosaicStrings.Key.archiveSave), 15f)
         saveArchiveButton.setOnClickListener { listener?.onSaveArchive() }
         val loadArchiveButton = textButton(MosaicStrings.t(MosaicStrings.Key.archiveLoad), 15f)
         loadArchiveButton.setOnClickListener { listener?.onLoadArchive() }
-        
-        menuHeader.addView(saveArchiveButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(12f) })
-        menuHeader.addView(loadArchiveButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(8f) })
+        val archiveRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(8f))
+        }
+        archiveRow.addView(saveArchiveButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)))
+        archiveRow.addView(loadArchiveButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(8f) })
         menuHeader.addView(
             View(context),
             LinearLayout.LayoutParams(0, 0, 1f),
@@ -678,6 +694,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)),
         )
         switcherPanel.addView(menuHeader)
+        switcherPanel.addView(archiveRow)
 
         
         val syncRow = LinearLayout(context).apply {

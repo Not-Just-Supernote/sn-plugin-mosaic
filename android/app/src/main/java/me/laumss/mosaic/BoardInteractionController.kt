@@ -4067,7 +4067,7 @@ class BoardInteractionController(
         zoomTo(BoardGeometry.ZOOM_LEVELS[next])
     }
 
-    override fun onZoomReset() = zoomTo(BoardGeometry.DEFAULT_ZOOM)
+    override fun onZoomReset() = zoomTo(BoardGeometry.RESET_ZOOM)
 
     override fun onToggleTouch() = setTouchEnabled(!touchEnabled, fromJs = false)
 

@@ -13,8 +13,6 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
     var onMarkerInk: (MarkerInk) -> Unit = {}
     
     var onTool: (String) -> Unit = {}
-    var onUndo: () -> Unit = {}
-    var onRedo: () -> Unit = {}
     var onToggleTouch: () -> Unit = {}
     var onMore: () -> Unit = {}
     
@@ -134,8 +132,6 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
         shapeCell = shape
         toolCells["shape"] = shape
         add(shape)
-        add(IconCell(context, { c,s,p -> ToolIcons.undo(c,s,p) }) { onUndo() })
-        add(IconCell(context, { c,s,p -> ToolIcons.redo(c,s,p) }) { onRedo() })
         touchCell = IconCell(context, { c,s,p -> ToolIcons.touch(c,s,p,touchEnabled) }) { onToggleTouch() }
         add(touchCell)
         refreshSelection()
