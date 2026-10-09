@@ -1502,7 +1502,7 @@ class BoardInteractionController(
         )
         val ink = synchronized(BoardEngine.lock) { InkBackdrop.resolve(draft) }
         val rec = draft.withColor(ink)
-        apply(BoardHistory.Change("draw").stroke(null, rec), record = true)
+        host.commitPlainStroke { apply(BoardHistory.Change("draw").stroke(null, rec), record = true) }
         if (!marker && (ink != INK_BLACK) != trailWhite) Log.i(TAG_PEN, "[MosaicTrail] color differs from hardware trail committedWhite=${ink != INK_BLACK} trailWhite=$trailWhite stroke=${s.id}")
         val committedPressures = s.pressures.toArray()
         val minPressure = committedPressures.minOrNull() ?: 0f
@@ -2838,6 +2838,7 @@ class BoardInteractionController(
         trackToolbarToggleTap(frame)
         when (frame.action) {
             InputRouter.ACTION_DOWN, InputRouter.ACTION_POINTER_DOWN -> {
+                host.flushInkHandoff("touch")
                 if (frame.action == InputRouter.ACTION_DOWN) refreshViewOffset()
                 val i = frame.actionIndex
                 fingerDown(frame.ids[i], frame.xs[i] - viewOffsetX, frame.ys[i] - viewOffsetY, frame.penPriority, frame.uptimeMs)
@@ -3755,6 +3756,7 @@ class BoardInteractionController(
     
     override fun onManualRefresh() {
         if (surfaceSwitching) return
+        host.flushInkHandoff("manual-refresh")
         Log.i(TAG, "manual full refresh: exit lasso/eraser/gesture states ${arbiter.describe()} lasso=${lasso != null}")
         cancelActiveInteractions("manual-refresh")
         for (source in ToolArbiter.Source.values()) applyTransition(arbiter.forceExit(source), "manual-refresh")
@@ -3768,6 +3770,7 @@ class BoardInteractionController(
 
     override fun onSlider(gesture: String, side: Int) {
         if (side != settings.sliderSide) return
+        host.flushInkHandoff("slider")
         Log.i(TAG, "[Slider] $gesture side=$side")
         when (gesture) {
             "slideUp" -> redo()

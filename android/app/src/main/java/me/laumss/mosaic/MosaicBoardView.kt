@@ -47,6 +47,7 @@ class MosaicBoardView(
         private const val BACKGROUND_SYNC_PROMPT_DELAY_MS = 120L
         
         private const val PEN_MODE_RESET_MAX_MS = 1500L
+        private const val INK_HANDOFF_IDLE_MS = 3000L
         private const val BACKGROUND_SYNC_IDLE_DELAY_MS = 2000L
         
         private const val CLOSE_WATCHDOG_MS = 3000L
@@ -179,6 +180,11 @@ class MosaicBoardView(
     private var transientStrokeActive = false
     
     private var awaitingStrokeCommit = false
+    private var inkHandoffPending = false
+    private var plainStrokeCommit = false
+    private val inkHandoffTask = Runnable {
+        if (inkHandoffPending && !stylusContact) finalizeInkSession("idle")
+    }
     private var trailDiscardedDuringContact = false
     private var strokeSceneChangedDuringContact = false
     
@@ -400,6 +406,8 @@ class MosaicBoardView(
         drawPathBinder = null
         stylusContact = false
         awaitingStrokeCommit = false
+        clearInkHandoff()
+        plainStrokeCommit = false
         strokeSceneChangedDuringContact = false
         hoverRearmDeferred = false
         InputArbiter.onPenContact(false)
@@ -675,7 +683,11 @@ class MosaicBoardView(
         cancelBackgroundSync()
         
         if (stylusContact) strokeSceneChangedDuringContact = true
-        if (awaitingStrokeCommit) finalizeInkSession("commit")
+        when {
+            plainStrokeCommit -> if (awaitingStrokeCommit || inkHandoffPending) holdInkHandoff()
+            awaitingStrokeCommit -> finalizeInkSession("commit")
+            inkHandoffPending && !stylusContact -> finalizeInkSession("flush")
+        }
     }
 
     private fun onContentSettled() {
@@ -1036,8 +1048,36 @@ class MosaicBoardView(
     }
 
     
+    private fun holdInkHandoff() {
+        awaitingStrokeCommit = false
+        inkHandoffPending = true
+        handler.removeCallbacks(inkHandoffTask)
+        handler.postDelayed(inkHandoffTask, INK_HANDOFF_IDLE_MS)
+    }
+
+    private fun clearInkHandoff(): Boolean {
+        handler.removeCallbacks(inkHandoffTask)
+        val was = inkHandoffPending
+        inkHandoffPending = false
+        return was
+    }
+
+    fun <T> commitPlainStroke(block: () -> T): T {
+        plainStrokeCommit = true
+        try {
+            return block()
+        } finally {
+            plainStrokeCommit = false
+        }
+    }
+
+    fun flushInkHandoff(reason: String) {
+        if (inkHandoffPending && !stylusContact) finalizeInkSession(reason)
+    }
+
     private fun finalizeInkSession(reason: String) {
         cancelStrokeCommitWait()
+        clearInkHandoff()
         contentView.markSettleRequested()
         contentView.refreshAfterRaster()
         inkView.clearImmediately()
@@ -1054,7 +1094,7 @@ class MosaicBoardView(
 
     
     private fun releaseInkDefer() {
-        val waiting = cancelStrokeCommitWait()
+        val waiting = cancelStrokeCommitWait() or clearInkHandoff()
         if (waiting || contentView.isDeferringRefresh) {
             contentView.markSettleRequested()
             contentView.refreshAfterRaster()
@@ -1294,6 +1334,7 @@ class MosaicBoardView(
                     
                     
                     cancelStrokeCommitWait()
+                    handler.removeCallbacks(inkHandoffTask)
                     strokeSceneChangedDuringContact = false
                     contentView.setDeferRefresh(true)
                 } else {
