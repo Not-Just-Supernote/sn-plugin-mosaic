@@ -5,6 +5,7 @@ import android.content.ComponentCallbacks
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.Path
 import android.graphics.Point
 import android.graphics.RectF
 import android.hardware.display.DisplayManager
@@ -180,6 +181,7 @@ class MosaicBoardView(
     private var transientStrokeActive = false
     
     private var awaitingStrokeCommit = false
+    private var trailFlashCount = 0
     private var inkHandoffPending = false
     private var plainStrokeCommit = false
     private val inkHandoffTask = Runnable {
@@ -406,6 +408,7 @@ class MosaicBoardView(
         drawPathBinder = null
         stylusContact = false
         awaitingStrokeCommit = false
+        trailFlashCount = 0
         clearInkHandoff()
         plainStrokeCommit = false
         strokeSceneChangedDuringContact = false
@@ -735,6 +738,10 @@ class MosaicBoardView(
 
     private fun sendBackgroundSync(force: Boolean = false) {
         if (!attached || !configured || (!force && stylusContact && drawPathActive)) return
+        if (trailFlashCount > 0) {
+            if (backgroundSyncUrgency.ordinal < SyncUrgency.PROMPT.ordinal) backgroundSyncUrgency = SyncUrgency.PROMPT
+            return
+        }
         val binder = drawPathBinder ?: return
         val urgency = backgroundSyncUrgency
         val discard = discardSyncPending
@@ -754,25 +761,39 @@ class MosaicBoardView(
     }
 
     
-    fun onPenTrailDiscarded(reason: String) {
+    fun onPenTrailDiscarded(reason: String, trail: Path? = null, trailWidthPx: Float = 0f, trailColor: Int = Color.BLACK) {
         if (stylusContact) trailDiscardedDuringContact = true
         if (backgroundSyncUrgency.ordinal < SyncUrgency.PROMPT.ordinal) backgroundSyncUrgency = SyncUrgency.PROMPT
         discardSyncPending = true
         
         
         
-        val immediate = stylusContact || reason.startsWith("card-")
-        if (immediate) {
+        val flash = !stylusContact && trail != null
+        if (stylusContact) {
             cancelBackgroundSync()
             sendBackgroundSync(force = true)
-            backgroundSyncUrgency = SyncUrgency.PROMPT
+        } else if (trail != null) {
+            flashDiscardedTrail(trail, trailWidthPx, trailColor)
         }
         
         
         
         contentView.markSettleRequested()
         if (!contentView.isDeferringRefresh) contentView.postInvalidateOnAnimation()
-        Log.i(TAG, "pen trail discarded: reason=$reason sync=${if (immediate) "now" else "deferred"} stylus=$stylusContact active=$drawPathActive")
+        Log.i(TAG, "pen trail discarded: reason=$reason sync=${if (stylusContact) "now" else if (flash) "after-flash" else "deferred"} stylus=$stylusContact active=$drawPathActive")
+    }
+
+    private fun flashDiscardedTrail(trail: Path, widthPx: Float, color: Int) {
+        trailFlashCount++
+        cancelBackgroundSync()
+        inkView.flashTrail(trail, widthPx, color) {
+            trailFlashCount = (trailFlashCount - 1).coerceAtLeast(0)
+            if (!attached || trailFlashCount > 0) return@flashTrail
+            cancelBackgroundSync()
+            sendBackgroundSync()
+            if (backgroundSyncUrgency.ordinal < SyncUrgency.PROMPT.ordinal) backgroundSyncUrgency = SyncUrgency.PROMPT
+            Log.i(TAG, "pen trail flash done")
+        }
     }
 
     

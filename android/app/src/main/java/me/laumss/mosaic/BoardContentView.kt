@@ -41,8 +41,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         
         private const val CARD_COLORED_FILL_COLOR = 0xFF000000.toInt()
         
-        private const val CARD_SHADOW_COLOR = Color.BLACK
-        private const val CARD_SHADOW_EDGE_COLOR = Color.BLACK
+        private const val CARD_SHADOW_COLOR = 0xFF77838D.toInt()
+        private const val CARD_SHADOW_EDGE_COLOR = 0xFF9BA5B1.toInt()
         private const val CARD_SHADOW_OFFSET = 5f
         private const val CARD_SHADOW_EDGE = 2f
         private const val CARD_SHADOW_EXTENT = CARD_SHADOW_OFFSET + CARD_SHADOW_EDGE
