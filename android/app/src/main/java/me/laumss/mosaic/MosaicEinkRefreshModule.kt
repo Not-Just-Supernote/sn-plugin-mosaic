@@ -22,6 +22,8 @@ class MosaicEinkRefreshModule(
         
         const val MODE_A2 = 4
 
+        private const val EINK_SERVICE = "eink"
+
         @Volatile private var instance: WeakReference<MosaicEinkRefreshModule>? = null
 
         
@@ -40,6 +42,62 @@ class MosaicEinkRefreshModule(
         
         private fun runOnUiImmediate(block: () -> Unit) {
             if (UiThreadUtil.isOnUiThread()) block() else UiThreadUtil.runOnUiThread(block)
+        }
+
+        @Volatile private var einkApisLogged = false
+
+        
+        @JvmStatic
+        fun requestFullRefresh(view: View, reason: String): Boolean {
+            val manager = try {
+                view.context.getSystemService(EINK_SERVICE)
+            } catch (e: Throwable) {
+                null
+            }
+            logEinkApisOnce(manager)
+            if (manager == null) {
+                Log.w(TAG, "full refresh unavailable reason=$reason: no $EINK_SERVICE service")
+                return false
+            }
+            val method = when {
+                invokeEink(manager, "sendOneFullFrame") -> "sendOneFullFrame"
+                invokeEink(manager, "screenRefresh", true, 1) -> "screenRefresh"
+                else -> null
+            }
+            if (method == null) {
+                Log.w(TAG, "full refresh unavailable reason=$reason: ${manager.javaClass.name} has no refresh method")
+                return false
+            }
+            
+            view.postInvalidateOnAnimation()
+            view.rootView.postInvalidateOnAnimation()
+            Log.i(TAG, "full refresh requested reason=$reason via=$method")
+            return true
+        }
+
+        private fun invokeEink(manager: Any, name: String, vararg args: Any): Boolean {
+            val type = manager.javaClass
+            val method = (type.methods.asSequence() + type.declaredMethods.asSequence())
+                .firstOrNull { it.name == name && it.parameterTypes.size == args.size }
+                ?: return false
+            return try {
+                method.isAccessible = true
+                method.invoke(manager, *args)
+                true
+            } catch (e: Throwable) {
+                Log.w(TAG, "eink $name failed: ${e.cause?.message ?: e.message}")
+                false
+            }
+        }
+
+        
+        private fun logEinkApisOnce(manager: Any?) {
+            if (einkApisLogged) return
+            einkApisLogged = true
+            val pattern = Regex("(?i)eink|epd|refresh|fullframe")
+            val viewApis = View::class.java.methods.map { it.name }.filter { pattern.containsMatchIn(it) }.distinct().sorted()
+            val managerApis = manager?.javaClass?.methods?.map { it.name }?.distinct()?.sorted()
+            Log.i(TAG, "eink apis view=$viewApis manager=${manager?.javaClass?.name} methods=$managerApis")
         }
     }
 

@@ -53,7 +53,6 @@ class BoardInteractionController(
         private const val TRAIL_HYSTERESIS_DP = 6f
         
         private const val ZOOM_SNAP_RATIO = 0.03f
-        private const val TRAIL_FLASH_MARGIN_DP = 2f
         
         private const val ROTATE_SNAP_DEG = 3f
         
@@ -1030,41 +1029,7 @@ class BoardInteractionController(
     
     private fun discardWriteTrail(s: PenSession.Write, reason: String) {
         if (s.points.size < 4) return
-        if (penContact) {
-            host.onPenTrailDiscarded(reason)
-            return
-        }
-        host.onPenTrailDiscarded(reason, discardedTrailPath(s), discardedTrailWidthPx(s), discardedTrailColor())
-    }
-
-    
-    private fun discardedTrailPath(s: PenSession.Write): Path {
-        val path = Path()
-        val p = s.points
-        var i = 0
-        while (i + 1 < p.size) {
-            val x = screenX(p[i] + s.cardX)
-            val y = screenY(p[i + 1] + s.cardY)
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            i += 2
-        }
-        return path
-    }
-
-    private fun discardedTrailWidthPx(s: PenSession.Write): Float {
-        val drawPathWidth = DrawPathClient.widthArgument(penStyle, penWidth)
-        var widest = 0f
-        for (i in 0 until s.pressures.size) {
-            val w = runCatching { DrawPathClient.nativePressureWidthUnits(penStyle.objType, drawPathWidth, s.pressures[i]) }.getOrDefault(0f)
-            if (w > widest) widest = w
-        }
-        return widest + 2f * TRAIL_FLASH_MARGIN_DP * density
-    }
-
-    private fun discardedTrailColor(): Int = when {
-        penStyle == PenStyle.MARKER -> markerInk.argb
-        trailWhite -> Color.WHITE
-        else -> Color.BLACK
+        host.onPenTrailDiscarded(reason)
     }
 
     private fun syncToolMirrors(state: ToolArbiter.State, source: String) {

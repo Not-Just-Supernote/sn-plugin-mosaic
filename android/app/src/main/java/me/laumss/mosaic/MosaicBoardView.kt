@@ -5,7 +5,6 @@ import android.content.ComponentCallbacks
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
-import android.graphics.Path
 import android.graphics.Point
 import android.graphics.RectF
 import android.hardware.display.DisplayManager
@@ -181,7 +180,7 @@ class MosaicBoardView(
     private var transientStrokeActive = false
     
     private var awaitingStrokeCommit = false
-    private var trailFlashCount = 0
+    private var fullRefreshPending = false
     private var inkHandoffPending = false
     private var plainStrokeCommit = false
     private val inkHandoffTask = Runnable {
@@ -408,7 +407,7 @@ class MosaicBoardView(
         drawPathBinder = null
         stylusContact = false
         awaitingStrokeCommit = false
-        trailFlashCount = 0
+        fullRefreshPending = false
         clearInkHandoff()
         plainStrokeCommit = false
         strokeSceneChangedDuringContact = false
@@ -738,10 +737,6 @@ class MosaicBoardView(
 
     private fun sendBackgroundSync(force: Boolean = false) {
         if (!attached || !configured || (!force && stylusContact && drawPathActive)) return
-        if (trailFlashCount > 0) {
-            if (backgroundSyncUrgency.ordinal < SyncUrgency.PROMPT.ordinal) backgroundSyncUrgency = SyncUrgency.PROMPT
-            return
-        }
         val binder = drawPathBinder ?: return
         val urgency = backgroundSyncUrgency
         val discard = discardSyncPending
@@ -761,39 +756,41 @@ class MosaicBoardView(
     }
 
     
-    fun onPenTrailDiscarded(reason: String, trail: Path? = null, trailWidthPx: Float = 0f, trailColor: Int = Color.BLACK) {
+    fun onPenTrailDiscarded(reason: String) {
         if (stylusContact) trailDiscardedDuringContact = true
         if (backgroundSyncUrgency.ordinal < SyncUrgency.PROMPT.ordinal) backgroundSyncUrgency = SyncUrgency.PROMPT
         discardSyncPending = true
         
         
         
-        val flash = !stylusContact && trail != null
         if (stylusContact) {
             cancelBackgroundSync()
             sendBackgroundSync(force = true)
-        } else if (trail != null) {
-            flashDiscardedTrail(trail, trailWidthPx, trailColor)
         }
         
         
         
         contentView.markSettleRequested()
         if (!contentView.isDeferringRefresh) contentView.postInvalidateOnAnimation()
-        Log.i(TAG, "pen trail discarded: reason=$reason sync=${if (stylusContact) "now" else if (flash) "after-flash" else "deferred"} stylus=$stylusContact active=$drawPathActive")
+        val fullRefresh = reason.startsWith("card-")
+        if (fullRefresh) requestFullRefreshWhenSettled(reason)
+        Log.i(TAG, "pen trail discarded: reason=$reason sync=${if (stylusContact) "now" else "deferred"} fullRefresh=$fullRefresh stylus=$stylusContact active=$drawPathActive")
     }
 
-    private fun flashDiscardedTrail(trail: Path, widthPx: Float, color: Int) {
-        trailFlashCount++
-        cancelBackgroundSync()
-        inkView.flashTrail(trail, widthPx, color) {
-            trailFlashCount = (trailFlashCount - 1).coerceAtLeast(0)
-            if (!attached || trailFlashCount > 0) return@flashTrail
-            cancelBackgroundSync()
-            sendBackgroundSync()
-            if (backgroundSyncUrgency.ordinal < SyncUrgency.PROMPT.ordinal) backgroundSyncUrgency = SyncUrgency.PROMPT
-            Log.i(TAG, "pen trail flash done")
+    
+    private fun requestFullRefreshWhenSettled(reason: String) {
+        fullRefreshPending = true
+        contentView.runWhenSettled(Runnable { runPendingFullRefresh(reason) })
+    }
+
+    private fun runPendingFullRefresh(reason: String) {
+        if (!fullRefreshPending || !attached) return
+        if (stylusContact || awaitingStrokeCommit || inkHandoffPending) {
+            Log.i(TAG, "full refresh waits for ink reason=$reason contact=$stylusContact awaiting=$awaitingStrokeCommit handoff=$inkHandoffPending")
+            return
         }
+        fullRefreshPending = false
+        MosaicEinkRefreshModule.requestFullRefresh(contentView, reason)
     }
 
     
@@ -1075,6 +1072,10 @@ class MosaicBoardView(
 
     
     private fun holdInkHandoff() {
+        if (fullRefreshPending) {
+            finalizeInkSession("refresh-pending")
+            return
+        }
         awaitingStrokeCommit = false
         inkHandoffPending = true
         handler.removeCallbacks(inkHandoffTask)
@@ -1107,6 +1108,7 @@ class MosaicBoardView(
         contentView.markSettleRequested()
         contentView.refreshAfterRaster()
         inkView.clearImmediately()
+        if (fullRefreshPending) contentView.runWhenSettled(Runnable { runPendingFullRefresh("after-ink:$reason") })
         if (reason == "no-commit") {
             
             
