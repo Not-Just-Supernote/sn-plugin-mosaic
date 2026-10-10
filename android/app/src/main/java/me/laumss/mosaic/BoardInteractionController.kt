@@ -1676,18 +1676,17 @@ class BoardInteractionController(
         if (target != null) {
             
             
-            val rejected = when {
-                !BoardGeometry.canConnect(source, target) -> "color-mismatch"
-                BoardGeometry.edgeDistance(source, target) > NeckGeometry.MAX_DISTANCE -> "too-far"
-                else -> null
-            }
-            if (rejected != null) {
-                Log.i(TAG_PEN, "card connection rejected source=$sourceId target=${target.id} reason=$rejected")
+            if (!BoardGeometry.canConnect(source, target)) {
+                Log.i(TAG_PEN, "card thread rejected source=$sourceId target=${target.id} reason=color-mismatch")
                 return true
             }
-            if (BoardEngine.connectionBetween(sourceId, target.id) == null) {
-                apply(BoardHistory.Change("connect").connection(null, BoardEngine.ConnectionRec(newId("conn-"), sourceId, target.id)), record = true)
+            if (BoardEngine.threadBetween(sourceId, target.id) != null) return true
+            val thread = BoardEngine.threadStroke(newId("stroke-"), source, target)
+            if (thread == null) {
+                Log.i(TAG_PEN, "card thread rejected source=$sourceId target=${target.id} reason=overlap")
+                return true
             }
+            apply(BoardHistory.Change("thread").stroke(null, thread), record = true)
             return true
         }
         val rect = BoardGeometry.cardFromStrokeRect(source, endX, endY)
@@ -2453,6 +2452,11 @@ class BoardInteractionController(
     private fun collectCardRemoval(cardId: String, change: BoardHistory.Change) {
         val card = BoardEngine.cards[cardId] ?: return
         BoardEngine.cardStrokes[cardId]?.forEach { change.stroke(it, null) }
+        val threads = ArrayList<BoardEngine.StrokeRec>()
+        BoardEngine.threadsOf(cardId, threads)
+        for (t in threads) {
+            if (change.diffs.none { it is BoardHistory.Diff.Stroke && it.before?.id == t.id }) change.stroke(t, null)
+        }
         val conns = ArrayList<BoardEngine.ConnectionRec>()
         BoardEngine.connectionsOf(cardId, conns)
         for (c in conns) change.connection(c, null)

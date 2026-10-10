@@ -30,6 +30,9 @@ object BoardEngine {
     
     const val NECK_PAD = 16f
 
+    const val THREAD_SPACE = "thread:"
+    const val THREAD_STROKE_WIDTH = 3f
+
     class StrokeRec(
         val id: String,
         
@@ -62,6 +65,11 @@ object BoardEngine {
         val path: Path by lazy { if (isShape) buildPolylinePath(points) else buildStrokePath(points) }
         val cardId: String? = if (space.startsWith("card:")) space.substring(5) else null
         val connectionId: String? = if (space.startsWith("connection:")) space.substring(11) else null
+        
+        val threadEnds: Pair<String, String>? = if (space.startsWith(THREAD_SPACE)) {
+            space.substring(THREAD_SPACE.length).split('|').takeIf { it.size == 2 }?.let { it[0] to it[1] }
+        } else null
+        val isThread: Boolean get() = threadEnds != null
         val runs: List<TchRaster.Run> by lazy {
             TchRaster.runs(points, pressures, sampleScale, penStyle, drawPathWidth)
         }
@@ -272,8 +280,14 @@ object BoardEngine {
     }
 
     
-    class NeckRec(val id: String, val path: Path, val dark: Boolean, val thread: Boolean = false) {
+    class NeckRec(val id: String, val path: Path, val dark: Boolean) {
         val bounds: RectF = RectF().also { path.computeBounds(it, true) }
+    }
+
+    
+    class ThreadRec(val id: String, val fromId: String, val toId: String, val path: Path, val centerline: FloatArray, val dark: Boolean) {
+        val bounds: RectF = RectF().also { path.computeBounds(it, true) }
+        fun touches(cardId: String): Boolean = fromId == cardId || toId == cardId
     }
 
     interface Listener {
@@ -302,6 +316,7 @@ object BoardEngine {
         val necks: List<NeckRec>,
         val hiddenCardId: String?,
         val scale: Float,
+        val threads: List<ThreadRec> = emptyList(),
     )
 
     
@@ -337,14 +352,16 @@ object BoardEngine {
             necks = necks.values.toList(),
             hiddenCardId = hiddenCardId,
             scale = scale,
+            threads = threadShapes.values.toList(),
         )
     }
 
     fun snapshotScene(): SceneSnapshot = synchronized(lock) { SceneSnapshot(strokes.values.toList(), cards.values.toList(), connections.values.toList(), necks.values.toList(), selectedCardIds.toList(), panX, panY, scale) }
     fun replaceScene(snapshot: SceneSnapshot) {
         val m = Mutation(); synchronized(lock) {
-            strokes.clear(); cards.clear(); connections.clear(); necks.clear(); selectedCardIds.clear(); cardsByZ=emptyList(); canvasStrokeGrid.clear(); cardStrokes.clear()
+            strokes.clear(); cards.clear(); connections.clear(); necks.clear(); selectedCardIds.clear(); cardsByZ=emptyList(); canvasStrokeGrid.clear(); cardStrokes.clear(); threads.clear(); threadShapes.clear()
             snapshot.strokes.forEach { m.addStroke(it) }; snapshot.cards.forEach { m.upsertCard(it) }; snapshot.connections.forEach { connections[it.id]=it }; snapshot.necks.forEach { necks[it.id]=it }; selectedCardIds.addAll(snapshot.selected); rebuildCardOrderLocked()
+            m.refreshThreadsLocked()
         }
         hiddenCardId = null
         setViewport(snapshot.panX, snapshot.panY, snapshot.scale); m.invalidateAll(); m.dispatch()
@@ -356,6 +373,9 @@ object BoardEngine {
     val cards = LinkedHashMap<String, CardRec>()
     val connections = LinkedHashMap<String, ConnectionRec>()
     val necks = LinkedHashMap<String, NeckRec>()
+    
+    val threads = LinkedHashMap<String, StrokeRec>()
+    val threadShapes = LinkedHashMap<String, ThreadRec>()
     val selectedCardIds = LinkedHashSet<String>()
 
     
@@ -402,6 +422,8 @@ object BoardEngine {
             cards.clear()
             connections.clear()
             necks.clear()
+            threads.clear()
+            threadShapes.clear()
             selectedCardIds.clear()
             cardsByZ = emptyList()
             canvasStrokeGrid.clear()
@@ -420,6 +442,7 @@ object BoardEngine {
             try {
                 m.block()
             } finally {
+                m.refreshThreadsLocked()
                 m.refreshNecksLocked()
             }
         }
@@ -437,6 +460,8 @@ object BoardEngine {
         private val touchedConnections = HashSet<String>()
         
         private val newConnections = HashSet<String>()
+        
+        private val touchedThreads = HashSet<String>()
 
         fun addDirty(rect: RectF) {
             if (dirtyAll) return
@@ -458,6 +483,7 @@ object BoardEngine {
                 addDirty(strokeWorldBounds(existing))
                 moved = true
             }
+            if (rec.isThread || existing?.isThread == true) touchedThreads.add(rec.id)
             insertStrokeLocked(rec)
             addDirty(strokeWorldBounds(rec))
             rec.connectionId?.let { connectionId ->
@@ -471,6 +497,11 @@ object BoardEngine {
 
         
         fun addStrokesBatch(records: List<StrokeRec>) {
+            if (records.any { it.isThread }) {
+                records.filter { it.isThread }.forEach(::addStroke)
+                addStrokesBatch(records.filterNot { it.isThread })
+                return
+            }
             if (records.size <= 1) {
                 records.firstOrNull()?.let(::addStroke)
                 return
@@ -586,6 +617,7 @@ object BoardEngine {
 
         fun removeStroke(id: String): StrokeRec? {
             val rec = removeStrokeLocked(id) ?: return null
+            if (rec.isThread) touchedThreads.add(id)
             addDirty(strokeWorldBounds(rec))
             moved = true
             return rec
@@ -641,6 +673,37 @@ object BoardEngine {
         }
 
         
+        fun refreshThreadsLocked() {
+            if (touchedThreads.isEmpty() && (touchedCards.isEmpty() || threads.isEmpty())) return
+            val ids = LinkedHashSet<String>(touchedThreads)
+            if (touchedCards.isNotEmpty()) {
+                for (rec in threads.values) {
+                    val ends = rec.threadEnds ?: continue
+                    if (touchedCards.contains(ends.first) || touchedCards.contains(ends.second)) ids.add(rec.id)
+                }
+            }
+            for (id in ids) {
+                threadShapes.remove(id)?.let {
+                    addDirty(padded(it.bounds, NECK_PAD))
+                    moved = true
+                }
+                val next = threads[id]?.let { buildThreadLocked(it) } ?: continue
+                threadShapes[id] = next
+                addDirty(padded(next.bounds, NECK_PAD))
+                moved = true
+            }
+            touchedThreads.clear()
+        }
+
+        private fun buildThreadLocked(rec: StrokeRec): ThreadRec? {
+            val ends = rec.threadEnds ?: return null
+            val a = cards[ends.first] ?: return null
+            val b = cards[ends.second] ?: return null
+            val shape = NeckGeometry.buildThread(a.rect(), b.rect()) ?: return null
+            return ThreadRec(rec.id, a.id, b.id, shape.path, shape.centerline, a.colored && b.colored)
+        }
+
+        
         fun refreshNecksLocked() {
             if (touchedCards.isEmpty() && touchedConnections.isEmpty()) return
             val ids = LinkedHashSet<String>(touchedConnections)
@@ -650,7 +713,7 @@ object BoardEngine {
             for (id in necks.keys) if (!connections.containsKey(id)) ids.add(id)
             for (id in ids) {
                 val previous = necks[id]
-                val next = connections[id]?.let { buildNeckLocked(it, wasBridge = previous != null && !previous.thread, isNew = newConnections.contains(id)) }
+                val next = connections[id]?.let { buildNeckLocked(it, wasActive = previous != null, isNew = newConnections.contains(id)) }
                 if (next == null) {
                     if (previous != null) {
                         necks.remove(id)
@@ -669,17 +732,16 @@ object BoardEngine {
             newConnections.clear()
         }
 
-        private fun buildNeckLocked(conn: ConnectionRec, wasBridge: Boolean, isNew: Boolean): NeckRec? {
+        private fun buildNeckLocked(conn: ConnectionRec, wasActive: Boolean, isNew: Boolean): NeckRec? {
             val a = cards[conn.fromId] ?: return null
             val b = cards[conn.toId] ?: return null
             
             if (a.colored != b.colored) return null
             val gap = BoardGeometry.edgeDistance(a, b)
-            val bridge = gap <= NeckGeometry.MAX_DISTANCE &&
-                (wasBridge || isNew || gap <= NeckGeometry.RECONNECT_DISTANCE)
-            if (bridge) NeckGeometry.build(a.rect(), b.rect())?.let { return NeckRec(conn.id, it, a.colored) }
-            val thread = NeckGeometry.buildThread(a.rect(), b.rect()) ?: return null
-            return NeckRec(conn.id, thread, a.colored, thread = true)
+            if (gap > NeckGeometry.MAX_DISTANCE) return null
+            if (!wasActive && !isNew && gap > NeckGeometry.RECONNECT_DISTANCE) return null
+            val path = NeckGeometry.build(a.rect(), b.rect()) ?: return null
+            return NeckRec(conn.id, path, a.colored)
         }
 
         fun setSelection(ids: Collection<String>) {
@@ -782,6 +844,7 @@ object BoardEngine {
                 try {
                     decoded.forEach { it() }
                 } finally {
+                    m.refreshThreadsLocked()
                     m.refreshNecksLocked()
                 }
             }
@@ -792,6 +855,7 @@ object BoardEngine {
             if (!applied && decoded.isNotEmpty()) {
                 synchronized(lock) {
                     runCatching { decoded.forEach { it() } }
+                    m.refreshThreadsLocked()
                     m.refreshNecksLocked()
                 }
             }
@@ -835,6 +899,11 @@ object BoardEngine {
                 val rec = strokes[id] ?: continue
                 if (boundsContain(rec.bounds, worldX, worldY, radius)) out.add(rec)
             }
+        }
+        for (shape in threadShapes.values) {
+            if (!boundsContain(shape.bounds, worldX, worldY, radius)) continue
+            if (!NeckGeometry.threadHit(shape.centerline, worldX, worldY, radius)) continue
+            threads[shape.id]?.let(out::add)
         }
         if (cardStrokes.isEmpty()) return
         for ((cardId, bucket) in cardStrokes) {
@@ -894,7 +963,6 @@ object BoardEngine {
         var best: ConnectionRec? = null
         var bestArea = Float.POSITIVE_INFINITY
         for ((id, neck) in necks) {
-            if (neck.thread) continue
             val r = neck.bounds
             if (worldX < r.left - 8f || worldX > r.right + 8f || worldY < r.top - 8f || worldY > r.bottom + 8f) continue
             val area = r.width() * r.height()
@@ -906,6 +974,31 @@ object BoardEngine {
         best
     }
 
+    fun threadBetween(a: String, b: String): StrokeRec? {
+        for (rec in threads.values) {
+            val ends = rec.threadEnds ?: continue
+            if ((ends.first == a && ends.second == b) || (ends.first == b && ends.second == a)) return rec
+        }
+        return null
+    }
+
+    fun threadsOf(cardId: String, out: MutableList<StrokeRec>) {
+        for (rec in threads.values) {
+            val ends = rec.threadEnds ?: continue
+            if (ends.first == cardId || ends.second == cardId) out.add(rec)
+        }
+    }
+
+    
+    fun threadStroke(id: String, from: CardRec, to: CardRec): StrokeRec? {
+        val shape = NeckGeometry.buildThread(from.rect(), to.rect()) ?: return null
+        val points = shape.centerline
+        return StrokeRec(
+            id, THREAD_SPACE + from.id + "|" + to.id, THREAD_STROKE_WIDTH, 0xFF000000.toInt(),
+            points, FloatArray(points.size / 2) { 1f }, PenStyle.PEN.objType, 1f,
+        )
+    }
+
     fun connectionsOf(cardId: String, out: MutableList<ConnectionRec>) {
         for (c in connections.values) if (c.fromId == cardId || c.toId == cardId) out.add(c)
     }
@@ -914,6 +1007,10 @@ object BoardEngine {
 
     private fun insertStrokeLocked(rec: StrokeRec) {
         strokes[rec.id] = rec
+        if (rec.isThread) {
+            threads[rec.id] = rec
+            return
+        }
         val cardId = rec.cardId
         if (cardId == null) {
             forEachCell(rec.bounds) { key -> canvasStrokeGrid.getOrPut(key) { ArrayList(4) }.add(rec.id) }
@@ -924,6 +1021,10 @@ object BoardEngine {
 
     private fun removeStrokeLocked(id: String): StrokeRec? {
         val rec = strokes.remove(id) ?: return null
+        if (rec.isThread) {
+            threads.remove(id)
+            return rec
+        }
         val cardId = rec.cardId
         if (cardId == null) {
             forEachCell(rec.bounds) { key ->
@@ -955,6 +1056,9 @@ object BoardEngine {
         for (neck in necks.values) {
             val connection = connections[neck.id] ?: continue
             if (connection.touches(card.id)) out.union(padded(neck.bounds, NECK_PAD))
+        }
+        for (thread in threadShapes.values) {
+            if (thread.touches(card.id)) out.union(padded(thread.bounds, NECK_PAD))
         }
         out
     }

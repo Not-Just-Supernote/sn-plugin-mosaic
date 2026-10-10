@@ -34,6 +34,8 @@ object NeckGeometry {
     private const val THREAD_MIN_SAMPLES = 16
     private const val THREAD_MAX_SAMPLES = 160
 
+    class ThreadShape(val path: Path, val centerline: FloatArray)
+
     private class V(val x: Float, val y: Float) {
         operator fun plus(o: V) = V(x + o.x, y + o.y)
         operator fun minus(o: V) = V(x - o.x, y - o.y)
@@ -231,7 +233,7 @@ object NeckGeometry {
     }
 
     
-    fun buildThread(a: RectF, b: RectF): Path? {
+    fun buildThread(a: RectF, b: RectF): ThreadShape? {
         val gapX = max(b.left - a.right, a.left - b.right)
         val gapY = max(b.top - a.bottom, a.top - b.bottom)
         if (gapX <= 0f && gapY <= 0f) return null
@@ -302,7 +304,28 @@ object NeckGeometry {
             path.lineTo(xs[i] + tys[i] * half, ys[i] - txs[i] * half)
         }
         path.close()
-        return path
+        val centerline = FloatArray((count - 2) * 2)
+        for (i in 1 until count - 1) {
+            centerline[(i - 1) * 2] = xs[i]
+            centerline[(i - 1) * 2 + 1] = ys[i]
+        }
+        return ThreadShape(path, centerline)
+    }
+
+    
+    fun threadHit(centerline: FloatArray, x: Float, y: Float, radius: Float): Boolean {
+        val reach = radius + THREAD_END_WIDTH / 2f
+        var i = 0
+        while (i + 3 < centerline.size) {
+            val ax = centerline[i]; val ay = centerline[i + 1]
+            val bx = centerline[i + 2]; val by = centerline[i + 3]
+            val dx = bx - ax; val dy = by - ay
+            val lengthSq = dx * dx + dy * dy
+            val t = if (lengthSq > EPS) (((x - ax) * dx + (y - ay) * dy) / lengthSq).coerceIn(0f, 1f) else 0f
+            if (hypot(ax + dx * t - x, ay + dy * t - y) <= reach) return true
+            i += 2
+        }
+        return false
     }
 
     private fun pathIsFinite(vararg pts: V): Boolean = pts.all { it.x.isFinite() && it.y.isFinite() }

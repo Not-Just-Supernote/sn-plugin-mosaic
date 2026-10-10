@@ -1296,7 +1296,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         var unionOk = true
         
         for (neck in scene.necks) {
-            if (neck.thread || neckTouchesHidden(neck, hidden, scene)) continue
+            if (neckTouchesHidden(neck, hidden, scene)) continue
             if (!shadowedIntersects(neck.bounds, world)) continue
             shadowCopiesOf(null, neck.path)
             canvas.drawPath(shadowPathNear, shadowEdgePaint)
@@ -1320,7 +1320,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val save = canvas.save()
         if (unionOk) canvas.clipPath(shadowFarUnion)
         for (neck in scene.necks) {
-            if (neck.thread || neckTouchesHidden(neck, hidden, scene)) continue
+            if (neckTouchesHidden(neck, hidden, scene)) continue
             if (!shadowedIntersects(neck.bounds, world)) continue
             shadowCopiesOf(null, neck.path)
             canvas.drawPath(shadowPathNear, shadowPaint)
@@ -1344,13 +1344,13 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         
         if (emphasis) {
             drawFlatShadow(canvas, world, hidden, scene)
+            drawThreads(canvas, world, hidden, scene, emphasis)
         } else {
             drawSilhouetteShadow(canvas, world, hidden, scene)
-        }
-        drawThreads(canvas, world, hidden, scene, emphasis)
-        if (!emphasis) {
+            drawThreads(canvas, world, hidden, scene, emphasis)
+            
             for (neck in scene.necks) {
-                if (neck.thread || neckTouchesHidden(neck, hidden, scene)) continue
+                if (neckTouchesHidden(neck, hidden, scene)) continue
                 if (!RectF.intersects(neck.bounds, world)) continue
                 neckFillPaint.color = if (neck.dark) CARD_COLORED_FILL_COLOR else CARD_FILL_COLOR
                 canvas.drawPath(neck.path, neckFillPaint)
@@ -1382,11 +1382,11 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     
     private fun drawThreads(canvas: Canvas, world: RectF, hidden: String?, scene: BoardEngine.RenderSnapshot, emphasis: Boolean) {
-        for (neck in scene.necks) {
-            if (!neck.thread || neckTouchesHidden(neck, hidden, scene)) continue
-            if (!RectF.intersects(neck.bounds, world)) continue
-            threadPaint.color = if (emphasis || neck.dark) Color.BLACK else THREAD_COLOR
-            canvas.drawPath(neck.path, threadPaint)
+        for (thread in scene.threads) {
+            if (hidden != null && thread.touches(hidden)) continue
+            if (!RectF.intersects(thread.bounds, world)) continue
+            threadPaint.color = if (emphasis || thread.dark) Color.BLACK else THREAD_COLOR
+            canvas.drawPath(thread.path, threadPaint)
         }
     }
 
