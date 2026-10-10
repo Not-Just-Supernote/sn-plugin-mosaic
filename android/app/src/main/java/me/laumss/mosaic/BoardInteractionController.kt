@@ -3844,8 +3844,21 @@ class BoardInteractionController(
         chromeUpdatePosted = true
         handler.post {
             chromeUpdatePosted = false
-            updateChrome()
+            if (host.inkHandoffActive) {
+                chromeUpdateDeferred = true
+                Log.i(TAG, "chrome update deferred during ink handoff")
+            } else {
+                updateChrome()
+            }
         }
+    }
+
+    private var chromeUpdateDeferred = false
+
+    fun onInkHandoffEnded() {
+        if (!chromeUpdateDeferred) return
+        chromeUpdateDeferred = false
+        scheduleChromeUpdate()
     }
 
     private fun updateChrome() {

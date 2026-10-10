@@ -48,6 +48,8 @@ class MosaicBoardView(
         
         private const val PEN_MODE_RESET_MAX_MS = 1500L
         private const val INK_HANDOFF_IDLE_MS = 3000L
+        private const val INK_HANDOFF_RETRY_MS = 500L
+        private const val INK_CONTACT_STALE_MS = 1500L
         private const val BACKGROUND_SYNC_IDLE_DELAY_MS = 2000L
         
         private const val CLOSE_WATCHDOG_MS = 3000L
@@ -184,8 +186,24 @@ class MosaicBoardView(
     private var inkHandoffPending = false
     private var plainStrokeCommit = false
     private var plainStrokeCommitted = false
+    private var lastPenEventAt = 0L
+    private var inkHandoffEndedListener: (() -> Unit)? = null
+    val inkHandoffActive: Boolean get() = inkHandoffPending || awaitingStrokeCommit
     private val inkHandoffTask = Runnable {
-        if (inkHandoffPending && !stylusContact) finalizeInkSession("idle")
+        if (!inkHandoffPending) return@Runnable
+        val sincePen = SystemClock.uptimeMillis() - lastPenEventAt
+        if (stylusContact && sincePen < INK_CONTACT_STALE_MS) {
+            Log.i(TAG, "ink handoff idle: pen in contact, retry sincePen=$sincePen")
+            handler.postDelayed(inkHandoffTask, INK_HANDOFF_RETRY_MS)
+            return@Runnable
+        }
+        if (stylusContact) {
+            Log.w(TAG, "ink handoff idle: stale pen contact cleared sincePen=$sincePen")
+            stylusContact = false
+            InputArbiter.onPenContact(false)
+        }
+        Log.i(TAG, "ink handoff idle: finalize")
+        finalizeInkSession("idle")
     }
     private var trailDiscardedDuringContact = false
     private var strokeSceneChangedDuringContact = false
@@ -340,6 +358,7 @@ class MosaicBoardView(
             }
         }
         contentView.onContentSettled = { onContentSettled() }
+        inkHandoffEndedListener = { controller.onInkHandoffEnded() }
     }
 
     override fun onAttachedToWindow() {
@@ -1084,6 +1103,7 @@ class MosaicBoardView(
         inkHandoffPending = true
         handler.removeCallbacks(inkHandoffTask)
         handler.postDelayed(inkHandoffTask, INK_HANDOFF_IDLE_MS)
+        Log.i(TAG, "ink handoff hold: ${INK_HANDOFF_IDLE_MS}ms")
     }
 
     private fun clearInkHandoff(): Boolean {
@@ -1124,6 +1144,7 @@ class MosaicBoardView(
             }
         }
         Log.i(TAG, "ink session finalize: reason=$reason")
+        inkHandoffEndedListener?.invoke()
     }
 
     
@@ -1133,6 +1154,7 @@ class MosaicBoardView(
             contentView.markSettleRequested()
             contentView.refreshAfterRaster()
         }
+        inkHandoffEndedListener?.invoke()
     }
 
     
@@ -1297,6 +1319,7 @@ class MosaicBoardView(
             Log.i(TAG, "[MosaicTwoFinger] framework touch consumed action=${event.actionMasked} pointers=${event.pointerCount}")
             return true
         }
+        lastPenEventAt = SystemClock.uptimeMillis()
 
         
         

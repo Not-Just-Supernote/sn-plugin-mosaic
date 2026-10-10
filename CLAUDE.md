@@ -74,6 +74,8 @@ Kotlin 负责画面和所有交互。每次改动后，它把结果发给 JS。J
 
 笔记卡片里的手写也走同一套交接。判断落在 `commitPlainStroke` 里：笔画一提交就进入 3 秒等待，不依赖后面有没有收到内容变化的通知。如果等待被中途打断，日志会打印 `ink handoff flushed by content change reason=...` 或 `ink session finalize: reason=...`，看这两行就知道是谁打断的。
 
+等待这 3 秒里，Mosaic 不更新任何界面：`BoardInteractionController.scheduleChromeUpdate` 会把按钮、箭头、选框的刷新压到交接结束后（日志 `chrome update deferred during ink handoff`）。原因是系统画的笔迹只要有别的界面刷新盖过它，就会被抹掉，笔记卡片里就出现过落笔后字迹马上消失、3 秒后才重新出现。到点时如果笔还被认为在接触，会每 0.5 秒重试，笔 1.5 秒没有任何事件就当它已经抬起。这几步的日志是 `ink handoff hold`、`ink handoff idle: ...`。
+
 使用套索和图形时，系统服务会关闭，轨迹由 Mosaic 自己画。
 
 ## 笔刷和图形
