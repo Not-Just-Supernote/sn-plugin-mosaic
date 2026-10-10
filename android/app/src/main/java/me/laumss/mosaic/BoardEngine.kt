@@ -272,7 +272,7 @@ object BoardEngine {
     }
 
     
-    class NeckRec(val id: String, val path: Path, val dark: Boolean) {
+    class NeckRec(val id: String, val path: Path, val dark: Boolean, val thread: Boolean = false) {
         val bounds: RectF = RectF().also { path.computeBounds(it, true) }
     }
 
@@ -650,7 +650,7 @@ object BoardEngine {
             for (id in necks.keys) if (!connections.containsKey(id)) ids.add(id)
             for (id in ids) {
                 val previous = necks[id]
-                val next = connections[id]?.let { buildNeckLocked(it, wasActive = previous != null, isNew = newConnections.contains(id)) }
+                val next = connections[id]?.let { buildNeckLocked(it, wasBridge = previous != null && !previous.thread, isNew = newConnections.contains(id)) }
                 if (next == null) {
                     if (previous != null) {
                         necks.remove(id)
@@ -669,16 +669,17 @@ object BoardEngine {
             newConnections.clear()
         }
 
-        private fun buildNeckLocked(conn: ConnectionRec, wasActive: Boolean, isNew: Boolean): NeckRec? {
+        private fun buildNeckLocked(conn: ConnectionRec, wasBridge: Boolean, isNew: Boolean): NeckRec? {
             val a = cards[conn.fromId] ?: return null
             val b = cards[conn.toId] ?: return null
             
             if (a.colored != b.colored) return null
             val gap = BoardGeometry.edgeDistance(a, b)
-            if (gap > NeckGeometry.MAX_DISTANCE) return null
-            if (!wasActive && !isNew && gap > NeckGeometry.RECONNECT_DISTANCE) return null
-            val path = NeckGeometry.build(a.rect(), b.rect()) ?: return null
-            return NeckRec(conn.id, path, a.colored)
+            val bridge = gap <= NeckGeometry.MAX_DISTANCE &&
+                (wasBridge || isNew || gap <= NeckGeometry.RECONNECT_DISTANCE)
+            if (bridge) NeckGeometry.build(a.rect(), b.rect())?.let { return NeckRec(conn.id, it, a.colored) }
+            val thread = NeckGeometry.buildThread(a.rect(), b.rect()) ?: return null
+            return NeckRec(conn.id, thread, a.colored, thread = true)
         }
 
         fun setSelection(ids: Collection<String>) {
@@ -893,6 +894,7 @@ object BoardEngine {
         var best: ConnectionRec? = null
         var bestArea = Float.POSITIVE_INFINITY
         for ((id, neck) in necks) {
+            if (neck.thread) continue
             val r = neck.bounds
             if (worldX < r.left - 8f || worldX > r.right + 8f || worldY < r.top - 8f || worldY > r.bottom + 8f) continue
             val area = r.width() * r.height()

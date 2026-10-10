@@ -1676,13 +1676,8 @@ class BoardInteractionController(
         if (target != null) {
             
             
-            val rejected = when {
-                !BoardGeometry.canConnect(source, target) -> "color-mismatch"
-                BoardGeometry.edgeDistance(source, target) > NeckGeometry.MAX_DISTANCE -> "too-far"
-                else -> null
-            }
-            if (rejected != null) {
-                Log.i(TAG_PEN, "card connection rejected source=$sourceId target=${target.id} reason=$rejected")
+            if (!BoardGeometry.canConnect(source, target)) {
+                Log.i(TAG_PEN, "card connection rejected source=$sourceId target=${target.id} reason=color-mismatch")
                 return true
             }
             if (BoardEngine.connectionBetween(sourceId, target.id) == null) {

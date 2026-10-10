@@ -44,6 +44,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         
         private const val CARD_SHADOW_COLOR = 0xFF77838D.toInt()
         private const val CARD_SHADOW_EDGE_COLOR = 0xFF9BA5B1.toInt()
+        
+        private const val THREAD_COLOR = CARD_SHADOW_COLOR
         private const val CARD_SHADOW_OFFSET = 5f
         private const val CARD_SHADOW_EDGE = 2f
         private const val CARD_SHADOW_EXTENT = CARD_SHADOW_OFFSET + CARD_SHADOW_EDGE
@@ -402,6 +404,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         }
         val placeholderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
         val neckFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_FILL_COLOR }
+        val threadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = THREAD_COLOR }
         val cardFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_FILL_COLOR }
         val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_SHADOW_COLOR }
         val shadowEdgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_SHADOW_EDGE_COLOR }
@@ -428,6 +431,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private val strokePaint get() = rasterScratch.get().strokePaint
     private val placeholderPaint get() = rasterScratch.get().placeholderPaint
     private val neckFillPaint get() = rasterScratch.get().neckFillPaint
+    private val threadPaint get() = rasterScratch.get().threadPaint
     private val cardFillPaint get() = rasterScratch.get().cardFillPaint
     private val shadowPaint get() = rasterScratch.get().shadowPaint
     private val shadowEdgePaint get() = rasterScratch.get().shadowEdgePaint
@@ -1292,7 +1296,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         var unionOk = true
         
         for (neck in scene.necks) {
-            if (neckTouchesHidden(neck, hidden, scene)) continue
+            if (neck.thread || neckTouchesHidden(neck, hidden, scene)) continue
             if (!shadowedIntersects(neck.bounds, world)) continue
             shadowCopiesOf(null, neck.path)
             canvas.drawPath(shadowPathNear, shadowEdgePaint)
@@ -1316,7 +1320,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val save = canvas.save()
         if (unionOk) canvas.clipPath(shadowFarUnion)
         for (neck in scene.necks) {
-            if (neckTouchesHidden(neck, hidden, scene)) continue
+            if (neck.thread || neckTouchesHidden(neck, hidden, scene)) continue
             if (!shadowedIntersects(neck.bounds, world)) continue
             shadowCopiesOf(null, neck.path)
             canvas.drawPath(shadowPathNear, shadowPaint)
@@ -1342,9 +1346,11 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             drawFlatShadow(canvas, world, hidden, scene)
         } else {
             drawSilhouetteShadow(canvas, world, hidden, scene)
-            
+        }
+        drawThreads(canvas, world, hidden, scene, emphasis)
+        if (!emphasis) {
             for (neck in scene.necks) {
-                if (neckTouchesHidden(neck, hidden, scene)) continue
+                if (neck.thread || neckTouchesHidden(neck, hidden, scene)) continue
                 if (!RectF.intersects(neck.bounds, world)) continue
                 neckFillPaint.color = if (neck.dark) CARD_COLORED_FILL_COLOR else CARD_FILL_COLOR
                 canvas.drawPath(neck.path, neckFillPaint)
@@ -1371,6 +1377,16 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             card.rect(cardRect)
             if (!RectF.intersects(cardRect, world)) continue
             drawCardContent(canvas, card, cardRect, dark, scene)
+        }
+    }
+
+    
+    private fun drawThreads(canvas: Canvas, world: RectF, hidden: String?, scene: BoardEngine.RenderSnapshot, emphasis: Boolean) {
+        for (neck in scene.necks) {
+            if (!neck.thread || neckTouchesHidden(neck, hidden, scene)) continue
+            if (!RectF.intersects(neck.bounds, world)) continue
+            threadPaint.color = if (emphasis || neck.dark) Color.BLACK else THREAD_COLOR
+            canvas.drawPath(neck.path, threadPaint)
         }
     }
 

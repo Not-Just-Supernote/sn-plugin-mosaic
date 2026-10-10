@@ -25,6 +25,15 @@ object NeckGeometry {
     
     const val RECONNECT_DISTANCE = BoardGeometry.CONNECT_DISTANCE
 
+    private const val THREAD_INSET = 12f
+    private const val THREAD_HANDLE_MIN = 32f
+    private const val THREAD_HANDLE_MAX = 240f
+    private const val THREAD_END_WIDTH = 6f
+    private const val THREAD_MID_WIDTH = 2.5f
+    private const val THREAD_SAMPLE_STEP = 8f
+    private const val THREAD_MIN_SAMPLES = 16
+    private const val THREAD_MAX_SAMPLES = 160
+
     private class V(val x: Float, val y: Float) {
         operator fun plus(o: V) = V(x + o.x, y + o.y)
         operator fun minus(o: V) = V(x - o.x, y - o.y)
@@ -218,6 +227,81 @@ object NeckGeometry {
         path.cubicTo(aCapCpHigh.x, aCapCpHigh.y, aCapCpLow.x, aCapCpLow.y, aLowFinal.x, aLowFinal.y)
         path.close()
         if (!pathIsFinite(aLowFinal, bLowFinal, bHighFinal, aHighFinal)) return null
+        return path
+    }
+
+    
+    fun buildThread(a: RectF, b: RectF): Path? {
+        val gapX = max(b.left - a.right, a.left - b.right)
+        val gapY = max(b.top - a.bottom, a.top - b.bottom)
+        if (gapX <= 0f && gapY <= 0f) return null
+        val normalA: V
+        val edgeA: V
+        val edgeB: V
+        val insetA: Float
+        val insetB: Float
+        val span: Float
+        if (gapX >= gapY) {
+            val toRight = b.left - a.right >= a.left - b.right
+            normalA = V(if (toRight) 1f else -1f, 0f)
+            edgeA = V(if (toRight) a.right else a.left, a.centerY())
+            edgeB = V(if (toRight) b.left else b.right, b.centerY())
+            insetA = min(THREAD_INSET, a.width() / 2f)
+            insetB = min(THREAD_INSET, b.width() / 2f)
+            span = gapX
+        } else {
+            val below = b.top - a.bottom >= a.top - b.bottom
+            normalA = V(0f, if (below) 1f else -1f)
+            edgeA = V(a.centerX(), if (below) a.bottom else a.top)
+            edgeB = V(b.centerX(), if (below) b.top else b.bottom)
+            insetA = min(THREAD_INSET, a.height() / 2f)
+            insetB = min(THREAD_INSET, b.height() / 2f)
+            span = gapY
+        }
+        
+        val handle = min(max(span * 0.5f, THREAD_HANDLE_MIN), min(THREAD_HANDLE_MAX, span))
+        val p0 = edgeA
+        val p1 = edgeA + normalA * handle
+        val p2 = edgeB - normalA * handle
+        val p3 = edgeB
+        val chord = normalize(p3 - p0)
+        val polygon = dist(p0, p1) + dist(p1, p2) + dist(p2, p3)
+        val samples = (polygon / THREAD_SAMPLE_STEP).toInt().coerceIn(THREAD_MIN_SAMPLES, THREAD_MAX_SAMPLES)
+
+        val count = samples + 3
+        val xs = FloatArray(count)
+        val ys = FloatArray(count)
+        val txs = FloatArray(count)
+        val tys = FloatArray(count)
+        val widths = FloatArray(count)
+        fun put(i: Int, p: V, tangent: V, width: Float) {
+            xs[i] = p.x; ys[i] = p.y; txs[i] = tangent.x; tys[i] = tangent.y; widths[i] = width
+        }
+        put(0, edgeA - normalA * insetA, normalA, THREAD_END_WIDTH)
+        for (i in 0..samples) {
+            val t = i.toFloat() / samples
+            val u = 1f - t
+            val point = p0 * (u * u * u) + p1 * (3f * u * u * t) + p2 * (3f * u * t * t) + p3 * (t * t * t)
+            val derivative = (p1 - p0) * (3f * u * u) + (p2 - p1) * (6f * u * t) + (p3 - p2) * (3f * t * t)
+            val tangent = normalize(derivative).let { if (it.isZero) chord else it }
+            val taper = (2f * t - 1f) * (2f * t - 1f)
+            put(i + 1, point, tangent, THREAD_MID_WIDTH + (THREAD_END_WIDTH - THREAD_MID_WIDTH) * taper)
+        }
+        put(count - 1, edgeB + normalA * insetB, normalA, THREAD_END_WIDTH)
+
+        val path = Path()
+        for (i in 0 until count) {
+            val half = widths[i] / 2f
+            val x = xs[i] - tys[i] * half
+            val y = ys[i] + txs[i] * half
+            if (!x.isFinite() || !y.isFinite()) return null
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        for (i in count - 1 downTo 0) {
+            val half = widths[i] / 2f
+            path.lineTo(xs[i] + tys[i] * half, ys[i] - txs[i] * half)
+        }
+        path.close()
         return path
     }
 
