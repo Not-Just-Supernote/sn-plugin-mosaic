@@ -187,8 +187,6 @@ class MosaicBoardView(
     private var plainStrokeCommit = false
     private var plainStrokeCommitted = false
     private var lastPenEventAt = 0L
-    private var inkHandoffEndedListener: (() -> Unit)? = null
-    val inkHandoffActive: Boolean get() = inkHandoffPending || awaitingStrokeCommit
     private val inkHandoffTask = Runnable {
         if (!inkHandoffPending) return@Runnable
         val sincePen = SystemClock.uptimeMillis() - lastPenEventAt
@@ -358,7 +356,6 @@ class MosaicBoardView(
             }
         }
         contentView.onContentSettled = { onContentSettled() }
-        inkHandoffEndedListener = { controller.onInkHandoffEnded() }
     }
 
     override fun onAttachedToWindow() {
@@ -1144,7 +1141,6 @@ class MosaicBoardView(
             }
         }
         Log.i(TAG, "ink session finalize: reason=$reason")
-        inkHandoffEndedListener?.invoke()
     }
 
     
@@ -1154,7 +1150,6 @@ class MosaicBoardView(
             contentView.markSettleRequested()
             contentView.refreshAfterRaster()
         }
-        inkHandoffEndedListener?.invoke()
     }
 
     

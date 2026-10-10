@@ -622,10 +622,15 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         if (width == 0 || height == 0 || tilePx <= 0f) return
         val scaleBits = rasterScale.toRawBits()
         val minIx = floor((-panXPx) / tilePx).toInt()
-        val maxIx = floor((width - panXPx) / tilePx).toInt()
+        val maxIx = ceil((width - panXPx) / tilePx).toInt() - 1
         val minIy = floor((-panYPx) / tilePx).toInt()
-        val maxIy = floor((height - panYPx) / tilePx).toInt()
-        for (iy in minIy..maxIy) for (ix in minIx..maxIx) block(TileKey(ix, iy, scaleBits))
+        val maxIy = ceil((height - panYPx) / tilePx).toInt() - 1
+        for (iy in minIy..maxIy) for (ix in minIx..maxIx) {
+            val left = panXPx + ix * tilePx
+            val top = panYPx + iy * tilePx
+            if (left >= width || top >= height || left + tilePx <= 0f || top + tilePx <= 0f) continue
+            block(TileKey(ix, iy, scaleBits))
+        }
     }
 
     
@@ -800,9 +805,9 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val scaleBits = rasterScale.toRawBits()
         val previewing = rasterScaleOverride != null
         val minIx = floor((-panXPx) / tilePx).toInt()
-        val maxIx = floor((width - panXPx) / tilePx).toInt()
+        val maxIx = ceil((width - panXPx) / tilePx).toInt() - 1
         val minIy = floor((-panYPx) / tilePx).toInt()
-        val maxIy = floor((height - panYPx) / tilePx).toInt()
+        val maxIy = ceil((height - panYPx) / tilePx).toInt() - 1
 
         val rasterTilePx = ceil(TILE_WORLD * rasterScale * densityValue).toLong().coerceAtLeast(1L)
         visibleTileBytes = rasterTilePx * rasterTilePx * 4L * ((maxIx - minIx + 1).toLong() * (maxIy - minIy + 1).toLong())
@@ -821,6 +826,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
                     val entry = cache[key]
                     val left = panXPx + ix * tilePx
                     val top = panYPx + iy * tilePx
+                    if (left >= width || top >= height || left + tilePx <= 0f || top + tilePx <= 0f) continue
                     dst.set(left, top, left + tilePx, top + tilePx)
                     if (entry != null) {
                         src.set(0, 0, entry.bitmap.width, entry.bitmap.height)

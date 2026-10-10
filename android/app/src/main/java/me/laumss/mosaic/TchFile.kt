@@ -1,6 +1,8 @@
 package me.laumss.mosaic
 
 import android.util.AtomicFile
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
@@ -9,7 +11,8 @@ import java.io.File
 object TchFile {
     private val MAGIC_V1 = byteArrayOf(77, 79, 83, 78, 79, 84, 69, 1)
     private val MAGIC = byteArrayOf(77, 79, 83, 78, 79, 84, 69, 2)
-    fun read(file: File, ref: String): ScrollingDocument = DataInputStream(AtomicFile(file).openRead()).use { input ->
+    private const val IO_BUFFER = 64 * 1024
+    fun read(file: File, ref: String): ScrollingDocument = DataInputStream(BufferedInputStream(AtomicFile(file).openRead(), IO_BUFFER)).use { input ->
         val header = ByteArray(MAGIC.size); input.readFully(header)
         val v2 = header.contentEquals(MAGIC)
         require(v2 || header.contentEquals(MAGIC_V1)) { "Unsupported note format" }
@@ -38,7 +41,7 @@ object TchFile {
         require(file.parentFile!!.isDirectory || file.parentFile!!.mkdirs())
         val atomic = AtomicFile(file); val output = atomic.startWrite()
         try {
-            val data = DataOutputStream(output)
+            val data = DataOutputStream(BufferedOutputStream(output, IO_BUFFER))
             data.write(MAGIC); data.writeFloat(doc.scrollY); data.writeInt(doc.strokes.size)
             for (s in doc.strokes) {
                 data.writeUTF(s.id); data.writeFloat(s.width); data.writeInt(s.color)

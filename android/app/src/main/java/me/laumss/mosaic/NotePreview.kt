@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.util.AtomicFile
+import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.File
@@ -15,14 +16,12 @@ import kotlin.math.ceil
 
 
 object NotePreview {
-    
-    private const val PREVIEW_STROKE_SCALE = 2f
 
     fun write(file: File, doc: ScrollingDocument) {
         val width = ceil(doc.contentWidth.toDouble()).toInt(); val height = ceil(doc.contentHeight.toDouble()).toInt()
         val atomic = AtomicFile(file); val stream = atomic.startWrite()
         try {
-            val out = DataOutputStream(stream)
+            val out = DataOutputStream(BufferedOutputStream(stream, 64 * 1024))
             out.write(byteArrayOf(137.toByte(),80,78,71,13,10,26,10))
             fun chunk(type: String, bytes: ByteArray) {
                 val tag = type.toByteArray(Charsets.US_ASCII)
@@ -51,10 +50,9 @@ object NotePreview {
                         bitmap.eraseColor(0)
                         canvas.translate(0f, -top.toFloat())
                         val visible = doc.strokes.filter { s ->
-                            val pad = s.width * PREVIEW_STROKE_SCALE
-                            s.bounds.bottom + pad >= top && s.bounds.top - pad < top + count
+                            s.bounds.bottom + s.width >= top && s.bounds.top - s.width < top + count
                         }
-                        TchRaster.drawLayer(canvas, visible, paint, widthScale = PREVIEW_STROKE_SCALE)
+                        TchRaster.drawLayer(canvas, visible, paint)
                         for (y in 0 until count) {
                             bitmap.getPixels(pixels,0,width,0,y,width,1)
                             row[0]=0
