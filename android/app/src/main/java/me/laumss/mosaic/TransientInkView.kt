@@ -106,11 +106,11 @@ class TransientInkView(context: Context) : View(context) {
         allMaxX = -Float.MAX_VALUE; allMaxY = -Float.MAX_VALUE
     }
 
-    private val lassoDotPaint = Paint().apply {
+    private val lassoDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xE6000000.toInt()
         style = Paint.Style.FILL
     }
-    private val lassoDotHaloPaint = Paint().apply {
+    private val lassoDotHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         style = Paint.Style.FILL
     }

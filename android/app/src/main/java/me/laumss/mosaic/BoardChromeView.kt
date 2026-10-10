@@ -505,11 +505,11 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
 
     private inner class RegionJumpView(val direction: SparseNavigation.Direction) : View(context) {
         var region: SparseNavigation.Region? = null
-        private val border = Paint().apply { style = Paint.Style.STROKE; color = INK; strokeWidth = 2f * density }
-        private val fill = Paint().apply { style = Paint.Style.FILL; color = Color.WHITE }
-        private val badge = Paint().apply { style = Paint.Style.FILL; color = INK }
-        private val arrowText = Paint().apply { color = INK; textSize = 32f * density; isFakeBoldText = true; textAlign = Paint.Align.CENTER }
-        private val countText = Paint().apply { color = Color.WHITE; textSize = 13f * density; isFakeBoldText = true; textAlign = Paint.Align.CENTER }
+        private val border = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = INK; strokeWidth = 2f * density }
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = Color.WHITE }
+        private val badge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = INK }
+        private val arrowText = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = INK; textSize = 32f * density; isFakeBoldText = true; textAlign = Paint.Align.CENTER }
+        private val countText = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 13f * density; isFakeBoldText = true; textAlign = Paint.Align.CENTER }
 
         init {
             isClickable = true
@@ -1145,7 +1145,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         var active = false
             set(value) { if (field != value) { field = value; invalidate() } }
         private var down = false
-        private val paint = Paint().apply {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND

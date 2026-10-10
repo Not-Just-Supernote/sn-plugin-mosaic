@@ -115,26 +115,26 @@ class InteractionOverlayView(context: Context) : View(context) {
     private var eraserTrailRadiusPx = 0f
     private var eraserTrailOnDark = false
 
-    private val solidPaint = Paint().apply {
+    private val solidPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = 0xFF111111.toInt()
         strokeWidth = 2f
     }
-    private val dashPaint = Paint().apply {
+    private val dashPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = 0xFF111111.toInt()
         strokeWidth = 1.5f
     }
-    private val thinDashPaint = Paint().apply {
+    private val thinDashPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = 0xFF111111.toInt()
         strokeWidth = 1f
     }
-    private val fillWhite = Paint().apply {
+    private val fillWhite = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = Color.WHITE
     }
-    private val fillBlack = Paint().apply {
+    private val fillBlack = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = 0xFF111111.toInt()
     }
@@ -145,25 +145,25 @@ class InteractionOverlayView(context: Context) : View(context) {
         strokeJoin = Paint.Join.ROUND
     }
     
-    private val eraserFill = Paint().apply {
+    private val eraserFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = ERASER_LIGHT_FILL
     }
-    private val eraserBorder = Paint().apply {
+    private val eraserBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = ERASER_LIGHT_BORDER
         strokeWidth = 2f
     }
-    private val eraserFillDark = Paint().apply {
+    private val eraserFillDark = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = ERASER_DARK_FILL
     }
-    private val eraserBorderDark = Paint().apply {
+    private val eraserBorderDark = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = ERASER_DARK_BORDER
         strokeWidth = 2f
     }
-    private val eraserTrailPaint = Paint().apply {
+    private val eraserTrailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = Color.WHITE
         
@@ -171,7 +171,7 @@ class InteractionOverlayView(context: Context) : View(context) {
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
-    private val arrowPaint = Paint().apply {
+    private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFF111111.toInt()
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true

@@ -89,10 +89,10 @@ object WhiteboardExport {
         val height = max(1f, min(LABEL_HEIGHT * density, heightPx - top))
         val rect = RectF(left, top, left + width, top + height)
 
-        val fill = Paint().apply { style = Paint.Style.FILL; color = LABEL_COLOR }
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = LABEL_COLOR }
         canvas.drawRect(rect, fill)
 
-        val text = TextPaint().apply {
+        val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textSize = LABEL_TEXT_SIZE * density
             isFakeBoldText = true

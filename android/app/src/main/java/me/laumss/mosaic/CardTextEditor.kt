@@ -421,7 +421,7 @@ class CardTextEditor(
     }
 
     private class FormatIcon(context: Context, private val kind: String) : View(context) {
-        private val pen = Paint()
+        private val pen = Paint(Paint.ANTI_ALIAS_FLAG)
         private val path = Path()
         private val asset = when (kind) {
             "heading" -> resources.getDrawable(R.drawable.card_format_heading, context.theme)

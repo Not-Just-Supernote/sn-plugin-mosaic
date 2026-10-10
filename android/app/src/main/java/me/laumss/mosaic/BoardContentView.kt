@@ -60,8 +60,9 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         private const val CARD_TEXT_SIZE = CardTextFormat.BODY_SIZE
         private const val CARD_TEXT_COLOR = Color.BLACK
         private const val CARD_PADDING_X = 16f
-        private val textMeasurePaint = TextPaint().apply {
+        private val textMeasurePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = CARD_TEXT_SIZE
+            isSubpixelText = true
         }
 
         
@@ -127,8 +128,9 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             return y
         }
 
-        private val headerMeasurePaint = TextPaint().apply {
+        private val headerMeasurePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = CARD_TEXT_SIZE
+            isSubpixelText = true
         }
 
         private const val NOTE_HEADER_DIVIDER_COLOR = 0xFF9A9A9A.toInt()
@@ -397,30 +399,33 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
         }
-        val neckFillPaint = Paint().apply { style = Paint.Style.FILL; color = CARD_FILL_COLOR }
-        val cardFillPaint = Paint().apply { style = Paint.Style.FILL; color = CARD_FILL_COLOR }
-        val shadowPaint = Paint().apply { style = Paint.Style.FILL; color = CARD_SHADOW_COLOR }
-        val shadowEdgePaint = Paint().apply { style = Paint.Style.FILL; color = CARD_SHADOW_EDGE_COLOR }
+        val placeholderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+        val neckFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_FILL_COLOR }
+        val cardFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_FILL_COLOR }
+        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_SHADOW_COLOR }
+        val shadowEdgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_SHADOW_EDGE_COLOR }
         val shadowPathNear = Path()
         val shadowPathFar = Path()
         val shadowFarUnion = Path()
         val outlineOccluders = Path()
-        val emphasisStrokePaint = Paint().apply {
+        val emphasisStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             color = CARD_OUTLINE_EMPHASIS_COLOR
             strokeWidth = CARD_OUTLINE_WIDTH
         }
-        val cardImagePaint = Paint()
-        val cardTextPaint = TextPaint().apply {
+        val cardImagePaint = Paint(Paint.FILTER_BITMAP_FLAG)
+        val cardTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = CARD_TEXT_COLOR
             textSize = CARD_TEXT_SIZE
+            isSubpixelText = true
         }
-        val flatShadowPaint = Paint().apply { style = Paint.Style.FILL; color = Color.BLACK }
+        val flatShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = Color.BLACK }
         val strokeQueryScratch = ArrayList<BoardEngine.StrokeRec>(64)
     }
 
     private val rasterScratch = ThreadLocal.withInitial { RasterScratch() }
     private val strokePaint get() = rasterScratch.get().strokePaint
+    private val placeholderPaint get() = rasterScratch.get().placeholderPaint
     private val neckFillPaint get() = rasterScratch.get().neckFillPaint
     private val cardFillPaint get() = rasterScratch.get().cardFillPaint
     private val shadowPaint get() = rasterScratch.get().shadowPaint
@@ -433,16 +438,16 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private val flatShadowPaint get() = rasterScratch.get().flatShadowPaint
     private val strokeQueryScratch get() = rasterScratch.get().strokeQueryScratch
     
-    private val selectionBorderPaint = Paint().apply {
+    private val selectionBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = CARD_SELECTED_COLOR
         strokeWidth = CARD_SELECTED_WIDTH
     }
-    private val handleFillPaint = Paint().apply {
+    private val handleFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = Color.WHITE
     }
-    private val handleBorderPaint = Paint().apply {
+    private val handleBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = CARD_SELECTED_COLOR
         strokeWidth = CARD_SELECTED_WIDTH
@@ -809,6 +814,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         
         val freeze = gestureFreezeTiles
         synchronized(cacheLock) {
+            tilePaint.isFilterBitmap = previewing || fallbackTiles.isNotEmpty()
             for (iy in minIy..maxIy) {
                 for (ix in minIx..maxIx) {
                     val key = TileKey(ix, iy, scaleBits)
@@ -1457,11 +1463,11 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private fun drawImagePlaceholder(canvas: Canvas, width: Float, height: Float) {
         val inset = CARD_PADDING_X
         val box = RectF(inset, inset, (width - inset).coerceAtLeast(inset + 1f), (height - inset).coerceAtLeast(inset + 1f))
-        strokePaint.color = CARD_PLACEHOLDER_COLOR
-        strokePaint.strokeWidth = CARD_OUTLINE_WIDTH
-        canvas.drawRect(box, strokePaint)
-        canvas.drawLine(box.left, box.top, box.right, box.bottom, strokePaint)
-        canvas.drawLine(box.right, box.top, box.left, box.bottom, strokePaint)
+        placeholderPaint.color = CARD_PLACEHOLDER_COLOR
+        placeholderPaint.strokeWidth = CARD_OUTLINE_WIDTH
+        canvas.drawRect(box, placeholderPaint)
+        canvas.drawLine(box.left, box.top, box.right, box.bottom, placeholderPaint)
+        canvas.drawLine(box.right, box.top, box.left, box.bottom, placeholderPaint)
     }
 
     
@@ -1477,7 +1483,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
                 val fm = cardTextPaint.fontMetrics
                 val baseline = top + (lineHeight - (fm.descent - fm.ascent)) / 2f - fm.ascent
                 if (blackBackground) {
-                    val fill = Paint().apply { color = highlight; style = Paint.Style.FILL }
+                    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = highlight; style = Paint.Style.FILL }
                     canvas.drawRect(m.padX - 6f, top, width - m.padX + 6f, top + lineHeight, fill)
                     cardTextPaint.color = highlightText
                 }

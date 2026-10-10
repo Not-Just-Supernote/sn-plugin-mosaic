@@ -244,7 +244,7 @@ object NoteShotExport {
 
     
     fun drawTag(canvas: Canvas, density: Float, widthPx: Int, heightPx: Int): Hotspot {
-        val text = TextPaint().apply {
+        val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textSize = TAG_TEXT_SP * density
             isFakeBoldText = true
@@ -257,14 +257,14 @@ object NoteShotExport {
         val tagWidth = min(padX + text.measureText(TAG_TEXT) + gap + arrow + padX, max(1f, widthPx - 2f * margin))
         val rect = RectF(margin, margin, margin + tagWidth, margin + tagHeight)
         val radius = TAG_RADIUS_DP * density
-        canvas.drawRoundRect(rect, radius, radius, Paint().apply {
+        canvas.drawRoundRect(rect, radius, radius, Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
             color = TAG_COLOR
         })
         val baseline = rect.centerY() - (text.ascent() + text.descent()) / 2f
         canvas.drawText(TAG_TEXT, rect.left + padX, baseline, text)
         
-        val stroke = Paint().apply {
+        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             color = Color.WHITE
             strokeWidth = TAG_ARROW_STROKE_DP * density
