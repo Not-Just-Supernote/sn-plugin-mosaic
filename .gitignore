@@ -8,5 +8,4 @@ android/local.properties
 .env
 .env.*
 !.env.example
-React/server/data/
-React/server/uploads/
+React/
