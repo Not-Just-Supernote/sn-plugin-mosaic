@@ -267,17 +267,13 @@ object BoardGeometry {
         val x: Float
         val y: Float
         if (abs(dx) >= abs(dy)) {
-            x = if (dx >= 0f) max(source.x + w + CARD_STROKE_GAP, endX) else min(source.x - w - CARD_STROKE_GAP, endX - w)
-            val gap = if (dx >= 0f) x - (source.x + w) else source.x - (x + w)
+            x = if (dx >= 0f) source.x + w + CARD_STROKE_GAP else source.x - w - CARD_STROKE_GAP
             val ov = min(CARD_STROKE_MIN_OVERLAP, h)
-            y = if (gap > NeckGeometry.MAX_DISTANCE) endY - h / 2f
-                else max(source.y + ov - h, min(source.y + h - ov, endY - h / 2f))
+            y = max(source.y + ov - h, min(source.y + h - ov, endY - h / 2f))
         } else {
-            y = if (dy >= 0f) max(source.y + h + CARD_STROKE_GAP, endY) else min(source.y - h - CARD_STROKE_GAP, endY - h)
-            val gap = if (dy >= 0f) y - (source.y + h) else source.y - (y + h)
+            y = if (dy >= 0f) source.y + h + CARD_STROKE_GAP else source.y - h - CARD_STROKE_GAP
             val ov = min(CARD_STROKE_MIN_OVERLAP, w)
-            x = if (gap > NeckGeometry.MAX_DISTANCE) endX - w / 2f
-                else max(source.x + ov - w, min(source.x + w - ov, endX - w / 2f))
+            x = max(source.x + ov - w, min(source.x + w - ov, endX - w / 2f))
         }
         return RectF(x, y, x + w, y + h)
     }
