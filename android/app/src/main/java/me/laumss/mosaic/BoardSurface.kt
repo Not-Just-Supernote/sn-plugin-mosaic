@@ -84,6 +84,9 @@ class NoteSurface(
     private val context: Context,
     
     private val viewportHeightDp: () -> Float,
+    private val viewportWidthDp: () -> Float,
+    // Scale at which the note width fills the view; that is 100%.
+    private val fitScale: () -> Float,
     
     private val topInsetDp: () -> Float,
     
@@ -99,12 +102,19 @@ class NoteSurface(
     companion object {
         
         private const val NOTE_OVERSCROLL_SCREENS = 6f
+        // Pinch zoom inside a note runs from fit-width (100%) to 150%.
+        const val MAX_ZOOM = 1.5f
     }
 
-    override fun constrainScale(next: Float, start: Float): Float = start
+    override fun constrainScale(next: Float, start: Float): Float {
+        val fit = fitScale()
+        return next.coerceIn(fit, fit * MAX_ZOOM)
+    }
 
+    // Horizontal pan only exists while zoomed in; the page never leaves the view edges.
     override fun constrainPan(panX: Float, panY: Float, scale: Float, out: FloatArray) {
-        out[0] = BoardEngine.panX
+        val minPanX = minOf(0f, viewportWidthDp() - ScrollingDocument.WIDTH * scale)
+        out[0] = panX.coerceIn(minPanX, 0f)
         out[1] = clampPanY(panY, scale)
     }
 
@@ -125,7 +135,7 @@ class NoteSurface(
     }
 
     override fun onViewportCommitted(panX: Float, panY: Float, scale: Float) {
-        notes.document?.scrollY = (topInsetDp() - panY).coerceAtLeast(0f)
+        notes.document?.scrollY = ((topInsetDp() - panY) / scale).coerceAtLeast(0f)
     }
 
     override fun onCloseRequested(source: BoardSurface.CloseSource) {

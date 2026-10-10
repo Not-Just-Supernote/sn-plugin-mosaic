@@ -104,6 +104,8 @@ class BoardInteractionController(
         
         const val LASSO_BOUNDS_PAD = 10f
         private const val EINK_OWNER = "gesture"
+        private const val NOTE_SCROLL_EINK_OWNER = "note-scroll"
+        private const val NOTE_SCROLL_SETTLE_MS = 400L
         
         const val GESTURE_SETTLE_MS = 600L
 
@@ -124,15 +126,14 @@ class BoardInteractionController(
         private const val RECOGNIZE_CARD_MIN_DP = 120f
 
         
-        const val NOTE_CARD_BOARD_WIDTH = 300f
+        const val NOTE_CARD_BOARD_WIDTH = 450f
 
         
-        fun noteCardBoardSize(contentHeight: Float, contentWidth: Float, cardWidth: Float = NOTE_CARD_BOARD_WIDTH, out: FloatArray, header: String = "") {
+        fun noteCardBoardSize(contentHeight: Float, cardWidth: Float = NOTE_CARD_BOARD_WIDTH, out: FloatArray, header: String = "") {
             val width = cardWidth.coerceAtLeast(BoardGeometry.MIN_CARD_SIZE)
-            val cw = contentWidth.coerceAtLeast(ScrollingDocument.WIDTH)
             val headerH = BoardContentView.noteHeaderHeight(header) * width / ScrollingDocument.WIDTH
             out[0] = width
-            out[1] = (contentHeight * width / cw + headerH).coerceAtLeast(BoardGeometry.MIN_CARD_SIZE)
+            out[1] = (contentHeight * width / ScrollingDocument.WIDTH + headerH).coerceAtLeast(BoardGeometry.MIN_CARD_SIZE)
         }
     }
 
@@ -173,12 +174,22 @@ class BoardInteractionController(
     private var currentNoteHeader: String? = null
     private var currentNoteHeaderPlaceholder = false
     private var currentNoteHeaderHeight = 0f
+    // View scale of the open note page; the header is laid out at screen size inside it.
+    private var notePageScale = 1f
     
     private var noteEntryCard: BoardEngine.CardRec? = null
     
     private var noteHeaderHoverBlocked = false
     
     private val viewportTmp = FloatArray(2)
+    private val noteScrollResetTask = Runnable {
+        MosaicEinkRefreshModule.resetNative(NOTE_SCROLL_EINK_OWNER)
+    }
+
+    private fun resetNoteScrollMode() {
+        handler.removeCallbacks(noteScrollResetTask)
+        MosaicEinkRefreshModule.resetNative(NOTE_SCROLL_EINK_OWNER)
+    }
 
     fun setNotesDirectory(path: String) {
         notesDirectory = path
@@ -196,13 +207,14 @@ class BoardInteractionController(
 
     
     private fun enterSurface(next: BoardSurface, scene: BoardEngine.SceneSnapshot) {
+        if (surface !== next) resetNoteScrollMode()
         if (surface !== next) invalidateClipboardWork("surface:${next.name}")
         surface = next
         
         NoteLinks.setActive(next.showsBoardChrome)
         BoardEngine.replaceScene(scene)
         chrome.setNoteMode(!next.showsBoardChrome)
-        content.setNoteHeader(if (next.showsBoardChrome) null else currentNoteHeader, currentNoteHeaderPlaceholder)
+        content.setNoteHeader(if (next.showsBoardChrome) null else currentNoteHeader, currentNoteHeaderPlaceholder, notePageScale)
         if (next.showsBoardChrome) setNoteHeaderHoverBlocked(false)
         syncToolMirrors(arbiter.effective(), "surface:${next.name}")
         
@@ -238,14 +250,12 @@ class BoardInteractionController(
                 suspendedBoard = suspended
                 history = BoardHistory(); lasso = null
                 noteEntryCard = sourceCard
+                // The page always spans the view width, whatever the screen resolution.
+                val scale = ScrollingDocument.viewScale(host.width / density)
+                notePageScale = scale
                 setPageNoteHeader(BoardContentView.noteHeaderOf(sourceCard))
-                val note = NoteSurface(noteController, host.context, { host.height / density }, ::noteTopInsetWorld, ::closeNote)
-                
-                
-                
-                
-                val scale = minOf(1f, (host.width / density) / ScrollingDocument.WIDTH)
-                val panY = toolbarHeightWorld() + currentNoteHeaderHeight * scale - doc.clampScroll(doc.scrollY, host.height / density)
+                val note = NoteSurface(noteController, host.context, { host.height / density }, { host.width / density }, { notePageScale }, ::noteTopInsetWorld, ::closeNote)
+                val panY = toolbarHeightWorld() + currentNoteHeaderHeight * scale - doc.clampScroll(doc.scrollY, host.height / density / scale) * scale
                 val scene = BoardEngine.SceneSnapshot(doc.strokes, emptyList(), emptyList(), emptyList(), emptyList(), 0f, panY, scale)
                 enterSurface(note, scene)
                 releasePaintHold("note-opened")
@@ -264,7 +274,6 @@ class BoardInteractionController(
         
         
         val liveStrokes = synchronized(BoardEngine.lock) { BoardEngine.strokes.values.toList() }
-        
         val compacted = ScrollingDocument.compact(liveStrokes)
         if (compacted.isNotEmpty() || noteController.document?.strokes?.isEmpty() != false) {
             noteController.changed(compacted)
@@ -275,13 +284,12 @@ class BoardInteractionController(
             result.onSuccess { doc ->
                 suspendedBoard = null
                 history = suspended.history
-                CardImageCache.invalidate(noteController.previewPath(doc.ref))
                 enterSurface(whiteboard, suspended.scene)
                 setLasso(suspended.lasso)
                 WhiteboardSceneGate.release()
                 val card = synchronized(BoardEngine.lock) { BoardEngine.cards.values.firstOrNull { it.noteRef == doc.ref } }
                 if (card != null) {
-                    val size = FloatArray(2); noteCardBoardSize(doc.contentHeight, doc.contentWidth, card.width, size, BoardContentView.noteHeaderOf(card))
+                    val size = FloatArray(2); noteCardBoardSize(doc.contentHeight, card.width, size, BoardContentView.noteHeaderOf(card))
                     val resized = card.withRect(RectF(card.x, card.y, card.x + size[0], card.y + size[1]))
                     
                     val entry = noteEntryCard?.takeIf { it.id == card.id } ?: card
@@ -651,6 +659,7 @@ class BoardInteractionController(
     }
 
     fun detach() {
+        resetNoteScrollMode()
         closeCardEditor()
         releasePaintHold("detach")
         noteShotSessionActive = false
@@ -803,7 +812,6 @@ class BoardInteractionController(
         noteController.flush(true) { result ->
             surfaceSwitching = false
             result.onFailure { Log.e(TAG, "note save failed on inkling close", it) }
-            result.onSuccess { doc -> CardImageCache.invalidate(noteController.previewPath(doc.ref)) }
             whiteboard.onCloseRequested(BoardSurface.CloseSource.TOOLBAR)
         }
     }
@@ -1735,6 +1743,9 @@ class BoardInteractionController(
     }
 
     
+    // LASSO_BOUNDS_PAD is world units on the board; above 100% (an open note) it stays the same on screen.
+    private fun lassoPadWorld(): Float = LASSO_BOUNDS_PAD / BoardEngine.scale.coerceAtLeast(1f)
+
     private fun selectionFrame(sel: LassoSelection): RectF {
         val out = RectF()
         var any = false
@@ -1747,12 +1758,13 @@ class BoardInteractionController(
             }
             for (id in sel.strokeIds) {
                 val stroke = BoardEngine.strokes[id] ?: continue
-                val bounds = BoardEngine.strokeWorldBounds(stroke)
+                val bounds = BoardEngine.strokeInkBounds(stroke)
                 if (!any) { out.set(bounds); any = true } else out.union(bounds)
             }
         }
         if (!any) return sel.rect
-        out.inset(-LASSO_BOUNDS_PAD, -LASSO_BOUNDS_PAD)
+        val pad = lassoPadWorld()
+        out.inset(-pad, -pad)
         return out
     }
 
@@ -2090,8 +2102,9 @@ class BoardInteractionController(
 
     
     private fun selectStroke(rec: BoardEngine.StrokeRec) {
-        val frame = synchronized(BoardEngine.lock) { RectF(BoardEngine.strokeWorldBounds(rec)) }
-        frame.inset(-LASSO_BOUNDS_PAD, -LASSO_BOUNDS_PAD)
+        val frame = synchronized(BoardEngine.lock) { RectF(BoardEngine.strokeInkBounds(rec)) }
+        val pad = lassoPadWorld()
+        frame.inset(-pad, -pad)
         setLasso(LassoSelection(frame, emptyList(), listOf(rec.id)))
     }
 
@@ -2123,7 +2136,7 @@ class BoardInteractionController(
 
     
     fun clearLassoForInkling(delete: Boolean) {
-        if (!InklingLink.isBoardSurface()) {
+        if (!InklingLink.isInkSurface()) {
             Log.i(TAG_LASSO, "inkling clear-selection deferred surface=${InklingLink.currentSurface()} delete=$delete")
             return
         }
@@ -2161,6 +2174,55 @@ class BoardInteractionController(
         }
         val view = viewWorld()
         emitImportedTextCard(TextReflow.reflow(text), view.centerX(), view.centerY(), "doc", centered = true)
+    }
+
+    
+    fun importNoteCard(path: String, title: String, done: (Result<Boolean>) -> Unit) {
+        if (!surface.showsBoardChrome || suspendedBoard != null || surfaceSwitching || notesDirectory.isBlank()) {
+            Log.i(TAG, "note import deferred surface=${surface.name}")
+            done(Result.success(false))
+            return
+        }
+        val directory = notesDirectory
+        val ref = "note-" + UUID.randomUUID().toString().replace("-", "").take(12)
+        clipboardIo.submitNoteImport(File(path)) { parsed ->
+            handler.post {
+                val imported = parsed.getOrElse {
+                    Log.e(TAG, "note import parse failed path=$path", it)
+                    done(Result.failure(it))
+                    return@post
+                }
+                noteController.create(directory, ScrollingDocument(ref, imported.strokes, 0f)) { written ->
+                    val doc = written.getOrElse {
+                        Log.e(TAG, "note import write failed ref=$ref", it)
+                        done(Result.failure(it))
+                        return@create
+                    }
+                    if (!surface.showsBoardChrome || suspendedBoard != null || surfaceSwitching) {
+                        File(directory, "$ref.mnote").delete(); File(directory, ref).deleteRecursively()
+                        Log.i(TAG, "note import deferred after write surface=${surface.name}")
+                        done(Result.success(false))
+                        return@create
+                    }
+                    val header = BoardContentView.noteHeaderFromText(title)
+                    val headerLines = if (header.isEmpty()) emptyList() else header.split('\n')
+                    val size = FloatArray(2)
+                    noteCardBoardSize(doc.contentHeight, NOTE_CARD_BOARD_WIDTH, size, BoardContentView.noteHeaderMarkdown(headerLines))
+                    val view = viewWorld()
+                    val top = if (size[1] < view.height()) view.centerY() - size[1] / 2f
+                        else view.top + toolbarHeightWorld() / BoardEngine.scale + LASSO_BOUNDS_PAD * 2f
+                    val card = BoardEngine.CardRec(
+                        newId("card-"), view.centerX() - size[0] / 2f, top, size[0], size[1],
+                        BoardGeometry.nextZIndex(BoardEngine.cards.values), "note", header,
+                        File(directory, ref).absolutePath, ref, "", "", headerLines.firstOrNull().orEmpty(),
+                    )
+                    apply(BoardHistory.Change("import-note").card(null, card), record = true)
+                    selectSingleCard(card); scheduleChromeUpdate()
+                    Log.i(TAG, "imported note card=${card.id} ref=$ref pages=${imported.pageCount} strokes=${doc.strokes.size} size=${size[0]}x${size[1]}")
+                    done(Result.success(true))
+                }
+            }
+        }
     }
 
     
@@ -2290,10 +2352,11 @@ class BoardInteractionController(
                 }
             }
         }
+        // A note page is shown at notePageScale; export at that size so the clip matches what is on screen.
         clipboardIo.submitExport(
             target = file,
             strokes = out.values.toList(),
-            density = density,
+            density = density * if (surface.showsBoardChrome) 1f else notePageScale,
             isCurrent = { clipboardExportGeneration.get() == sequence },
         ) { result ->
             result.onSuccess { count ->
@@ -2304,7 +2367,7 @@ class BoardInteractionController(
 
     
     fun handlePasteStrokes() {
-        if (!InklingLink.isBoardSurface()) {
+        if (!InklingLink.isInkSurface()) {
             Log.i(TAG_LASSO, "paste deferred surface=${InklingLink.currentSurface()}")
             return
         }
@@ -2325,7 +2388,7 @@ class BoardInteractionController(
         )
         clipboardPasteTask = clipboardIo.submitPaste(file, transform) { result ->
             handler.post {
-                if (generation != clipboardPasteGeneration.get() || surfaceSwitching || !InklingLink.isBoardSurface()) return@post
+                if (generation != clipboardPasteGeneration.get() || surfaceSwitching || !InklingLink.isInkSurface()) return@post
                 val batch = result.getOrNull()
                 if (batch == null || batch.strokes.isEmpty()) {
                     result.exceptionOrNull()?.let { Log.w(TAG_LASSO, "paste parse failed", it) }
@@ -2376,12 +2439,13 @@ class BoardInteractionController(
         synchronized(BoardEngine.lock) {
             for (id in ids) {
                 val stroke = BoardEngine.strokes[id] ?: continue
-                val b = BoardEngine.strokeWorldBounds(stroke)
+                val b = BoardEngine.strokeInkBounds(stroke)
                 if (!any) { frame.set(b); any = true } else frame.union(b)
             }
         }
         if (!any) return
-        frame.inset(-LASSO_BOUNDS_PAD, -LASSO_BOUNDS_PAD)
+        val pad = lassoPadWorld()
+        frame.inset(-pad, -pad)
         setLasso(LassoSelection(frame, emptyList(), ids.toList()))
     }
 
@@ -3380,7 +3444,7 @@ class BoardInteractionController(
     private fun setPageNoteHeader(markdown: String) {
         currentNoteHeaderPlaceholder = markdown.isBlank()
         currentNoteHeader = if (currentNoteHeaderPlaceholder) MosaicStrings.t(MosaicStrings.Key.noteHeaderPlaceholder) else markdown
-        currentNoteHeaderHeight = BoardContentView.noteHeaderHeight(currentNoteHeader.orEmpty())
+        currentNoteHeaderHeight = BoardContentView.noteHeaderHeight(currentNoteHeader.orEmpty(), notePageScale)
     }
 
     
@@ -3446,7 +3510,7 @@ class BoardInteractionController(
         )
         val oldH = currentNoteHeaderHeight
         setPageNoteHeader(BoardContentView.noteHeaderOf(next))
-        content.setNoteHeader(currentNoteHeader, currentNoteHeaderPlaceholder)
+        content.setNoteHeader(currentNoteHeader, currentNoteHeaderPlaceholder, notePageScale)
         
         val d = (currentNoteHeaderHeight - oldH) * BoardEngine.scale
         if (d != 0f) BoardEngine.setViewport(BoardEngine.panX, BoardEngine.panY + d, BoardEngine.scale)
@@ -3583,6 +3647,9 @@ class BoardInteractionController(
         if (surface.showsBoardChrome) {
             overlay.setLassoVisible(false)
             presentation.acquire(BoardPresentation.Reason.PAN_ZOOM)
+        } else {
+            handler.removeCallbacks(noteScrollResetTask)
+            MosaicEinkRefreshModule.applyNative(MosaicEinkRefreshModule.MODE_NOTE_SCROLL, NOTE_SCROLL_EINK_OWNER)
         }
         armPanZoom()
         val bnd = activeRegion?.bounds
@@ -3596,12 +3663,11 @@ class BoardInteractionController(
         resnapPanZoom(g)
         if (!panZoomArmed) {
             panZoomArmed = true
-            if (surface.showsBoardChrome) {
-                content.setZoomPreview(true)
-                
-                content.setGestureFreezeTiles(true)
-                content.setGestureThrottle(true)
-            }
+            // Notes zoom too now, so they also scale the cached frame instead of re-rastering tiles every frame.
+            content.setZoomPreview(true)
+
+            content.setGestureFreezeTiles(true)
+            content.setGestureThrottle(true)
             Log.i(TAG_PAN, "armed pan=(${g.startPanX},${g.startPanY}) scale=${g.startScale}")
         }
     }
@@ -3682,7 +3748,12 @@ class BoardInteractionController(
         
         
         
-        val snapped = if (scale != g.startScale) magneticZoom(scale) else scale
+        val snapped = when {
+            scale == g.startScale -> scale
+            surface.showsBoardChrome -> magneticZoom(scale)
+            abs(scale - notePageScale) <= notePageScale * ZOOM_SNAP_RATIO -> notePageScale
+            else -> scale
+        }
         if (snapped != scale) {
             val ax = g.lastCenterX / density
             val ay = g.lastCenterY / density
@@ -3717,6 +3788,10 @@ class BoardInteractionController(
         updateLassoOverlay()
         panZoomArmed = false
         presentation.release(BoardPresentation.Reason.PAN_ZOOM)
+        if (!surface.showsBoardChrome) {
+            handler.removeCallbacks(noteScrollResetTask)
+            handler.postDelayed(noteScrollResetTask, NOTE_SCROLL_SETTLE_MS)
+        }
         val centerX = (host.width / density / 2f - panX) / scale
         val centerY = (host.height / density / 2f - panY) / scale
         Log.i(TAG_PAN, "end frames=${g.frames} centerWorld=($centerX,$centerY) pan=($panX,$panY) scale=$scale")
@@ -3785,6 +3860,7 @@ class BoardInteractionController(
         host.flushInkHandoff("manual-refresh")
         Log.i(TAG, "manual full refresh: exit lasso/eraser/gesture states ${arbiter.describe()} lasso=${lasso != null}")
         cancelActiveInteractions("manual-refresh")
+        resetNoteScrollMode()
         for (source in ToolArbiter.Source.values()) applyTransition(arbiter.forceExit(source), "manual-refresh")
         applyTransition(arbiter.clearBase(), "manual-refresh")
         setLasso(null)
@@ -4053,13 +4129,12 @@ class BoardInteractionController(
                 noteController.flush(preview = true) { flushed ->
                     flushed.onFailure { Log.e(TAG, "convert-to-note flush failed", it) }
                     val contentHeight = flushed.getOrNull()?.contentHeight ?: ScrollingDocument.WIDTH
-                    val contentWidth = flushed.getOrNull()?.contentWidth ?: ScrollingDocument.WIDTH
                     noteController.clear()
                     val size = FloatArray(2)
                     
                     val header = BoardContentView.noteHeaderFromText(source.content)
                     val headerLines = if (header.isEmpty()) emptyList() else header.split('\n')
-                    noteCardBoardSize(contentHeight, contentWidth, source.width, size, BoardContentView.noteHeaderMarkdown(headerLines))
+                    noteCardBoardSize(contentHeight, source.width, size, BoardContentView.noteHeaderMarkdown(headerLines))
                     
                     val note = BoardEngine.CardRec(source.id, source.x, source.y, size[0], size[1], source.zIndex, "note", header, noteController.previewPath(ref), ref, "", "", headerLines.firstOrNull().orEmpty())
                     val change = BoardHistory.Change("card-to-note")

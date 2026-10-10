@@ -805,7 +805,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
                 }
             }
             val name = card.title.ifBlank { MosaicStrings.noteName(index + 1) }
-            val preview = if (card.imagePath.isNotEmpty()) CardImageCache.get(card.imagePath, thumbSize, alpha = true) else null
+            val preview = if (card.imagePath.isNotEmpty()) CardImageCache.get(NotePreview.tilePath(card.imagePath, 0), thumbSize * 4 / 3, alpha = true) else null
             val thumbView: View = if (preview != null) {
                 ImageView(context).apply {
                     setImageBitmap(preview)

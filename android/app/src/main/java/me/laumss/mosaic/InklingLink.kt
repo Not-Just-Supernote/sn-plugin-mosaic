@@ -157,6 +157,9 @@ object InklingLink {
     
     fun isBoardSurface(): Boolean = boardVisible && surface == SURFACE_BOARD
 
+    // Clipboard strokes work on the board and inside a note card.
+    fun isInkSurface(): Boolean = boardVisible && (surface == SURFACE_BOARD || surface == SURFACE_NOTE)
+
     private fun publishState(reason: String) {
         val ctx = appContext ?: return
         try {
@@ -225,15 +228,15 @@ object InklingLink {
             "close" -> host?.onInklingCloseRequested()
             "sync" -> publishState("sync-request")
             "paste_strokes" -> {
-                if (isBoardSurface()) host?.onInklingPasteStrokesRequested()
+                if (isInkSurface()) host?.onInklingPasteStrokesRequested()
                 else Log.i(TAG, "paste ignored surface=$surface visible=$boardVisible")
             }
             "clear_selection" -> {
-                if (isBoardSurface()) host?.onInklingClearSelectionRequested(delete = false)
+                if (isInkSurface()) host?.onInklingClearSelectionRequested(delete = false)
                 else Log.i(TAG, "clear-selection ignored surface=$surface visible=$boardVisible")
             }
             "delete_selection" -> {
-                if (isBoardSurface()) host?.onInklingClearSelectionRequested(delete = true)
+                if (isInkSurface()) host?.onInklingClearSelectionRequested(delete = true)
                 else Log.i(TAG, "delete-selection ignored surface=$surface visible=$boardVisible")
             }
             "text_card" -> {

@@ -14,16 +14,31 @@ class NoteController {
         private set
     private lateinit var directory: File
     private var pending: Runnable? = null
+    private var previewed: Map<String, BoardEngine.StrokeRec> = emptyMap()
     fun open(dir: String, ref: String, create: Boolean, done: (Result<ScrollingDocument>) -> Unit) {
         require(ref.matches(Regex("note-[a-zA-Z0-9-]+")))
         directory = File(dir)
         io.execute {
             val result = runCatching {
                 val file = File(directory,"$ref.mnote")
-                if (create) ScrollingDocument(ref,emptyList(),0f).also { TchFile.write(file,it); NotePreview.write(File(directory,"$ref.png"),it) }
+                if (create) ScrollingDocument(ref,emptyList(),0f).also { TchFile.write(file,it); NotePreview.write(File(directory,ref),it,null) }
                 else TchFile.read(file,ref)
             }
-            ui.post { result.onSuccess { document=it }; done(result) }
+            ui.post { result.onSuccess { document=it; previewed=it.strokes.associateBy { s -> s.id } }; done(result) }
+        }
+    }
+    
+    fun create(dir: String, doc: ScrollingDocument, done: (Result<ScrollingDocument>) -> Unit) {
+        require(doc.ref.matches(Regex("note-[a-zA-Z0-9-]+")))
+        val target = File(dir)
+        io.execute {
+            val result = runCatching {
+                TchFile.write(File(target,"${doc.ref}.mnote"),doc)
+                NotePreview.write(File(target,doc.ref),doc,null)
+                Log.i("MosaicNote","created ref=${doc.ref} strokes=${doc.strokes.size} height=${doc.contentHeight} tiles=${doc.tileCount}")
+                doc
+            }
+            ui.post { done(result) }
         }
     }
     fun changed(strokes: List<BoardEngine.StrokeRec>) {
@@ -34,18 +49,23 @@ class NoteController {
     fun flush(preview: Boolean, done: (Result<ScrollingDocument>) -> Unit) {
         pending?.let(ui::removeCallbacks); pending=null
         val snapshot = document!!.snapshot()
+        // Diffed against the last written thumbnails; a flush queued before that write lands only redraws more tiles.
+        val dirty = if (preview) ScrollingDocument.dirtyTiles(previewed, snapshot.strokes) else emptySet()
         io.execute {
             val result = runCatching {
                 TchFile.write(File(directory,"${snapshot.ref}.mnote"),snapshot)
-                if (preview) NotePreview.write(File(directory,"${snapshot.ref}.png"),snapshot)
-                Log.i("MosaicNote","saved ref=${snapshot.ref} strokes=${snapshot.strokes.size} height=${snapshot.contentHeight} preview=$preview")
+                val tiles = if (preview) NotePreview.write(File(directory,snapshot.ref),snapshot,dirty) else emptyList()
+                Log.i("MosaicNote","saved ref=${snapshot.ref} strokes=${snapshot.strokes.size} height=${snapshot.contentHeight} tiles=${snapshot.tileCount} preview=$preview redrawn=$tiles")
                 snapshot
             }
-            ui.post { done(result) }
+            ui.post {
+                if (preview && result.isSuccess && document?.ref == snapshot.ref) previewed = snapshot.strokes.associateBy { it.id }
+                done(result)
+            }
         }
     }
-    fun clear() { pending?.let(ui::removeCallbacks); pending=null; document=null }
-    fun previewPath(ref: String) = File(directory,"$ref.png").absolutePath
+    fun clear() { pending?.let(ui::removeCallbacks); pending=null; document=null; previewed=emptyMap() }
+    fun previewPath(ref: String) = File(directory,ref).absolutePath
 }
 
 

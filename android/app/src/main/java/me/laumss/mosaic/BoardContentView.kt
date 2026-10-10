@@ -116,16 +116,17 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         }
 
         
-        fun noteHeaderHeight(markdown: String): Float {
+        // pageScale > 1 lays the header out at screen size inside a page shown at that scale; the result is in page units.
+        fun noteHeaderHeight(markdown: String, pageScale: Float = 1f): Float {
             if (markdown.isBlank()) return 0f
             val m = CardTextFormat.WEB
-            val innerMax = ScrollingDocument.WIDTH - m.padX * 2f
+            val innerMax = ScrollingDocument.WIDTH * pageScale - m.padX * 2f
             var y = m.padTop + m.padBottom
             
             synchronized(headerMeasurePaint) {
                 forEachTextRun(markdown, innerMax, headerMeasurePaint, m) { _, _, lineHeight, _ -> y += lineHeight }
             }
-            return y
+            return y / pageScale
         }
 
         private val headerMeasurePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -890,16 +891,18 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private var pageNoteHeader: String? = null
     @Volatile
     private var pageNoteHeaderPlaceholder = false
+    private var pageNoteHeaderScale = 1f
     @Volatile
     private var pageNoteHeaderHeight = 0f
 
     
-    fun setNoteHeader(markdown: String?, placeholder: Boolean = false) {
+    fun setNoteHeader(markdown: String?, placeholder: Boolean = false, pageScale: Float = 1f) {
         val next = markdown?.takeIf { it.isNotBlank() }
-        if (next == pageNoteHeader && placeholder == pageNoteHeaderPlaceholder) return
+        if (next == pageNoteHeader && placeholder == pageNoteHeaderPlaceholder && pageScale == pageNoteHeaderScale) return
         pageNoteHeader = next
         pageNoteHeaderPlaceholder = placeholder
-        pageNoteHeaderHeight = if (next == null) 0f else noteHeaderHeight(next)
+        pageNoteHeaderScale = pageScale
+        pageNoteHeaderHeight = if (next == null) 0f else noteHeaderHeight(next, pageScale)
         rerasterAllTiles()
     }
 
@@ -909,23 +912,28 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         if (world.bottom <= -h || world.top >= 0f || world.left >= ScrollingDocument.WIDTH || world.right <= 0f) return
         val save = canvas.save()
         canvas.translate(0f, -h)
-        drawNoteHeader(canvas, header, h, Color.WHITE, if (pageNoteHeaderPlaceholder) NOTE_HEADER_PLACEHOLDER_COLOR else CARD_TEXT_COLOR)
+        drawNoteHeader(canvas, header, h, Color.WHITE, if (pageNoteHeaderPlaceholder) NOTE_HEADER_PLACEHOLDER_COLOR else CARD_TEXT_COLOR, pageNoteHeaderScale)
         canvas.restoreToCount(save)
     }
 
     
-    private fun drawNoteHeader(canvas: Canvas, markdown: String, height: Float, fill: Int?, textColor: Int) {
+    private fun drawNoteHeader(canvas: Canvas, markdown: String, height: Float, fill: Int?, textColor: Int, pageScale: Float = 1f) {
+        val save = canvas.save()
+        canvas.scale(1f / pageScale, 1f / pageScale)
+        val width = ScrollingDocument.WIDTH * pageScale
+        val h = height * pageScale
         if (fill != null) {
             cardFillPaint.color = fill
-            canvas.drawRect(0f, 0f, ScrollingDocument.WIDTH, height, cardFillPaint)
+            canvas.drawRect(0f, 0f, width, h, cardFillPaint)
         }
         cardTextPaint.color = textColor
-        drawTextBlock(canvas, markdown, ScrollingDocument.WIDTH, false)
+        drawTextBlock(canvas, markdown, width, false)
         strokePaint.style = Paint.Style.STROKE
         strokePaint.color = NOTE_HEADER_DIVIDER_COLOR
         strokePaint.strokeWidth = NOTE_HEADER_DIVIDER_WIDTH
-        val y = height - NOTE_HEADER_DIVIDER_WIDTH / 2f
-        canvas.drawLine(CARD_PADDING_X, y, ScrollingDocument.WIDTH - CARD_PADDING_X, y, strokePaint)
+        val y = h - NOTE_HEADER_DIVIDER_WIDTH / 2f
+        canvas.drawLine(CARD_PADDING_X, y, width - CARD_PADDING_X, y, strokePaint)
+        canvas.restoreToCount(save)
     }
 
     fun setGesturePresentation(flatCards: Boolean, darkCards: Boolean, hideTemplate: Boolean) {
@@ -1426,13 +1434,17 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             }
             val imageH = (rect.height() - headerH).coerceAtLeast(1f)
             canvas.translate(0f, headerH)
-            val bitmap = if (card.imagePath.isEmpty()) null
-            else CardImageCache.get(card.imagePath, (rect.width() * scene.scale).toInt(), alpha = card.kind == "note")
-            if (bitmap != null) {
-                drawCardImage(canvas, bitmap, rect.width(), imageH)
+            if (card.kind == "note") {
+                if (!drawNotePages(canvas, card, rect.width(), imageH, scene)) drawImagePlaceholder(canvas, rect.width(), imageH)
             } else {
-                
-                drawImagePlaceholder(canvas, rect.width(), imageH)
+                val bitmap = if (card.imagePath.isEmpty()) null
+                else CardImageCache.get(card.imagePath, (rect.width() * scene.scale).toInt())
+                if (bitmap != null) {
+                    drawCardImage(canvas, bitmap, rect.width(), imageH)
+                } else {
+
+                    drawImagePlaceholder(canvas, rect.width(), imageH)
+                }
             }
             canvas.translate(0f, -headerH)
         } else if (card.content.isNotBlank()) {
@@ -1456,6 +1468,28 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     }
 
     
+    // Stacks the thumbnail tiles at the card width; only tiles inside the canvas clip are decoded.
+    private fun drawNotePages(canvas: Canvas, card: BoardEngine.CardRec, width: Float, height: Float, scene: BoardEngine.RenderSnapshot): Boolean {
+        if (card.imagePath.isEmpty()) return false
+        val tileH = ScrollingDocument.TILE_HEIGHT * width / ScrollingDocument.WIDTH
+        val count = ceil(height / tileH).toInt().coerceAtLeast(1)
+        val targetPx = ceil(tileH * scene.scale * density).toInt()
+        val save = canvas.save()
+        canvas.clipRect(0f, 0f, width, height)
+        val clip = canvas.clipBounds
+        var drawn = false
+        val dst = RectF()
+        for (tile in 0 until count) {
+            dst.set(0f, tile * tileH, width, (tile + 1) * tileH)
+            if (dst.bottom < clip.top || dst.top > clip.bottom) { drawn = true; continue }
+            val bitmap = CardImageCache.get(NotePreview.tilePath(card.imagePath, tile), targetPx, alpha = true) ?: continue
+            canvas.drawBitmap(bitmap, null, dst, cardImagePaint)
+            drawn = true
+        }
+        canvas.restoreToCount(save)
+        return drawn
+    }
+
     private fun drawCardImage(canvas: Canvas, bitmap: Bitmap, width: Float, height: Float) {
         val bw = bitmap.width.toFloat()
         val bh = bitmap.height.toFloat()

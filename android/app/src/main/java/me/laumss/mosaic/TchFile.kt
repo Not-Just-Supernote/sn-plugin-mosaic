@@ -9,13 +9,11 @@ import java.io.File
 
 
 object TchFile {
-    private val MAGIC_V1 = byteArrayOf(77, 79, 83, 78, 79, 84, 69, 1)
     private val MAGIC = byteArrayOf(77, 79, 83, 78, 79, 84, 69, 2)
     private const val IO_BUFFER = 64 * 1024
     fun read(file: File, ref: String): ScrollingDocument = DataInputStream(BufferedInputStream(AtomicFile(file).openRead(), IO_BUFFER)).use { input ->
         val header = ByteArray(MAGIC.size); input.readFully(header)
-        val v2 = header.contentEquals(MAGIC)
-        require(v2 || header.contentEquals(MAGIC_V1)) { "Unsupported note format" }
+        require(header.contentEquals(MAGIC)) { "Unsupported note format" }
         val scroll = input.readFloat(); require(scroll.isFinite() && scroll >= 0f)
         val count = input.readInt(); require(count >= 0)
         val strokes = ArrayList<BoardEngine.StrokeRec>()
@@ -23,7 +21,7 @@ object TchFile {
             val id = input.readUTF(); val width = input.readFloat(); val color = input.readInt()
             val pen = input.readUnsignedShort(); PenStyle.fromObjType(pen)
             val scale = input.readFloat()
-            val drawPathWidth = if (v2) input.readInt() else DrawPathClient.widthArgument(PenStyle.fromObjType(pen), width)
+            val drawPathWidth = input.readInt()
             val originY = input.readFloat()
             require(width.isFinite() && width > 0 && scale.isFinite() && scale > 0 && originY.isFinite())
             val n = input.readInt(); require(n > 0 && n <= 1_000_000)

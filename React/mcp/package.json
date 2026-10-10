@@ -1,0 +1,12 @@
+{
+  "name": "mcp-cardbox",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "mcp-cardbox": "./index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "express": "^4.22.1"
+  }
+}

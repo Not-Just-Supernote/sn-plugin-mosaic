@@ -9,7 +9,7 @@ import kotlin.math.max
 
 object CardImageCache {
     private const val TAG = "MosaicCardImage"
-    private const val BUDGET_BYTES = 24L * 1024 * 1024
+    private const val BUDGET_BYTES = 48L * 1024 * 1024
     
     private const val FAILURE_RETRY_MS = 5000L
 
@@ -53,9 +53,18 @@ object CardImageCache {
         bytes = 0L
     }
 
+    // A note card's path is its tile directory; invalidating it drops every tile under it.
     fun invalidate(path: String) = synchronized(this) {
-        cache.remove(path)?.let { bytes -= it.bitmap.allocationByteCount }
-        failedAt.remove(path)
+        val prefix = "$path/"
+        val iterator = cache.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (entry.key == path || entry.key.startsWith(prefix)) {
+                bytes -= entry.value.bitmap.allocationByteCount
+                iterator.remove()
+            }
+        }
+        failedAt.keys.removeAll { it == path || it.startsWith(prefix) }
     }
 
     private fun evictLocked() {

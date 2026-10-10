@@ -112,6 +112,16 @@ class MosaicBoardEngineModule(
 
     
     @ReactMethod
+    fun importNoteCard(viewTag: Int, path: String, title: String, promise: Promise) {
+        withView(viewTag, onMissing = { promise.resolve(false) }) { view ->
+            view.controller.importNoteCard(path, title) { result ->
+                result.fold({ promise.resolve(it) }, { promise.reject("NOTE_IMPORT", it.message, it) })
+            }
+        }
+    }
+
+    
+    @ReactMethod
     fun invalidateImages(paths: ReadableArray) {
         val list = ArrayList<String>()
         for (i in 0 until paths.size()) paths.getString(i)?.let { list.add(it) }

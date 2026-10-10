@@ -68,7 +68,10 @@ export function ensureSyncNetworkPermission(): Promise<boolean> {
 
 export type PendingMosaicImageCard = {
   id: string;
+  type: 'image' | 'note';
   imagePath: string;
+  notePath: string;
+  title: string;
   createdAt?: number;
   source?: string;
 };
@@ -123,16 +126,21 @@ export async function claimPendingMosaicImageCard(): Promise<PendingMosaicImageC
       await RNFS.moveFile(entry.path, claimPath);
       const raw = await RNFS.readFile(claimPath, 'utf8');
       const parsed = JSON.parse(raw) as Partial<PendingMosaicImageCard>;
-      if (typeof parsed.imagePath !== 'string' || parsed.imagePath.length === 0) {
+      const type = parsed.type === 'note' ? 'note' : 'image';
+      const payloadPath = type === 'note' ? parsed.notePath : parsed.imagePath;
+      if (typeof payloadPath !== 'string' || payloadPath.length === 0) {
         await RNFS.moveFile(claimPath, entry.path);
-        if (ageMs > STALE_MARKER_MS) await quarantineMarker(entry.path, 'missing imagePath');
+        if (ageMs > STALE_MARKER_MS) await quarantineMarker(entry.path, `missing ${type === 'note' ? 'notePath' : 'imagePath'}`);
         continue;
       }
       return {
         request: {
           id: typeof parsed.id === 'string' && parsed.id.length > 0
             ? parsed.id : entry.name.replace(/\.json$/, ''),
-          imagePath: parsed.imagePath,
+          type,
+          imagePath: type === 'image' ? payloadPath : '',
+          notePath: type === 'note' ? payloadPath : '',
+          title: typeof parsed.title === 'string' ? parsed.title : '',
           createdAt: typeof parsed.createdAt === 'number' ? parsed.createdAt : undefined,
           source: typeof parsed.source === 'string' ? parsed.source : undefined,
         },
@@ -187,10 +195,13 @@ export async function completePendingMosaicImageCard(
   }
   
   
-  try {
-    if (await RNFS.exists(claim.request.imagePath)) await RNFS.unlink(claim.request.imagePath);
-  } catch {
-    
+  for (const path of [claim.request.imagePath, claim.request.notePath]) {
+    if (!path) continue;
+    try {
+      if (await RNFS.exists(path)) await RNFS.unlink(path);
+    } catch {
+      
+    }
   }
 }
 

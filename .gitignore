@@ -1,0 +1,12 @@
+node_modules/
+build/
+.gradle/
+.kotlin/
+dist/
+*.tsbuildinfo
+android/local.properties
+.env
+.env.*
+!.env.example
+React/server/data/
+React/server/uploads/

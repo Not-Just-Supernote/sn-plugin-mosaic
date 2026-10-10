@@ -99,15 +99,17 @@ object TemplatePaper {
 
     fun draw(canvas: Canvas, world: RectF, template: BackgroundTemplate, pageWidth: Float) {
         if (template.style == TemplateStyle.NONE) return
-        val pitch = template.spacing.pitch
-        if (pitch <= 0f) return
-        
-        
-        
-        val linePaint = Paint().apply { color = Color.LTGRAY; style = Paint.Style.STROKE; strokeWidth = LINE_W }
-        val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.GRAY; style = Paint.Style.FILL }
-        val crossPaint = Paint().apply { color = Color.GRAY; style = Paint.Style.STROKE; strokeWidth = CROSS_W }
         val bounded = pageWidth > 0f
+        val k = if (bounded) ScrollingDocument.TEMPLATE_PITCH_SCALE else 1f
+        val pitch = template.spacing.pitch * k
+        if (pitch <= 0f) return
+        val dotR = DOT_R * k
+        
+        
+        
+        val linePaint = Paint().apply { color = Color.LTGRAY; style = Paint.Style.STROKE; strokeWidth = LINE_W * k }
+        val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.GRAY; style = Paint.Style.FILL }
+        val crossPaint = Paint().apply { color = Color.GRAY; style = Paint.Style.STROKE; strokeWidth = CROSS_W * k }
 
         
         
@@ -115,7 +117,9 @@ object TemplatePaper {
         val rowRight = world.right
         if (rowRight <= rowLeft) return
 
-        val firstRow = floor(world.top / pitch) * pitch
+        // On a page, the first row sits one side margin below the header divider.
+        val rowPhase = if (bounded) pageMargin(pageWidth, pitch) else 0f
+        val firstRow = rowPhase + floor((world.top - rowPhase) / pitch) * pitch
 
         when (template.style) {
             TemplateStyle.LINES -> {
@@ -128,7 +132,7 @@ object TemplatePaper {
             TemplateStyle.DOTS -> {
                 var y = firstRow
                 while (y <= world.bottom) {
-                    forEachCol(world, pitch, bounded, pageWidth) { x -> canvas.drawCircle(x, y, DOT_R, dotPaint) }
+                    forEachCol(world, pitch, bounded, pageWidth) { x -> canvas.drawCircle(x, y, dotR, dotPaint) }
                     y += pitch
                 }
             }
@@ -147,15 +151,21 @@ object TemplatePaper {
         }
     }
 
+    // Columns are centred on the page with at least half a pitch to each edge.
+    private fun pageMargin(pageWidth: Float, pitch: Float): Float {
+        val gaps = floor((pageWidth - pitch) / pitch).coerceAtLeast(0f)
+        return (pageWidth - gaps * pitch) / 2f
+    }
+
     private inline fun forEachCol(world: RectF, pitch: Float, bounded: Boolean, pageWidth: Float, action: (Float) -> Unit) {
-        
-        
-        val phase = if (bounded) (pageWidth - (pageWidth / pitch).toInt() * pitch) / 2f else 0f
-        val start = floor((world.left - phase) / pitch).toInt()
-        val end = ceil((world.right - phase) / pitch).toInt()
+        val phase = if (bounded) pageMargin(pageWidth, pitch) else 0f
+        val left = if (bounded) maxOf(world.left, phase) else world.left
+        val right = if (bounded) minOf(world.right, pageWidth - phase) else world.right
+        val start = floor((left - phase) / pitch).toInt()
+        val end = ceil((right - phase) / pitch).toInt()
         for (i in start..end) {
             val x = phase + i * pitch
-            if (x >= world.left && x <= world.right) action(x)
+            if (x >= left - 0.01f && x <= right + 0.01f) action(x)
         }
     }
 }

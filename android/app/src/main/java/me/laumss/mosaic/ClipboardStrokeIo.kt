@@ -18,6 +18,8 @@ class ClipboardStrokeIo {
         private const val NOTE_COLOR_WHITE = 0xFE
         
         private const val NOTE_PEN_TYPE_CALLIGRAPHY = 14
+        // Blank space left between stacked pages before the note is compacted.
+        private const val NOTE_PAGE_GAP = 48f
     }
 
     data class PasteTransform(
@@ -66,6 +68,12 @@ class ClipboardStrokeIo {
         val color: Int = BoardEngine.StrokeRec.INK_BLACK,
     )
 
+    
+    class NoteImport(
+        val strokes: List<BoardEngine.StrokeRec>,
+        val pageCount: Int,
+    )
+
     private val pasteExecutor: ExecutorService = Executors.newSingleThreadExecutor { task ->
         Thread(task, "MosaicClipboardPaste").apply { isDaemon = true }
     }
@@ -90,6 +98,11 @@ class ClipboardStrokeIo {
         } finally {
             claimed?.let { runCatching { if (it.exists()) it.delete() } }
         }
+    }
+
+    
+    fun submitNoteImport(source: File, callback: (Result<NoteImport>) -> Unit): Future<*> = pasteExecutor.submit {
+        callback(runCatching { parseNotePages(source.readText(Charsets.UTF_8)) })
     }
 
     
@@ -161,10 +174,44 @@ class ClipboardStrokeIo {
         val array = root.optJSONArray("strokes") ?: return null
         if (array.length() == 0) return null
 
-        var minX = Float.POSITIVE_INFINITY
-        var minY = Float.POSITIVE_INFINITY
-        var maxX = Float.NEGATIVE_INFINITY
-        var maxY = Float.NEGATIVE_INFINITY
+        val bounds = floatArrayOf(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
+        val pageStrokes = parsePageStrokes(array, bounds)
+        val minX = bounds[0]
+        val minY = bounds[1]
+        val maxX = bounds[2]
+        val maxY = bounds[3]
+        if (!minX.isFinite() || !maxX.isFinite()) return null
+        
+        
+        
+        val pageScale = notePageScale(root, array, transform.screenShortPx)
+        val scale = transform.worldScale * pageScale
+        val strokes = pageStrokes.map { source ->
+            val points = FloatArray(source.points.size)
+            for (point in source.pressures.indices) {
+                points[point * 2] = transform.viewCx + (source.points[point * 2] - (minX + maxX) / 2f) * scale
+                points[point * 2 + 1] = transform.viewCy + (source.points[point * 2 + 1] - (minY + maxY) / 2f) * scale
+            }
+            PasteStroke(
+                source.penStyle,
+                source.width * scale,
+                points,
+                source.pressures,
+                source.drawPathWidth,
+                source.color,
+                transform.sampleScale / pageScale,
+                source.noteWhite,
+            )
+        }
+        return PasteBatch(strokes, minX, minY, maxX, maxY, pageScale)
+    }
+
+    
+    private fun parsePageStrokes(array: JSONArray, bounds: FloatArray): List<TripleStroke> {
+        var minX = bounds[0]
+        var minY = bounds[1]
+        var maxX = bounds[2]
+        var maxY = bounds[3]
         val pageStrokes = ArrayList<TripleStroke>(array.length())
         for (index in 0 until array.length()) {
             val obj = array.optJSONObject(index) ?: continue
@@ -213,30 +260,47 @@ class ClipboardStrokeIo {
                 ),
             )
         }
-        if (!minX.isFinite() || !maxX.isFinite()) return null
-        
-        
-        
-        val pageScale = notePageScale(root, array, transform.screenShortPx)
-        val scale = transform.worldScale * pageScale
-        val strokes = pageStrokes.map { source ->
-            val points = FloatArray(source.points.size)
-            for (point in source.pressures.indices) {
-                points[point * 2] = transform.viewCx + (source.points[point * 2] - (minX + maxX) / 2f) * scale
-                points[point * 2 + 1] = transform.viewCy + (source.points[point * 2 + 1] - (minY + maxY) / 2f) * scale
+        bounds[0] = minX
+        bounds[1] = minY
+        bounds[2] = maxX
+        bounds[3] = maxY
+        return pageStrokes
+    }
+
+    // Pages are scaled to the note width and stacked with NOTE_PAGE_GAP between them; blank runs are then
+    // collapsed the same way a note is on close, so empty page areas do not make the card long.
+    private fun parseNotePages(text: String): NoteImport {
+        val pages = JSONObject(text).optJSONArray("pages") ?: error("note import has no pages")
+        val strokes = ArrayList<BoardEngine.StrokeRec>()
+        var top = 0f
+        var pageCount = 0
+        for (index in 0 until pages.length()) {
+            val page = pages.optJSONObject(index) ?: continue
+            val size = page.optJSONObject("pageSize") ?: continue
+            val pageWidth = size.optDouble("width", 0.0).toFloat()
+            val pageHeight = size.optDouble("height", 0.0).toFloat()
+            if (!(pageWidth > 0f) || !(pageHeight > 0f)) continue
+            if (pageCount > 0) top += NOTE_PAGE_GAP
+            val scale = ScrollingDocument.WIDTH / pageWidth
+            val sources = page.optJSONArray("strokes")
+                ?.let { parsePageStrokes(it, floatArrayOf(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)) }
+                .orEmpty()
+            for (source in sources) {
+                val points = FloatArray(source.points.size)
+                for (point in source.pressures.indices) {
+                    points[point * 2] = source.points[point * 2] * scale
+                    points[point * 2 + 1] = top + source.points[point * 2 + 1] * scale
+                }
+                strokes.add(BoardEngine.StrokeRec(
+                    UUID.randomUUID().toString(), "canvas", source.width * scale, source.color,
+                    points, source.pressures, source.penStyle, 1f / scale, source.drawPathWidth,
+                ))
             }
-            PasteStroke(
-                source.penStyle,
-                source.width * scale,
-                points,
-                source.pressures,
-                source.drawPathWidth,
-                source.color,
-                transform.sampleScale / pageScale,
-                source.noteWhite,
-            )
+            top += pageHeight * scale
+            pageCount++
         }
-        return PasteBatch(strokes, minX, minY, maxX, maxY, pageScale)
+        require(pageCount > 0) { "note import has no valid pages" }
+        return NoteImport(ScrollingDocument.compact(strokes), pageCount)
     }
 
     

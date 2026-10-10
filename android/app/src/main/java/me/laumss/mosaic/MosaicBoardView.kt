@@ -187,7 +187,7 @@ class MosaicBoardView(
     private var plainStrokeCommit = false
     private var plainStrokeCommitted = false
     private var lastPenEventAt = 0L
-    private val inkHandoffTask = Runnable {
+    private val inkHandoffTask: Runnable = Runnable {
         if (!inkHandoffPending) return@Runnable
         val sincePen = SystemClock.uptimeMillis() - lastPenEventAt
         if (stylusContact && sincePen < INK_CONTACT_STALE_MS) {
@@ -571,7 +571,7 @@ class MosaicBoardView(
         if (!attached) return
         handler.post {
             if (!attached) return@post
-            if (!InklingLink.isBoardSurface()) {
+            if (!InklingLink.isInkSurface()) {
                 Log.i(TAG, "inkling paste deferred surface=${InklingLink.currentSurface()}")
                 return@post
             }
@@ -583,7 +583,7 @@ class MosaicBoardView(
         if (!attached) return
         handler.post {
             if (!attached) return@post
-            if (!InklingLink.isBoardSurface()) {
+            if (!InklingLink.isInkSurface()) {
                 Log.i(TAG, "inkling clear-selection deferred surface=${InklingLink.currentSurface()} delete=$delete")
                 return@post
             }

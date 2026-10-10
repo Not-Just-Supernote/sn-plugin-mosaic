@@ -11,7 +11,16 @@ export async function ensureNoteDir(): Promise<string> {
   directory = dir;
   return dir;
 }
+// A note's thumbnail is a directory of tile images: notes/<ref>/<tile>.png.
 export function notePathFor(noteRef: string | undefined): string {
   if (!directory || !noteRef) return '';
-  return `${directory}/${noteRef}.png`;
+  return `${directory}/${noteRef}`;
+}
+
+export function noteTilePath(noteDir: string, tile: number): string {
+  return `${noteDir}/${tile}.png`;
+}
+
+export function noteAssetRef(noteRef: string, tile: number): string {
+  return `${noteRef}.t${tile}.png`;
 }

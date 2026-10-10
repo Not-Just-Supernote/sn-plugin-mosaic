@@ -861,6 +861,20 @@ object BoardEngine {
         }
     }
 
+    // Tight ink box for selection frames; strokeWorldBounds keeps the wide STROKE_PAD for redraw and hit tests.
+    fun strokeInkBounds(rec: StrokeRec): RectF {
+        val maxPressure = (rec.pressures.maxOrNull() ?: 1f).coerceIn(0f, 1f)
+        val rendered = runCatching {
+            DrawPathClient.nativePressureWidthUnits(PenStyle.normalizeStoredType(rec.penStyle), rec.drawPathWidth, maxPressure) / rec.sampleScale
+        }.getOrDefault(rec.width)
+        val half = (rendered / 2f).coerceAtLeast(1f)
+        val rect = RectF(rec.bounds.left - half, rec.bounds.top - half, rec.bounds.right + half, rec.bounds.bottom + half)
+        val cardId = rec.cardId ?: return rect
+        val card = cards[cardId] ?: return rect
+        rect.offset(card.x, card.y)
+        return rect
+    }
+
     fun strokeWorldBounds(rec: StrokeRec): RectF {
         val rect = padded(rec.bounds, STROKE_PAD)
         val cardId = rec.cardId ?: return rect

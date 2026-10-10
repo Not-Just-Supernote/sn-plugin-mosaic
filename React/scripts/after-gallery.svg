@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1000" style="background:#b9c8de"><g transform="translate(20,40)">
+    <text x="0" y="-16" font-size="16" font-family="sans-serif">big over small (aligned)</text>
+    <path d="M 303.5611970787652 278.61081097260086 C 263.2262312954741 278.61081097260086, 218.1136318376901 289.1924085882086, 218.1136318376901 329.52737437149966 L 101.8863681623099 329.52737437149966 C 101.8863681623099 289.1924085882086, 56.77376870452588 278.61081097260086, 16.438802921234817 278.61081097260086 Z" fill="#ffffff" stroke="#c33" stroke-width="1.5"/>
+    <rect x="0" y="0" width="320" height="280" rx="12" fill="#ffffff" stroke="#8899aa" stroke-width="1"/><rect x="100" y="300" width="120" height="100" rx="12" fill="#ffffff" stroke="#8899aa" stroke-width="1"/>
+  </g><g transform="translate(660,40)">
+    <text x="0" y="-16" font-size="16" font-family="sans-serif">pure diagonal</text>
+    <path d="M 318.42395125255086 16.23128808394463 C 318.42395125255086 129.76783784463353, 540.0246473180763 311.38918902739914, 653.5611970787652 311.38918902739914 L 351.57604874744914 573.7687119160554 C 351.57604874744914 460.2321621553665, 129.97535268192374 278.61081097260086, 16.438802921234817 278.61081097260086 Z" fill="#ffffff" stroke="#c33" stroke-width="1.5"/>
+    <rect x="0" y="0" width="320" height="280" rx="12" fill="#ffffff" stroke="#8899aa" stroke-width="1"/><rect x="350" y="310" width="320" height="280" rx="12" fill="#ffffff" stroke="#8899aa" stroke-width="1"/>
+  </g><g transform="translate(1300,40)">
+    <text x="0" y="-16" font-size="16" font-family="sans-serif">diagonal small</text>
+    <path d="M 318.42395125255086 16.23128808394463 C 318.42395125255086 91.60047401104615, 378.2928846096536 311.48658829249433, 453.6620705367551 311.48658829249433 L 351.7275578017969 393.9922579489518 C 351.7275578017969 318.6230720218503, 91.80798884833632 278.61081097260086, 16.438802921234817 278.61081097260086 Z" fill="#ffffff" stroke="#c33" stroke-width="1.5"/>
+    <rect x="0" y="0" width="320" height="280" rx="12" fill="#ffffff" stroke="#8899aa" stroke-width="1"/><rect x="350" y="310" width="120" height="100" rx="12" fill="#ffffff" stroke="#8899aa" stroke-width="1"/>
+  </g><g transform="translate(20,540)">
+    <text x="0" y="-16" font-size="16" font-family="sans-serif">stacked</text>
+    <path d="M 303.5611970787652 278.61081097260086 C 246.13671824725913 278.61081097260086, 246.13671824725913 301.38918902739914, 303.5611970787652 301.38918902739914 L 16.438802921234817 301.38918902739914 C 73.8632817527409 301.38918902739914, 73.8632817527409 278.61081097260086, 16.438802921234817 278.61081097260086 Z" fill="#ffffff" stroke="#c33" stroke-width="1.5"/>
+    <rect x="0" y="0" width="320" height="280" rx="12" fill="#ffffff" stroke="#8899aa" stroke-width="1"/><rect x="0" y="300" width="320" height="280" rx="12" fill="#ffffff" stroke="#8899aa" stroke-width="1"/>
+  </g><g transform="translate(660,540)">
+    <text x="0" y="-16" font-size="16" font-family="sans-serif">side by side</text>
+    <path d="M 318.42395125255086 16.23128808394463 C 318.42395125255086 65.73877285036679, 341.57604874744914 65.73877285036679, 341.57604874744914 16.23128808394463 L 341.57604874744914 263.7687119160554 C 341.57604874744914 214.26122714963324, 318.42395125255086 214.26122714963324, 318.42395125255086 263.7687119160554 Z" fill="#ffffff" stroke="#c33" stroke-width="1.5"/>
+    <rect x="0" y="0" width="320" height="280" rx="12" fill="#ffffff" stroke="#8899aa" stroke-width="1"/><rect x="340" y="0" width="320" height="280" rx="12" fill="#ffffff" stroke="#8899aa" stroke-width="1"/>
+  </g><g transform="translate(1300,540)">
+    <text x="0" y="-16" font-size="16" font-family="sans-serif">offset 75pct</text>
+    <text x="100" y="140" font-size="14">NULL</text>
+    <rect x="0" y="0" width="320" height="280" rx="12" fill="#ffffff" stroke="#8899aa" stroke-width="1"/><rect x="240" y="300" width="320" height="280" rx="12" fill="#ffffff" stroke="#8899aa" stroke-width="1"/>
+  </g></svg>

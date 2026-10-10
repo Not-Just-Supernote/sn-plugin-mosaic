@@ -1,0 +1,19 @@
+[Unit]
+Description=Mosaic lightweight whiteboard sync
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/mosaic-sync/current
+ExecStart=/opt/node-v22.13.1-linux-x64/bin/node /opt/mosaic-sync/current/mosaic-sync-server.mjs
+User=whiteboard
+Group=whiteboard
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/mosaic-sync
+Environment=MOSAIC_SYNC_DATA=/var/lib/mosaic-sync
+Restart=always
+RestartSec=2
+MemoryMax=224M
+
+[Install]
+WantedBy=multi-user.target

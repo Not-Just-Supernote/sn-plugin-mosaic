@@ -1,7 +1,7 @@
 import RNFS from 'react-native-fs';
 import type { Card } from './React/src/types';
 import { imagePathFor } from './imageStore';
-import { notePathFor } from './noteStore';
+import { noteAssetRef, noteTilePath, notePathFor } from './noteStore';
 import { plainHttp } from './rawNet';
 import { bytesToBase64 } from './React/src/base64';
 import { encodeUtf8 } from './React/src/utf8';
@@ -13,18 +13,20 @@ const MAX_ASSET_BYTES = 2 * 1024 * 1024;
 
 const MISSING_RETRY_MS = 30000;
 
+const MAX_NOTE_TILES = 1000;
+const NOTE_TILE_FILE = /^(\d+)\.png$/;
 
-export function assetRefFor(card: Card): string | null {
-  if (card.kind === 'image') return card.imageRef ?? null;
-  if (card.kind === 'note') return card.noteRef ? `${card.noteRef}.png` : null;
-  return null;
-}
+type FileSync = 'uploaded' | 'downloaded' | 'none';
 
 
-function localPathFor(card: Card): string {
-  if (card.kind === 'image') return imagePathFor(card.imageRef);
-  if (card.kind === 'note') return notePathFor(card.noteRef);
-  return '';
+async function localNoteTiles(dir: string): Promise<number[]> {
+  const entries = await RNFS.readDir(dir).catch(() => []);
+  const tiles: number[] = [];
+  for (const entry of entries) {
+    const match = entry.isFile() ? NOTE_TILE_FILE.exec(entry.name) : null;
+    if (match) tiles.push(Number(match[1]));
+  }
+  return tiles.sort((a, b) => a - b);
 }
 
 export class AssetSync {
@@ -79,31 +81,36 @@ export class AssetSync {
       
       const seen = new Set<string>();
       for (const card of job.cards) {
-        const ref = assetRefFor(card);
-        const path = localPathFor(card);
-        if (ref === null || path === '' || seen.has(ref)) continue;
-        seen.add(ref);
-        const stat = await RNFS.stat(path).catch(() => null);
-        const hasLocal = stat !== null && stat.isFile() && Number(stat.size) > 0;
-        if (hasLocal) {
-          const size = Number(stat!.size);
-          if (size > MAX_ASSET_BYTES) { continue; }
-          const mtime = new Date(stat!.mtime as unknown as string | number | Date).getTime();
-          if (this.uploaded.get(ref) === mtime) continue;
-          if (await this.upload(job.boardId, ref, path)) {
-            this.uploaded.set(ref, mtime);
-            uploaded += 1;
-          }
-        } else {
-          const lastMiss = this.missingAt.get(ref);
-          if (lastMiss !== undefined && now - lastMiss < MISSING_RETRY_MS) continue;
-          if (await this.download(job.boardId, ref, path)) {
-            downloadedPaths.push(path);
-            this.missingAt.delete(ref);
+        if (card.kind === 'note' && card.noteRef) {
+          const noteRef = card.noteRef;
+          const dir = notePathFor(noteRef);
+          if (dir === '' || seen.has(dir)) continue;
+          seen.add(dir);
+          const tiles = await localNoteTiles(dir);
+          if (tiles.length > 0) {
+            for (const tile of tiles) {
+              if (await this.syncFile(job.boardId, noteAssetRef(noteRef, tile), noteTilePath(dir, tile), now) === 'uploaded') uploaded += 1;
+            }
           } else {
-            this.missingAt.set(ref, now);
+            // Tile count is unknown remotely, so pull tiles in order until one is missing.
+            await RNFS.mkdir(dir).catch(() => {});
+            let fetched = 0;
+            while (fetched < MAX_NOTE_TILES
+              && await this.syncFile(job.boardId, noteAssetRef(noteRef, fetched), noteTilePath(dir, fetched), now) === 'downloaded') {
+              fetched += 1;
+            }
+            if (fetched > 0) downloadedPaths.push(dir);
           }
+          continue;
         }
+        if (card.kind !== 'image' || !card.imageRef) continue;
+        const ref = card.imageRef;
+        const path = imagePathFor(ref);
+        if (path === '' || seen.has(ref)) continue;
+        seen.add(ref);
+        const result = await this.syncFile(job.boardId, ref, path, now);
+        if (result === 'uploaded') uploaded += 1;
+        else if (result === 'downloaded') downloadedPaths.push(path);
       }
       if (uploaded > 0) console.log(`[MosaicAsset] uploaded=${uploaded} board=${job.boardId.slice(0, 8)}`);
       if (downloadedPaths.length > 0) {
@@ -118,6 +125,28 @@ export class AssetSync {
       const next = this.queued as { boardId: string; cards: Card[] } | null;
       if (next !== null) this.schedule(next.boardId, next.cards);
     }
+  }
+
+  private async syncFile(boardId: string, ref: string, path: string, now: number): Promise<FileSync> {
+    const stat = await RNFS.stat(path).catch(() => null);
+    const hasLocal = stat !== null && stat.isFile() && Number(stat.size) > 0;
+    if (hasLocal) {
+      const size = Number(stat!.size);
+      if (size > MAX_ASSET_BYTES) return 'none';
+      const mtime = new Date(stat!.mtime as unknown as string | number | Date).getTime();
+      if (this.uploaded.get(ref) === mtime) return 'none';
+      if (!(await this.upload(boardId, ref, path))) return 'none';
+      this.uploaded.set(ref, mtime);
+      return 'uploaded';
+    }
+    const lastMiss = this.missingAt.get(ref);
+    if (lastMiss !== undefined && now - lastMiss < MISSING_RETRY_MS) return 'none';
+    if (await this.download(boardId, ref, path)) {
+      this.missingAt.delete(ref);
+      return 'downloaded';
+    }
+    this.missingAt.set(ref, now);
+    return 'none';
   }
 
   private async upload(boardId: string, ref: string, path: string): Promise<boolean> {

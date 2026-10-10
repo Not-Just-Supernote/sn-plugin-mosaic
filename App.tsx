@@ -843,8 +843,34 @@ export default function App(): React.JSX.Element {
     try {
       claim = await claimPendingMosaicImageCard();
       if (claim === null) return;
+      console.log(`[MosaicImport] claimed request=${claim.request.id} type=${claim.request.type} source=${claim.request.imagePath || claim.request.notePath}`);
+      if (claim.request.type === 'note') {
+        const engine = NativeModules.MosaicBoardEngine as
+          | { importNoteCard?: (tag: number, path: string, title: string) => Promise<boolean> }
+          | undefined;
+        const viewTag = findNodeHandle(boardRef.current);
+        if (viewTag === null || !engine?.importNoteCard) throw new Error('MosaicBoardEngine.importNoteCard unavailable');
+        let accepted: boolean;
+        try {
+          accepted = await engine.importNoteCard(viewTag, claim.request.notePath, claim.request.title);
+        } catch (error) {
+          committed = true;
+          await completePendingMosaicImageCard(claim);
+          console.log(`[MosaicImport] note import dropped request=${claim.request.id}: ${String(error)}`);
+          return;
+        }
+        if (!accepted) {
+          await releasePendingMosaicImageCard(claim);
+          claim = null;
+          console.log('[MosaicImport] note import deferred by native board');
+          return;
+        }
+        committed = true;
+        await completePendingMosaicImageCard(claim);
+        console.log(`[MosaicImport] inserted note card request=${claim.request.id}`);
+        return;
+      }
       if (!imageAvailable()) throw new Error('MosaicImage native module unavailable');
-      console.log(`[MosaicImport] claimed request=${claim.request.id} source=${claim.request.imagePath}`);
       const imported = await importImage(claim.request.imagePath);
       if (!isMosaicBoardSurface()) {
         await releasePendingMosaicImageCard(claim);
