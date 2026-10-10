@@ -230,14 +230,14 @@ class InkToolbar(context: android.content.Context) : LinearLayout(context) {
         private var down=false
         private var downY = 0f
         
-        private val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val paint=Paint().apply {
             style=Paint.Style.STROKE
             strokeWidth=iconStrokePx(resources.displayMetrics.density)
             strokeCap=Paint.Cap.ROUND
             strokeJoin=Paint.Join.ROUND
         }
-        private val badgeText=Paint(Paint.ANTI_ALIAS_FLAG).apply { isFakeBoldText=true; textAlign=Paint.Align.RIGHT }
-        private val badgeTri=Paint(Paint.ANTI_ALIAS_FLAG)
+        private val badgeText=Paint().apply { isFakeBoldText=true; textAlign=Paint.Align.RIGHT }
+        private val badgeTri=Paint()
 
         fun cancelPress() {
             if (!down) return

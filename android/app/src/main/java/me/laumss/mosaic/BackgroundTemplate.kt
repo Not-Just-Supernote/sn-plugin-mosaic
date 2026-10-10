@@ -105,7 +105,7 @@ object TemplatePaper {
         
         
         val linePaint = Paint().apply { color = Color.LTGRAY; style = Paint.Style.STROKE; strokeWidth = LINE_W }
-        val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.GRAY; style = Paint.Style.FILL }
+        val dotPaint = Paint().apply { color = Color.GRAY; style = Paint.Style.FILL }
         val crossPaint = Paint().apply { color = Color.GRAY; style = Paint.Style.STROKE; strokeWidth = CROSS_W }
         val bounded = pageWidth > 0f
 

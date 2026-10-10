@@ -70,23 +70,23 @@ object NoteLinks {
     var frames: List<Frame> = emptyList()
         private set
 
-    private val measurePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val measurePaint = TextPaint().apply {
         textSize = LABEL_SIZE
         isFakeBoldText = true
     }
     
-    private val cornerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val cornerPaint = Paint().apply {
         style = Paint.Style.STROKE
         color = INK
         strokeWidth = CORNER_STROKE
     }
     private val badgePaint = Paint().apply { color = INK }
-    private val labelPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val labelPaint = TextPaint().apply {
         textSize = LABEL_SIZE
         isFakeBoldText = true
         color = Color.WHITE
     }
-    private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val arrowPaint = Paint().apply {
         style = Paint.Style.STROKE
         color = Color.WHITE
         strokeWidth = 2.2f

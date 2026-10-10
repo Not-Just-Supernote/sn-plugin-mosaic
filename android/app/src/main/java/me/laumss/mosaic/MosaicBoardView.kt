@@ -183,6 +183,7 @@ class MosaicBoardView(
     private var fullRefreshPending = false
     private var inkHandoffPending = false
     private var plainStrokeCommit = false
+    private var plainStrokeCommitted = false
     private val inkHandoffTask = Runnable {
         if (inkHandoffPending && !stylusContact) finalizeInkSession("idle")
     }
@@ -329,12 +330,12 @@ class MosaicBoardView(
             if (Looper.myLooper() == Looper.getMainLooper()) {
                 sceneChangeCounter++
                 controller.onSceneOrViewportChanged(reason)
-                noteContentChanged(moved)
+                noteContentChanged(reason, moved)
             } else {
                 handler.post {
                     sceneChangeCounter++
                     controller.onSceneOrViewportChanged(reason)
-                    noteContentChanged(moved)
+                    noteContentChanged(reason, moved)
                 }
             }
         }
@@ -681,7 +682,7 @@ class MosaicBoardView(
     }
 
     
-    private fun noteContentChanged(moved: Boolean) {
+    private fun noteContentChanged(reason: String, moved: Boolean) {
         val next = if (moved) SyncUrgency.PROMPT else SyncUrgency.IDLE
         if (next.ordinal > backgroundSyncUrgency.ordinal) backgroundSyncUrgency = next
         
@@ -691,7 +692,10 @@ class MosaicBoardView(
         when {
             plainStrokeCommit -> if (awaitingStrokeCommit || inkHandoffPending) holdInkHandoff()
             awaitingStrokeCommit -> finalizeInkSession("commit")
-            inkHandoffPending && !stylusContact -> finalizeInkSession("flush")
+            inkHandoffPending && !stylusContact -> {
+                Log.i(TAG, "ink handoff flushed by content change reason=$reason moved=$moved")
+                finalizeInkSession("flush")
+            }
         }
     }
 
@@ -1095,6 +1099,8 @@ class MosaicBoardView(
             return block()
         } finally {
             plainStrokeCommit = false
+            plainStrokeCommitted = true
+            if (awaitingStrokeCommit || inkHandoffPending) holdInkHandoff()
         }
     }
 
@@ -1319,7 +1325,7 @@ class MosaicBoardView(
             feedInkView(event)
             controller.onPen(event)
             if ((event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)
-                && awaitingStrokeCommit && sceneChangeCounter == counterBefore
+                && awaitingStrokeCommit && sceneChangeCounter == counterBefore && !plainStrokeCommitted
             ) {
                 
                 finalizeInkSession("no-commit")
@@ -1363,6 +1369,7 @@ class MosaicBoardView(
                     
                     cancelStrokeCommitWait()
                     handler.removeCallbacks(inkHandoffTask)
+                    plainStrokeCommitted = false
                     strokeSceneChangedDuringContact = false
                     contentView.setDeferRefresh(true)
                 } else {

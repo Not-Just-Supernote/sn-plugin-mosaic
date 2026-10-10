@@ -30,6 +30,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         private const val TILE_WORLD = 512f
         
         private const val CACHE_BUDGET_BYTES = 64L * 1024 * 1024
+        private const val CACHE_BUDGET_MAX_BYTES = 256L * 1024 * 1024
         
         private const val PERF_LOG_INTERVAL_MS = 1000L
         
@@ -59,9 +60,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         private const val CARD_TEXT_SIZE = CardTextFormat.BODY_SIZE
         private const val CARD_TEXT_COLOR = Color.BLACK
         private const val CARD_PADDING_X = 16f
-        private val textMeasurePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val textMeasurePaint = TextPaint().apply {
             textSize = CARD_TEXT_SIZE
-            isSubpixelText = true
         }
 
         
@@ -127,9 +127,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             return y
         }
 
-        private val headerMeasurePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val headerMeasurePaint = TextPaint().apply {
             textSize = CARD_TEXT_SIZE
-            isSubpixelText = true
         }
 
         private const val NOTE_HEADER_DIVIDER_COLOR = 0xFF9A9A9A.toInt()
@@ -393,32 +392,30 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     
     
     private class RasterScratch {
-        val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            isAntiAlias = true
+        val strokePaint = Paint().apply {
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
         }
-        val neckFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_FILL_COLOR }
-        val cardFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_FILL_COLOR }
-        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_SHADOW_COLOR }
-        val shadowEdgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_SHADOW_EDGE_COLOR }
+        val neckFillPaint = Paint().apply { style = Paint.Style.FILL; color = CARD_FILL_COLOR }
+        val cardFillPaint = Paint().apply { style = Paint.Style.FILL; color = CARD_FILL_COLOR }
+        val shadowPaint = Paint().apply { style = Paint.Style.FILL; color = CARD_SHADOW_COLOR }
+        val shadowEdgePaint = Paint().apply { style = Paint.Style.FILL; color = CARD_SHADOW_EDGE_COLOR }
         val shadowPathNear = Path()
         val shadowPathFar = Path()
         val shadowFarUnion = Path()
         val outlineOccluders = Path()
-        val emphasisStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val emphasisStrokePaint = Paint().apply {
             style = Paint.Style.STROKE
             color = CARD_OUTLINE_EMPHASIS_COLOR
             strokeWidth = CARD_OUTLINE_WIDTH
         }
-        val cardImagePaint = Paint(Paint.FILTER_BITMAP_FLAG)
-        val cardTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        val cardImagePaint = Paint()
+        val cardTextPaint = TextPaint().apply {
             color = CARD_TEXT_COLOR
             textSize = CARD_TEXT_SIZE
-            isSubpixelText = true
         }
-        val flatShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = Color.BLACK }
+        val flatShadowPaint = Paint().apply { style = Paint.Style.FILL; color = Color.BLACK }
         val strokeQueryScratch = ArrayList<BoardEngine.StrokeRec>(64)
     }
 
@@ -436,16 +433,16 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private val flatShadowPaint get() = rasterScratch.get().flatShadowPaint
     private val strokeQueryScratch get() = rasterScratch.get().strokeQueryScratch
     
-    private val selectionBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val selectionBorderPaint = Paint().apply {
         style = Paint.Style.STROKE
         color = CARD_SELECTED_COLOR
         strokeWidth = CARD_SELECTED_WIDTH
     }
-    private val handleFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val handleFillPaint = Paint().apply {
         style = Paint.Style.FILL
         color = Color.WHITE
     }
-    private val handleBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val handleBorderPaint = Paint().apply {
         style = Paint.Style.STROKE
         color = CARD_SELECTED_COLOR
         strokeWidth = CARD_SELECTED_WIDTH
@@ -802,6 +799,9 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val minIy = floor((-panYPx) / tilePx).toInt()
         val maxIy = floor((height - panYPx) / tilePx).toInt()
 
+        val rasterTilePx = ceil(TILE_WORLD * rasterScale * densityValue).toLong().coerceAtLeast(1L)
+        visibleTileBytes = rasterTilePx * rasterTilePx * 4L * ((maxIx - minIx + 1).toLong() * (maxIy - minIy + 1).toLong())
+
         var missing = 0
         var stale = 0
         val src = Rect()
@@ -809,7 +809,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         
         val freeze = gestureFreezeTiles
         synchronized(cacheLock) {
-            tilePaint.isFilterBitmap = previewing || fallbackTiles.isNotEmpty()
             for (iy in minIy..maxIy) {
                 for (ix in minIx..maxIx) {
                     val key = TileKey(ix, iy, scaleBits)
@@ -1100,9 +1099,14 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         }
     }
 
+    @Volatile
+    private var visibleTileBytes = 0L
+
     private fun evictLocked() {
+        val visible = visibleTileBytes
+        val budget = minOf(CACHE_BUDGET_MAX_BYTES, maxOf(CACHE_BUDGET_BYTES, visible + visible / 4))
         val iterator = cache.entries.iterator()
-        while (cacheBytes > CACHE_BUDGET_BYTES && iterator.hasNext()) {
+        while (cacheBytes > budget && iterator.hasNext()) {
             val entry = iterator.next()
             cacheBytes -= entry.value.bitmap.allocationByteCount
             entry.value.bitmap.recycle()
@@ -1473,7 +1477,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
                 val fm = cardTextPaint.fontMetrics
                 val baseline = top + (lineHeight - (fm.descent - fm.ascent)) / 2f - fm.ascent
                 if (blackBackground) {
-                    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = highlight; style = Paint.Style.FILL }
+                    val fill = Paint().apply { color = highlight; style = Paint.Style.FILL }
                     canvas.drawRect(m.padX - 6f, top, width - m.padX + 6f, top + lineHeight, fill)
                     cardTextPaint.color = highlightText
                 }

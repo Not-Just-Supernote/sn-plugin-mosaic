@@ -107,7 +107,6 @@ object TchRaster {
         forceColor: Boolean = false,
     ) {
         val oldAlpha = paint.alpha
-        val oldAntiAlias = paint.isAntiAlias
         val oldDither = paint.isDither
         val oldFilter = paint.isFilterBitmap
         val marker = stroke.penStyle == PenStyle.MARKER.objType
@@ -117,7 +116,6 @@ object TchRaster {
         if (filledShape) paint.style = Paint.Style.FILL
         if (marker) {
             paint.alpha = 255
-            paint.isAntiAlias = true
         }
         paint.shader = null
         for (run in stroke.runs) {
@@ -126,7 +124,6 @@ object TchRaster {
         }
         paint.shader = null
         paint.alpha = oldAlpha
-        paint.isAntiAlias = oldAntiAlias
         paint.isDither = oldDither
         paint.isFilterBitmap = oldFilter
         paint.style = oldStyle
