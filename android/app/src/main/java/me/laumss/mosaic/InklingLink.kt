@@ -24,6 +24,7 @@ object InklingLink {
     
     
     const val ACTION_REQUEST = "me.laumss.mosaic.INKLING_REQUEST"
+    const val ACTION_PALETTE_RESULT = "me.laumss.mosaic.PALETTE_RESULT"
 
     const val SURFACE_BOARD = "board"
     const val SURFACE_NOTE = "note"
@@ -54,6 +55,9 @@ object InklingLink {
 
         
         fun onInklingInboxReady()
+
+        /** 调色盘读取选区；data 为非空时按冻结的选区应用笔形。 */
+        fun onInklingPaletteRequested(requestId: String, data: String?)
 
         
         fun onInklingSurfaceChanged(surface: String, noteRef: String?)
@@ -225,6 +229,14 @@ object InklingLink {
 
     private fun onRequest(intent: Intent) {
         when (val cmd = intent.getStringExtra("cmd")) {
+            "palette_info", "palette_apply" -> {
+                val id = intent.getStringExtra("requestId") ?: return
+                val currentHost = host
+                if (isBoardSurface() && currentHost != null) {
+                    currentHost.onInklingPaletteRequested(id,
+                        if (cmd == "palette_apply") intent.getStringExtra("data") ?: "{}" else null)
+                } else replyPalette(id, org.json.JSONObject().put("success", false).put("error", "surface_changed"))
+            }
             "close" -> host?.onInklingCloseRequested()
             "sync" -> publishState("sync-request")
             "paste_strokes" -> {
@@ -258,6 +270,15 @@ object InklingLink {
     
 
     
+    fun replyPalette(requestId: String, result: org.json.JSONObject) {
+        val ctx = appContext ?: return
+        ctx.sendBroadcast(Intent(ACTION_PALETTE_RESULT).apply {
+            setPackage(ctx.packageName)
+            putExtra("requestId", requestId)
+            putExtra("result", result.toString())
+        })
+    }
+
     fun toolbarRect(): Rect? = toolbarRect
 
     

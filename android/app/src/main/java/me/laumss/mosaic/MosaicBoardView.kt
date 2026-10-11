@@ -622,6 +622,21 @@ class MosaicBoardView(
         }
     }
 
+    override fun onInklingPaletteRequested(requestId: String, data: String?) {
+        handler.post {
+            val result = if (attached && InklingLink.isBoardSurface()) {
+                try {
+                    if (data == null) controller.paletteSelectionInfo()
+                    else controller.applyPaletteSelection(org.json.JSONObject(data))
+                } catch (error: Exception) {
+                    Log.w(TAG, "palette request failed", error)
+                    org.json.JSONObject().put("success", false).put("error", "apply_failed")
+                }
+            } else org.json.JSONObject().put("success", false).put("error", "surface_changed")
+            InklingLink.replyPalette(requestId, result)
+        }
+    }
+
     override fun onInklingInboxReady() {
         if (!attached) return
         handler.post {

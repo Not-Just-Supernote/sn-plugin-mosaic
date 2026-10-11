@@ -2308,6 +2308,60 @@ class BoardInteractionController(
         Log.i(TAG_LASSO, "clipboard work invalidated reason=$reason generation=$pasteGeneration")
     }
 
+    private fun paletteStrokes(): List<BoardEngine.StrokeRec> = synchronized(BoardEngine.lock) {
+        val selected = lasso ?: return@synchronized emptyList()
+        val records = LinkedHashMap<String, BoardEngine.StrokeRec>()
+        selected.strokeIds.forEach { id -> BoardEngine.strokes[id]?.let { records[id] = it } }
+        selected.cardIds.forEach { id -> BoardEngine.cardStrokes[id]?.forEach { records[it.id] = it } }
+        records.values.toList()
+    }
+
+    fun paletteSelectionInfo(): org.json.JSONObject {
+        val strokes = paletteStrokes()
+        val penId = strokes.groupingBy { PaletteStrokeStyle.id(it) }.eachCount()
+            .maxByOrNull { it.value }?.key ?: "ball"
+        val spec = PaletteStrokeStyle.spec(penId)!!
+        val widths = strokes.filter { PaletteStrokeStyle.id(it) == penId }.map { PaletteStrokeStyle.thickness(it) }
+        return org.json.JSONObject().apply {
+            put("success", true)
+            put("mosaic", true)
+            put("selectionVersion", clipboardExportGeneration.get())
+            put("strokeIds", org.json.JSONArray(strokes.map { it.id }))
+            put("strokeCount", strokes.count { !it.isShape })
+            put("geometryCount", strokes.count { it.isShape })
+            put("avgThickness", if (widths.isEmpty()) DrawPathClient.noteCalligraphyThickness(400) else widths.average().toInt())
+            put("dominantPenId", penId)
+            put("dominantPenType", spec.notePenType)
+            put("hasMarkerStroke", strokes.any { it.penStyle == PenStyle.MARKER.objType })
+        }
+    }
+
+    fun applyPaletteSelection(data: org.json.JSONObject): org.json.JSONObject {
+        fun failure(reason: String) = org.json.JSONObject().put("success", false).put("error", reason)
+        val ids = data.optJSONArray("strokeIds") ?: return failure("select_ink")
+        val requested = (0 until ids.length()).map { ids.optString(it) }.toSet()
+        val strokes = paletteStrokes()
+        if (requested.isEmpty() || strokes.isEmpty()) return failure("select_ink")
+        if (data.optLong("selectionVersion", -1L) != clipboardExportGeneration.get() ||
+            requested != strokes.map { it.id }.toSet()) return failure("selection_changed")
+        val spec = PaletteStrokeStyle.spec(data.optString("penId")) ?: return failure("invalid_pen")
+        val thickness = data.optInt("thickness", 0)
+        if (thickness !in 1..4000) return failure("invalid_width")
+        val change = BoardHistory.Change("palette")
+        strokes.forEach { before ->
+            val after = PaletteStrokeStyle.restyle(before, spec, thickness, data.optBoolean("changePen", true))
+            if (!before.sameGeometry(after)) change.stroke(before, after)
+        }
+        val changed = change.diffs.size
+        apply(change, record = true)
+        setLasso(lasso)
+        content.markSettleRequested()
+        content.postInvalidateOnAnimation()
+        host.invalidate()
+        Log.i(TAG_LASSO, "Mosaic palette applied pen=${data.optString("penId")} strokes=$changed")
+        return org.json.JSONObject().put("success", true).put("changed", changed)
+    }
+
     private fun exportLassoStrokes(sel: LassoSelection?) {
         val sequence = clipboardExportGeneration.incrementAndGet()
         val file = File(InklingLink.CLIP_LASSO_FILE)

@@ -56,7 +56,7 @@ enum class MarkerInk(
     companion object {
         
         fun fromArgb(argb: Int): MarkerInk = when (argb) {
-            0xFF9D9D9D.toInt() -> DARK_GRAY
+            0xFF9D9D9D.toInt(), 0xFFA0A0A0.toInt() -> DARK_GRAY
             0xFFC9C9C9.toInt() -> LIGHT_GRAY
             else -> entries.firstOrNull { it.argb == argb } ?: BLACK
         }
