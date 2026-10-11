@@ -29,6 +29,8 @@ export interface InkStroke {
   sampleScale: number
   /** Reference axis of the calligraphy nib in board coordinates, in radians. */
   nibAngle?: number
+  /** Original SDK tilt samples as interleaved X/Y integers, in source units. */
+  angles?: number[]
   width: number
   color: number       // ARGB u32
   encoding?: number
@@ -406,6 +408,15 @@ function decodeConnection(obj: Record<string, unknown>): Connection {
   }
 }
 
+export function readStrokeAngles(value: unknown): number[] | undefined {
+  if (value === undefined || value === null) return undefined
+  if (!Array.isArray(value) || value.length % 2 !== 0
+    || !value.every(angle => Number.isInteger(angle) && angle >= -2147483648 && angle <= 2147483647)) {
+    throw new Error('Invalid stroke angle sequence')
+  }
+  return value.length ? value.slice() : undefined
+}
+
 function encodeStroke(stroke: InkStroke): Record<string, unknown> {
   const obj: Record<string, unknown> = {
     id: stroke.id,
@@ -422,6 +433,7 @@ function encodeStroke(stroke: InkStroke): Record<string, unknown> {
     : canonicalDrawPathWidth(stroke.pen, stroke.width)
   obj.sampleScale = stroke.sampleScale
   if (typeof stroke.nibAngle === 'number' && Number.isFinite(stroke.nibAngle)) obj.nibAngle = stroke.nibAngle
+  if (stroke.angles?.length) obj.angles = readStrokeAngles(stroke.angles)
   if (stroke.createdAt !== undefined) obj.createdAt = stroke.createdAt
   return obj
 }
@@ -440,6 +452,7 @@ function decodeStroke(obj: Record<string, unknown>): InkStroke {
       : canonicalDrawPathWidth(pen, obj.width as number),
     sampleScale: obj.sampleScale as number,
     nibAngle: typeof obj.nibAngle === 'number' && Number.isFinite(obj.nibAngle) ? obj.nibAngle : undefined,
+    angles: readStrokeAngles(obj.angles),
     width: obj.width as number,
     color: obj.color as number,
     encoding: obj.encoding as number | undefined,

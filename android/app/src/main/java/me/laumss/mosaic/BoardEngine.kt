@@ -11,7 +11,7 @@ import java.nio.ByteOrder
 object BoardEngine {
 
     private const val TAG = "MosaicBoardEngine"
-    const val PROTOCOL_VERSION = 6
+    const val PROTOCOL_VERSION = 7
 
     private const val OP_ADD_STROKE = 1
     private const val OP_REMOVE_STROKES = 2
@@ -50,6 +50,8 @@ object BoardEngine {
         
         _requestedDrawPathWidth: Int = 0,
         val nibAngle: Float = Float.NaN,
+        /** Complete source SDK X/Y tilt sequence; geometry edits retain these raw samples. */
+        val angles: IntArray = IntArray(0),
     ) {
         
         val penStyle: Int = PenStyle.normalizeStoredType(rawPenStyle)
@@ -77,13 +79,13 @@ object BoardEngine {
 
         fun sameGeometry(other: StrokeRec): Boolean =
             space == other.space && width == other.width && color == other.color && penStyle == other.penStyle && sampleScale == other.sampleScale && drawPathWidth == other.drawPathWidth && nibAngle.toBits() == other.nibAngle.toBits() &&
-                points.contentEquals(other.points) && pressures.contentEquals(other.pressures)
+                points.contentEquals(other.points) && pressures.contentEquals(other.pressures) && angles.contentEquals(other.angles)
 
         fun withColor(c: Int): StrokeRec =
-            if (c == color) this else StrokeRec(id, space, width, c, points, pressures, penStyle, sampleScale, drawPathWidth, nibAngle)
+            if (c == color) this else StrokeRec(id, space, width, c, points, pressures, penStyle, sampleScale, drawPathWidth, nibAngle, angles)
 
         fun withPenStyle(style: PenStyle): StrokeRec =
-            if (style.objType == penStyle) this else StrokeRec(id, space, width, color, points, pressures, style.objType, sampleScale, DrawPathClient.widthArgument(style, width), nibAngle)
+            if (style.objType == penStyle) this else StrokeRec(id, space, width, color, points, pressures, style.objType, sampleScale, DrawPathClient.widthArgument(style, width), nibAngle, angles)
 
         
         fun translated(
@@ -114,6 +116,7 @@ object BoardEngine {
                 sampleScale,
                 drawPathWidth,
                 nibAngle,
+                angles,
             )
         }
 
@@ -126,7 +129,7 @@ object BoardEngine {
                 out[i + 1] = points[i + 1] + dy
                 i += 2
             }
-            return StrokeRec(id, space, width, color, out, pressures, penStyle, sampleScale, drawPathWidth, nibAngle)
+            return StrokeRec(id, space, width, color, out, pressures, penStyle, sampleScale, drawPathWidth, nibAngle, angles)
         }
 
         
@@ -163,6 +166,7 @@ object BoardEngine {
                 sampleScale,
                 (drawPathWidth * widthScale).toInt().coerceAtLeast(1),
                 if (nibAngle.isFinite()) kotlin.math.atan2(kotlin.math.sin(nibAngle) * fy, kotlin.math.cos(nibAngle) * fx) else Float.NaN,
+                angles,
             )
         }
 
@@ -203,12 +207,13 @@ object BoardEngine {
                 sampleScale,
                 drawPathWidth,
                 if (nibAngle.isFinite()) nibAngle + radians else Float.NaN,
+                angles,
             )
         }
 
         
         fun withPoints(pts: FloatArray): StrokeRec =
-            StrokeRec(id, space, width, color, pts, if (pressures.size == pts.size / 2) pressures else Shapes.pressures(pts.size / 2), penStyle, sampleScale, drawPathWidth, nibAngle)
+            StrokeRec(id, space, width, color, pts, if (pressures.size == pts.size / 2) pressures else Shapes.pressures(pts.size / 2), penStyle, sampleScale, drawPathWidth, nibAngle, angles)
 
         companion object {
             const val INK_BLACK = 0xFF000000.toInt()
@@ -791,7 +796,7 @@ object BoardEngine {
         var applied = false
         try {
             val version = buf.short.toInt()
-            if (version != PROTOCOL_VERSION && version != 5 && version != 4 && version != 3) {
+            if (version != PROTOCOL_VERSION && version != 6 && version != 5 && version != 4 && version != 3) {
                 Log.w(TAG, "applyOps: unsupported protocol version=$version")
                 return 0
             }
@@ -1118,6 +1123,11 @@ object BoardEngine {
         val sampleScale = buf.float
         val drawPathWidth = if (version >= 4) buf.int else DrawPathClient.widthArgument(PenStyle.fromObjType(penStyle), width)
         val nibAngle = if (version >= 6) buf.float.takeIf { it.isFinite() } ?: Float.NaN else Float.NaN
+        val angles = if (version >= 7) {
+            val angleCount = buf.int
+            require(angleCount >= 0 && angleCount % 2 == 0 && angleCount <= buf.remaining() / 4)
+            IntArray(angleCount) { buf.int }
+        } else IntArray(0)
         val pointCount = buf.int
         require(pointCount > 0 && pointCount <= 1_000_000)
         val points = FloatArray(pointCount * 2)
@@ -1127,7 +1137,7 @@ object BoardEngine {
         }
         require(sampleScale.isFinite() && sampleScale > 0f)
         val drawPathType = PenStyle.normalizeStoredType(penStyle)
-        return StrokeRec(id, space, width, color, points, pressures, drawPathType, sampleScale, drawPathWidth, nibAngle)
+        return StrokeRec(id, space, width, color, points, pressures, drawPathType, sampleScale, drawPathWidth, nibAngle, angles)
     }
 
     private fun readCard(buf: ByteBuffer): CardRec {

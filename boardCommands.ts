@@ -19,13 +19,13 @@ export type BoardCommand =
   | {
       type: 'strokeUpsert'; id: string; space: string; width: number; color: number;
       
-      pen: number; drawPathWidth?: number; sampleScale: number; nibAngle?: number; points: string;
+      pen: number; drawPathWidth?: number; sampleScale: number; nibAngle?: number; angles?: string; points: string;
       bounds?: { left: number; top: number; right: number; bottom: number };
     }
   | {
       
       type: 'strokeBatch'; ids: string[]; spaces: string[]; widths: number[]; colors: number[];
-      pens: number[]; drawPathWidths: number[]; sampleScales: number[]; nibAngles?: (number | null)[]; bounds: number[];
+      pens: number[]; drawPathWidths: number[]; sampleScales: number[]; nibAngles?: (number | null)[]; angles?: string[]; bounds: number[];
       pointOffsets: number[]; pointCounts: number[]; points: string;
     }
   | { type: 'strokesRemove'; ids: string[] }
@@ -81,6 +81,14 @@ export function subscribeBoardCommands(handler: (ops: BoardCommand[]) => void): 
 }
 
 
+function unpackAngles(encoded?: string): number[] | undefined {
+  if (!encoded) return undefined;
+  const bytes = base64ToBytes(encoded);
+  if (bytes.byteLength % 8 !== 0) throw new Error('Invalid packed stroke angle pairs');
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return Array.from({ length: bytes.byteLength / 4 }, (_, index) => view.getInt32(index * 4, true));
+}
+
 export function strokeFromCommand(op: Extract<BoardCommand, { type: 'strokeUpsert' }>): InkStroke {
   const pen = normalizeDrawPathPenType(op.pen)
   if (pen === null || !Number.isFinite(op.sampleScale) || op.sampleScale <= 0) {
@@ -99,6 +107,7 @@ export function strokeFromCommand(op: Extract<BoardCommand, { type: 'strokeUpser
       : canonicalDrawPathWidth(pen, op.width),
     sampleScale: op.sampleScale,
     nibAngle: typeof op.nibAngle === 'number' && Number.isFinite(op.nibAngle) ? op.nibAngle : undefined,
+    angles: unpackAngles(op.angles),
     encoding: STROKE_ENCODING_F32X3,
     points,
     
@@ -153,6 +162,7 @@ export function strokesFromBatch(op: Extract<BoardCommand, { type: 'strokeBatch'
       sampleScale: op.sampleScales[index],
       nibAngle: typeof op.nibAngles?.[index] === 'number' && Number.isFinite(op.nibAngles[index])
         ? op.nibAngles[index] as number : undefined,
+      angles: unpackAngles(op.angles?.[index]),
       encoding: STROKE_ENCODING_F32X3,
       points: packed.subarray(offset, offset + byteLength),
       bounds: bounds && bounds.every(Number.isFinite) ? bounds : computeStrokeBounds(unpackStrokePoints(packed.subarray(offset, offset + byteLength))),

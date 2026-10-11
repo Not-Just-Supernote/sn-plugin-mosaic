@@ -2391,6 +2391,7 @@ class BoardInteractionController(
                     rec.color,
                     rec.sampleScale,
                     rec.nibAngle,
+                    rec.angles.copyOf(),
                 )
             }
             for (cardId in sel.cardIds) {
@@ -2407,6 +2408,7 @@ class BoardInteractionController(
                         rec.color,
                         rec.sampleScale,
                         rec.nibAngle,
+                        rec.angles.copyOf(),
                     )
                 }
             }
@@ -2462,6 +2464,7 @@ class BoardInteractionController(
                         UUID.randomUUID().toString(), "canvas", stroke.width, stroke.color,
                         stroke.points, stroke.pressures, stroke.penStyle, stroke.sampleScale, stroke.drawPathWidth,
                         stroke.nibAngle,
+                        stroke.angles,
                     )
                 }
                 

@@ -81,6 +81,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 putInt("drawPathWidth", rec.drawPathWidth)
                 putDouble("sampleScale", rec.sampleScale.toDouble())
                 if (rec.nibAngle.isFinite()) putDouble("nibAngle", rec.nibAngle.toDouble())
+                if (rec.angles.isNotEmpty()) putString("angles", packAngles(rec.angles))
                 putString("points", packPoints(rec.points, rec.pressures))
                 
                 
@@ -111,6 +112,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
         val drawPathWidths = Arguments.createArray()
         val sampleScales = Arguments.createArray()
         val nibAngles = Arguments.createArray()
+        val angles = Arguments.createArray()
         val bounds = Arguments.createArray()
         val pointOffsets = Arguments.createArray()
         val pointCounts = Arguments.createArray()
@@ -124,6 +126,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
             drawPathWidths.pushInt(rec.drawPathWidth)
             sampleScales.pushDouble(rec.sampleScale.toDouble())
             if (rec.nibAngle.isFinite()) nibAngles.pushDouble(rec.nibAngle.toDouble()) else nibAngles.pushNull()
+            angles.pushString(packAngles(rec.angles))
             bounds.pushDouble(rec.bounds.left.toDouble())
             bounds.pushDouble(rec.bounds.top.toDouble())
             bounds.pushDouble(rec.bounds.right.toDouble())
@@ -151,6 +154,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 putArray("drawPathWidths", drawPathWidths)
                 putArray("sampleScales", sampleScales)
                 putArray("nibAngles", nibAngles)
+                putArray("angles", angles)
                 putArray("bounds", bounds)
                 putArray("pointOffsets", pointOffsets)
                 putArray("pointCounts", pointCounts)
@@ -160,6 +164,12 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
         val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000.0
         Log.i(TAG, "[MosaicBridgePerf] strokeBatch count=${values.size} points=$totalPoints " +
             "payloadBytes=${pointBuffer.array().size} encodeMs=${"%.2f".format(elapsedMs)}")
+    }
+
+    private fun packAngles(values: IntArray): String {
+        val buffer = ByteBuffer.allocate(values.size * 4).order(ByteOrder.LITTLE_ENDIAN)
+        for (value in values) buffer.putInt(value)
+        return Base64.encodeToString(buffer.array(), Base64.NO_WRAP)
     }
 
     fun strokesRemove(ids: Collection<String>) {

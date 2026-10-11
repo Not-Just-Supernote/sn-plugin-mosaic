@@ -1,6 +1,7 @@
 import { NativeModules } from 'react-native';
 import {
   STROKE_ENCODING_F32X3,
+  readStrokeAngles,
   type InkStroke,
 } from './React/src/boardFormat';
 import { bytesToBase64 } from './React/src/base64';
@@ -11,7 +12,7 @@ import { notePathFor } from './noteStore';
 
 
 
-const PROTOCOL_VERSION = 6;
+const PROTOCOL_VERSION = 7;
 
 const OP_ADD_STROKE = 1;
 const OP_REMOVE_STROKES = 2;
@@ -171,6 +172,9 @@ function writeStroke(writer: OpsWriter, stroke: InkStroke) {
   writer.f32(stroke.sampleScale);
   writer.u32(stroke.drawPathWidth ?? Math.round(Math.max(0.5, Math.min(40, stroke.width)) * 100));
   writer.f32(typeof stroke.nibAngle === 'number' && Number.isFinite(stroke.nibAngle) ? stroke.nibAngle : NaN);
+  const angles = readStrokeAngles(stroke.angles) ?? [];
+  writer.u32(angles.length);
+  for (const angle of angles) writer.i32(angle);
   const points = stroke.points;
   
   

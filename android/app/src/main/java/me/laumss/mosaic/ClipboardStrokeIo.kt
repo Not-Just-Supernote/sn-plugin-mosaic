@@ -47,6 +47,7 @@ class ClipboardStrokeIo {
         
         val noteWhite: Boolean = false,
         val nibAngle: Float = Float.NaN,
+        val angles: IntArray = IntArray(0),
     )
 
     data class PasteBatch(
@@ -71,6 +72,7 @@ class ClipboardStrokeIo {
         val color: Int = BoardEngine.StrokeRec.INK_BLACK,
         val sampleScale: Float = 1f,
         val nibAngle: Float = Float.NaN,
+        val angles: IntArray = IntArray(0),
     )
 
     
@@ -176,13 +178,23 @@ class ClipboardStrokeIo {
             .getOrDefault(PenStyle.PEN.objType)
     }
 
-    /** Mosaic exports carry nibAngle; note strokes carry their pen-down tilt from Element.angles. */
-    private fun pasteNibAngle(obj: JSONObject): Float {
+    /** Raw SDK X/Y pairs, retained independently of the rendered nib direction. */
+    private fun pasteAngles(obj: JSONObject): IntArray {
+        val values = obj.optJSONArray("angles") ?: obj.optJSONArray("tilt") ?: return IntArray(0)
+        require(values.length() % 2 == 0) { "Incomplete clipboard angle pairs" }
+        return IntArray(values.length()) { index ->
+            val value = values.getDouble(index)
+            require(value.isFinite() && value == value.toInt().toDouble()) { "Invalid clipboard angle at $index" }
+            value.toInt()
+        }
+    }
+
+    /** Mosaic exports carry nibAngle; note strokes carry raw Element.angles. */
+    private fun pasteNibAngle(obj: JSONObject, angles: IntArray): Float {
         val nib = obj.optDouble("nibAngle", Double.NaN).toFloat()
         if (nib.isFinite()) return nib
-        val tilt = obj.optJSONArray("tilt") ?: return Float.NaN
-        if (tilt.length() < 2) return Float.NaN
-        return InputReader.calligraphyNibAngleForTilt(tilt.getInt(0), tilt.getInt(1))
+        if (angles.size < 2) return Float.NaN
+        return InputReader.calligraphyNibAngleForTilt(angles[0], angles[1])
     }
 
     private fun parsePaste(text: String, transform: PasteTransform): PasteBatch? {
@@ -218,6 +230,7 @@ class ClipboardStrokeIo {
                 source.sampleScale * transform.sampleScale / pageScale,
                 source.noteWhite,
                 source.nibAngle,
+                source.angles,
             )
         }
         return PasteBatch(strokes, minX, minY, maxX, maxY, pageScale)
@@ -268,6 +281,7 @@ class ClipboardStrokeIo {
                     "penStyle=$penStyle width=$width sourceWidth=$rawWidth drawPathWidth=$drawPathWidth " +
                     "penColor=${obj.optInt("penColor", 0)} ink=${Integer.toHexString(noteInkColor(obj, penStyle))}")
             }
+            val angles = pasteAngles(obj)
             pageStrokes.add(
                 TripleStroke(
                     penStyle,
@@ -283,7 +297,8 @@ class ClipboardStrokeIo {
                         obj.optInt("penColor", 0) == NOTE_COLOR_WHITE,
                     obj.optDouble("sampleScale", 1.0).toFloat()
                         .takeIf { it.isFinite() && it > 0f } ?: 1f,
-                    pasteNibAngle(obj),
+                    pasteNibAngle(obj, angles),
+                    angles,
                 ),
             )
         }
@@ -322,6 +337,7 @@ class ClipboardStrokeIo {
                     UUID.randomUUID().toString(), "canvas", source.width * scale, source.color,
                     points, source.pressures, source.penStyle, source.sampleScale / scale, source.drawPathWidth,
                     source.nibAngle,
+                    source.angles,
                 ))
             }
             top += pageHeight * scale
@@ -360,6 +376,7 @@ class ClipboardStrokeIo {
         val noteWhite: Boolean,
         val sampleScale: Float,
         val nibAngle: Float,
+        val angles: IntArray,
     )
 
     
@@ -413,6 +430,12 @@ class ClipboardStrokeIo {
                 .put("sampleScale", (stroke.sampleScale / density).toDouble())
                 .put("pts", pts)
             if (stroke.nibAngle.isFinite()) json.put("nibAngle", stroke.nibAngle.toDouble())
+            if (stroke.angles.isNotEmpty()) {
+                json.put("angles", JSONArray().apply { for (angle in stroke.angles) put(angle) })
+                if (stroke.angles.size >= 2) {
+                    json.put("tilt", JSONArray().put(stroke.angles[0]).put(stroke.angles[1]))
+                }
+            }
             
             
             if (stroke.penStyle == PenStyle.MARKER.objType) {
