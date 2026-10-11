@@ -19,13 +19,13 @@ export type BoardCommand =
   | {
       type: 'strokeUpsert'; id: string; space: string; width: number; color: number;
       
-      pen: number; drawPathWidth?: number; sampleScale: number; points: string;
+      pen: number; drawPathWidth?: number; sampleScale: number; nibAngle?: number; points: string;
       bounds?: { left: number; top: number; right: number; bottom: number };
     }
   | {
       
       type: 'strokeBatch'; ids: string[]; spaces: string[]; widths: number[]; colors: number[];
-      pens: number[]; drawPathWidths: number[]; sampleScales: number[]; bounds: number[];
+      pens: number[]; drawPathWidths: number[]; sampleScales: number[]; nibAngles?: (number | null)[]; bounds: number[];
       pointOffsets: number[]; pointCounts: number[]; points: string;
     }
   | { type: 'strokesRemove'; ids: string[] }
@@ -98,6 +98,7 @@ export function strokeFromCommand(op: Extract<BoardCommand, { type: 'strokeUpser
       ? op.drawPathWidth
       : canonicalDrawPathWidth(pen, op.width),
     sampleScale: op.sampleScale,
+    nibAngle: typeof op.nibAngle === 'number' && Number.isFinite(op.nibAngle) ? op.nibAngle : undefined,
     encoding: STROKE_ENCODING_F32X3,
     points,
     
@@ -150,6 +151,8 @@ export function strokesFromBatch(op: Extract<BoardCommand, { type: 'strokeBatch'
         ? op.drawPathWidths[index]
         : canonicalDrawPathWidth(pen, op.widths[index]),
       sampleScale: op.sampleScales[index],
+      nibAngle: typeof op.nibAngles?.[index] === 'number' && Number.isFinite(op.nibAngles[index])
+        ? op.nibAngles[index] as number : undefined,
       encoding: STROKE_ENCODING_F32X3,
       points: packed.subarray(offset, offset + byteLength),
       bounds: bounds && bounds.every(Number.isFinite) ? bounds : computeStrokeBounds(unpackStrokePoints(packed.subarray(offset, offset + byteLength))),

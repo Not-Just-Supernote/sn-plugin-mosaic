@@ -7,11 +7,14 @@ enum class PenStyle(
     val objType: Int,
 ) {
     
+    /** 第一支笔：内部记录为 16，实时使用原生书法笔类型 15 与其八档粗细。 */
     PEN(DrawPathClient.PEN_TYPE_PRESSURE),
     
+    /** 第二支笔：导入原生针管笔和墨水笔；内部记录为 15，实时 drawPath 类型为 10。 */
     BRUSH(DrawPathClient.PEN_TYPE_BRUSH),
     MARKER(DrawPathClient.PEN_TYPE_MARKER),
     
+    /** 实心图形：内部填充状态为 18，实时 drawPath 类型为 16，宽度使用当前选中粗细。 */
     FILLED_SHAPE(18),
     ;
 

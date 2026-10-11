@@ -9,6 +9,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
 
 class ClipboardStrokeIo {
@@ -44,6 +45,7 @@ class ClipboardStrokeIo {
         val sampleScale: Float = 1f,
         
         val noteWhite: Boolean = false,
+        val nibAngle: Float = Float.NaN,
     )
 
     data class PasteBatch(
@@ -66,6 +68,8 @@ class ClipboardStrokeIo {
         val offsetY: Float,
         val drawPathWidth: Int = 0,
         val color: Int = BoardEngine.StrokeRec.INK_BLACK,
+        val sampleScale: Float = 1f,
+        val nibAngle: Float = Float.NaN,
     )
 
     
@@ -110,6 +114,7 @@ class ClipboardStrokeIo {
         target: File,
         strokes: List<ExportStroke>,
         density: Float,
+        screenShortPx: Float,
         isCurrent: () -> Boolean,
         callback: (Result<Int>) -> Unit = {},
     ): Future<*> = exportExecutor.submit {
@@ -120,7 +125,7 @@ class ClipboardStrokeIo {
                 callback(Result.success(0))
                 return@submit
             }
-            val encoded = encodeExport(strokes, density)
+            val encoded = encodeExport(strokes, density, screenShortPx)
             if (!isCurrent()) return@submit
             target.parentFile?.mkdirs()
             val tmp = File(target.parentFile, ".${target.name}.tmp-${UUID.randomUUID()}")
@@ -160,7 +165,8 @@ class ClipboardStrokeIo {
     private fun pastePenStyle(obj: JSONObject): Int {
         if (obj.has("sdkPenType")) {
             return when (obj.optInt("sdkPenType")) {
-                DrawPathClient.PEN_TYPE_NEEDLE -> PenStyle.BRUSH.objType
+                DrawPathClient.PEN_TYPE_NEEDLE,
+                DrawPathClient.PEN_TYPE_PRESSURE -> PenStyle.BRUSH.objType
                 DrawPathClient.PEN_TYPE_MARKER -> PenStyle.MARKER.objType
                 else -> PenStyle.PEN.objType
             }
@@ -175,7 +181,7 @@ class ClipboardStrokeIo {
         if (array.length() == 0) return null
 
         val bounds = floatArrayOf(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
-        val pageStrokes = parsePageStrokes(array, bounds)
+        val pageStrokes = parsePageStrokes(array, bounds, clipboardCoordinateSpace(root, array) == "note-page-px")
         val minX = bounds[0]
         val minY = bounds[1]
         val maxX = bounds[2]
@@ -199,15 +205,16 @@ class ClipboardStrokeIo {
                 source.pressures,
                 source.drawPathWidth,
                 source.color,
-                transform.sampleScale / pageScale,
+                source.sampleScale * transform.sampleScale / pageScale,
                 source.noteWhite,
+                source.nibAngle,
             )
         }
         return PasteBatch(strokes, minX, minY, maxX, maxY, pageScale)
     }
 
     
-    private fun parsePageStrokes(array: JSONArray, bounds: FloatArray): List<TripleStroke> {
+    private fun parsePageStrokes(array: JSONArray, bounds: FloatArray, noteSource: Boolean = false): List<TripleStroke> {
         var minX = bounds[0]
         var minY = bounds[1]
         var maxX = bounds[2]
@@ -238,25 +245,35 @@ class ClipboardStrokeIo {
             val penStyle = pastePenStyle(obj)
             val width = obj.optDouble("width", BoardInteractionController.PEN_WIDTH_DP.toDouble()).toFloat()
                 .takeIf { it.isFinite() } ?: BoardInteractionController.PEN_WIDTH_DP
+            val rawWidth = obj.optInt("drawPathWidth", 0).takeIf { it > 0 }
+                ?: (width * 100f).roundToInt().coerceAtLeast(1)
+            val calligraphy = noteSource && obj.optInt("sdkPenType", -1) == NOTE_PEN_TYPE_CALLIGRAPHY
+            val drawPathWidth = when {
+                calligraphy -> DrawPathClient.mosaicCalligraphyThickness(rawWidth)
+                noteSource || obj.has("drawPathWidth") -> rawWidth
+                else -> DrawPathClient.widthArgument(PenStyle.fromObjType(penStyle), width)
+            }
             if (index == 0) {
                 Log.i(TAG, "[CLIP-DBG] parsed first stroke sdkPenType=${obj.optInt("sdkPenType", -1)} " +
-                    "penStyle=$penStyle width=$width drawPathWidth=${obj.optInt("drawPathWidth", 0)} " +
+                    "penStyle=$penStyle width=$width sourceWidth=$rawWidth drawPathWidth=$drawPathWidth " +
                     "penColor=${obj.optInt("penColor", 0)} ink=${Integer.toHexString(noteInkColor(obj, penStyle))}")
             }
             pageStrokes.add(
                 TripleStroke(
                     penStyle,
-                    width,
+                    if (calligraphy) drawPathWidth / 100f else width,
                     pagePoints.copyOf(valid * 2),
                     pressures.copyOf(valid),
                     
                     
-                    obj.optInt("drawPathWidth", 0).takeIf { it > 0 }
-                        ?: DrawPathClient.widthArgument(PenStyle.fromObjType(penStyle), width),
+                    drawPathWidth,
                     noteInkColor(obj, penStyle),
                     
-                    penStyle != PenStyle.MARKER.objType && !obj.has("drawPathWidth") &&
+                    penStyle != PenStyle.MARKER.objType && noteSource &&
                         obj.optInt("penColor", 0) == NOTE_COLOR_WHITE,
+                    obj.optDouble("sampleScale", 1.0).toFloat()
+                        .takeIf { it.isFinite() && it > 0f } ?: 1f,
+                    obj.optDouble("nibAngle", Double.NaN).toFloat().takeIf { it.isFinite() } ?: Float.NaN,
                 ),
             )
         }
@@ -283,7 +300,7 @@ class ClipboardStrokeIo {
             if (pageCount > 0) top += NOTE_PAGE_GAP
             val scale = ScrollingDocument.WIDTH / pageWidth
             val sources = page.optJSONArray("strokes")
-                ?.let { parsePageStrokes(it, floatArrayOf(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)) }
+                ?.let { parsePageStrokes(it, floatArrayOf(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY), noteSource = true) }
                 .orEmpty()
             for (source in sources) {
                 val points = FloatArray(source.points.size)
@@ -293,7 +310,8 @@ class ClipboardStrokeIo {
                 }
                 strokes.add(BoardEngine.StrokeRec(
                     UUID.randomUUID().toString(), "canvas", source.width * scale, source.color,
-                    points, source.pressures, source.penStyle, 1f / scale, source.drawPathWidth,
+                    points, source.pressures, source.penStyle, source.sampleScale / scale, source.drawPathWidth,
+                    source.nibAngle,
                 ))
             }
             top += pageHeight * scale
@@ -304,13 +322,21 @@ class ClipboardStrokeIo {
     }
 
     
+    private fun clipboardCoordinateSpace(root: JSONObject, strokes: JSONArray): String =
+        root.optString("coordinateSpace").ifBlank {
+            // Legacy native exports preserve these SDK fields; pen width is independent of coordinates.
+            if ((0 until strokes.length()).any { index ->
+                strokes.optJSONObject(index)?.let { it.has("sdkThickness") || it.has("sourcePenType") } == true
+            }) "note-page-px" else "mosaic-px"
+        }
+
     private fun notePageScale(root: JSONObject, strokes: JSONArray, screenShortPx: Float): Float {
+        val coordinateSpace = clipboardCoordinateSpace(root, strokes)
+        if (coordinateSpace == "mosaic-px") return 1f
+        require(coordinateSpace == "note-page-px") { "Unknown clipboard coordinates: $coordinateSpace" }
         val page = root.optJSONObject("pageSize") ?: return 1f
         val pageShort = minOf(page.optDouble("width", 0.0), page.optDouble("height", 0.0)).toFloat()
         if (!(pageShort > 0f) || !(screenShortPx > 0f)) return 1f
-        for (index in 0 until strokes.length()) {
-            if ((strokes.optJSONObject(index)?.optInt("drawPathWidth", 0) ?: 0) > 0) return 1f
-        }
         return screenShortPx / pageShort
     }
 
@@ -322,6 +348,8 @@ class ClipboardStrokeIo {
         val drawPathWidth: Int,
         val color: Int,
         val noteWhite: Boolean,
+        val sampleScale: Float,
+        val nibAngle: Float,
     )
 
     
@@ -341,7 +369,7 @@ class ClipboardStrokeIo {
         }
     }
 
-    private fun encodeExport(strokes: List<ExportStroke>, density: Float): String {
+    private fun encodeExport(strokes: List<ExportStroke>, density: Float, screenShortPx: Float): String {
         val array = JSONArray()
         for (stroke in strokes) {
             val pts = JSONArray()
@@ -371,7 +399,10 @@ class ClipboardStrokeIo {
                 
                 .put("width", (noteThickness / 100f).toDouble())
                 .put("drawPathWidth", stroke.drawPathWidth)
+                // Convert capture pixels per world unit to capture pixels per exported pixel.
+                .put("sampleScale", (stroke.sampleScale / density).toDouble())
                 .put("pts", pts)
+            if (stroke.nibAngle.isFinite()) json.put("nibAngle", stroke.nibAngle.toDouble())
             
             
             if (stroke.penStyle == PenStyle.MARKER.objType) {
@@ -381,6 +412,8 @@ class ClipboardStrokeIo {
             }
             array.put(json)
         }
-        return JSONObject().put("v", 1).put("unit", "px").put("strokes", array).toString()
+        return JSONObject().put("v", 2).put("unit", "px")
+            .put("coordinateSpace", "mosaic-px").put("screenShortPx", screenShortPx.toDouble())
+            .put("strokes", array).toString()
     }
 }

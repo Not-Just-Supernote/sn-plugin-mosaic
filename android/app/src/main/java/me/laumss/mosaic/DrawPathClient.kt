@@ -25,6 +25,7 @@ object DrawPathClient {
     private const val SYNC_BACKGROUND_TRANSACTION = 6
     
     private const val ADDRESS_MODE_TRANSACTION = 10
+    private const val PRESSURE_MAPPING_TRANSACTION = 11
     
     private const val PEN_BUTTON_STYLE_TRANSACTION = 12
     private const val PEN_TYPE_GRID_LINE = 3
@@ -42,6 +43,7 @@ object DrawPathClient {
     
     const val PEN_TYPE_NEEDLE = 10
     const val PEN_TYPE_MARKER = 11
+    const val PEN_TYPE_CALLIGRAPHY = 15
     const val PEN_TYPE_BRUSH = 15
     const val PEN_TYPE_PRESSURE = 16
 
@@ -71,7 +73,7 @@ object DrawPathClient {
     private fun paletteSteps(style: PenStyle): IntArray = when (style) {
         PenStyle.MARKER -> intArrayOf(paletteTable.marker)
         PenStyle.BRUSH -> paletteTable.needle
-        else -> paletteTable.needle.copyOfRange(2, paletteTable.needle.size)
+        else -> paletteTable.needle.copyOfRange(2, paletteTable.needle.size - 2)
     }
 
     private fun nearestPaletteWidth(style: PenStyle, raw: Int): Int {
@@ -84,8 +86,21 @@ object DrawPathClient {
 
     
     fun noteCalligraphyThickness(drawPathWidth: Int): Int {
+        val mosaicSteps = paletteSteps(PenStyle.PEN)
         val steps = paletteTable.needle.copyOfRange(NOTE_CALLIGRAPHY_START, paletteTable.needle.size)
-        return steps.minByOrNull { kotlin.math.abs(it - drawPathWidth) } ?: steps[0]
+        // Older native imports stored the note's large raw tiers directly.
+        if (drawPathWidth > mosaicSteps.last()) {
+            return steps.minByOrNull { kotlin.math.abs(it - drawPathWidth) } ?: steps[0]
+        }
+        val index = mosaicSteps.indices.minByOrNull { kotlin.math.abs(mosaicSteps[it] - drawPathWidth) } ?: 0
+        return steps[index]
+    }
+
+    /** Native calligraphy tiers map back to the same Mosaic toolbar tier. */
+    fun mosaicCalligraphyThickness(noteThickness: Int): Int {
+        val steps = paletteTable.needle.copyOfRange(NOTE_CALLIGRAPHY_START, paletteTable.needle.size)
+        val index = steps.indices.minByOrNull { kotlin.math.abs(steps[it] - noteThickness) } ?: 0
+        return paletteSteps(PenStyle.PEN)[index]
     }
 
     
@@ -99,7 +114,8 @@ object DrawPathClient {
     fun liveWidthArgumentFromStdHundredths(stdWidth: Int, style: PenStyle = PenStyle.PEN): Int {
         val rawWidth = widthArgumentFromStdHundredths(stdWidth, style)
         return when (style) {
-            PenStyle.PEN -> (rawWidth * LIVE_PEN_WIDTH_SCALE).roundToInt()
+            PenStyle.PEN -> (noteCalligraphyThickness(rawWidth) * LIVE_PEN_WIDTH_SCALE).roundToInt()
+            PenStyle.FILLED_SHAPE -> noteCalligraphyThickness(rawWidth)
             PenStyle.BRUSH -> (rawWidth * BRUSH_LIVE_WIDTH_SCALE).roundToInt()
             else -> rawWidth
         }
@@ -112,17 +128,21 @@ object DrawPathClient {
     private const val LAMY_PEN_OFFSET = 45
     private const val LAMY_PEN_FACTOR_0 = -615
     private const val LAMY_PEN_FACTOR_1 = 183
+    /** Board display calibration; note tiers use the current mapping. */
     private const val LAMY_SCALE_TO_PIXELS_PEN = 0.004f
+    private const val PEN_CANVAS_WIDTH_SCALE = 0.4f
+    /** Increase the previous 0.84 board display scale by another 20%. */
+    private const val PEN_CANVAS_OUTPUT_SCALE = 1.008f
+    private const val LIVE_PEN_WIDTH_SCALE = 1.5f
     
     private const val MARKER_CANVAS_CALIBRATION = 3.6f
     
     
     
     private const val BRUSH_LIVE_WIDTH_SCALE = 1f
-    private const val BRUSH_CANVAS_WIDTH_SCALE = 3.4f
+    private const val BRUSH_CANVAS_WIDTH_SCALE = 3.6f
     private const val LAMY_MIN_X1000 = 1500
-    private const val DRAW_PATH_MIN_WIDTH = 4
-    private const val LIVE_PEN_WIDTH_SCALE = 2.1f
+    private const val DRAW_PATH_MIN_WIDTH = 2
 
     private fun lamyX1000Width(lineType: Int, pressureRaw: Int, baseWidth: Float): Int {
         
@@ -141,21 +161,48 @@ object DrawPathClient {
         val factorTerm = (logIndex * LAMY_PEN_FACTOR_1 + LAMY_PEN_FACTOR_0 * 1000) / 100
         val value = baseWidth * 296.20255f * factorTerm.toFloat() / 1000f -
             if (belowOffset) 1f else 0f
-        val rounded = value.roundToInt()
-        return rounded.coerceIn(LAMY_MIN_X1000, (baseWidth * 1000f).toInt())
+        // getLamyX1000Width uses FCVTZS here, after the integer logarithm lookup.
+        return value.toInt().coerceIn(LAMY_MIN_X1000, (baseWidth * 1000f).toInt())
     }
 
-    private fun drawPathPressureWidth(
-        drawPathWidth: Int,
-        pressure01: Float,
-    ): Float {
+    private fun calligraphyBaseWidth(drawPathWidth: Int): Float {
+        require(drawPathWidth > 0) { "drawPath width is unavailable" }
+        val nativeThickness = noteCalligraphyThickness(drawPathWidth)
+        return (nativeThickness * 0.01f).roundToInt().coerceAtLeast(1).toFloat()
+    }
+
+    /** Native Lamy pressure ratio before board display scaling or its minimum pixel width. */
+    internal fun calligraphyPressureWidthRatio(drawPathWidth: Int, pressure01: Float): Float {
+        require(pressure01.isFinite() && pressure01 in 0f..1f) {
+            "drawPath pressure sample is invalid: $pressure01"
+        }
+        val baseWidth = calligraphyBaseWidth(drawPathWidth)
         val pressureRaw = (pressure01 * ABS_PRESSURE_MAX_A5X2).roundToInt()
             .coerceIn(0, ABS_PRESSURE_MAX_A5X2)
-        
-        val baseWidth = (drawPathWidth * 0.01f).roundToInt().coerceAtLeast(1).toFloat()
-        val lamy = lamyX1000Width(LAMY_LINE_TYPE_PEN, pressureRaw, baseWidth)
-        return ((lamy * LAMY_SCALE_TO_PIXELS_PEN) * 0.5f).roundToInt()
-            .coerceAtLeast(DRAW_PATH_MIN_WIDTH).toFloat()
+        val lamyWidth = lamyX1000Width(LAMY_LINE_TYPE_PEN, pressureRaw, baseWidth)
+        val maxLamyWidth = lamyX1000Width(LAMY_LINE_TYPE_PEN, ABS_PRESSURE_MAX_A5X2, baseWidth).toFloat()
+        return (lamyWidth / maxLamyWidth).coerceIn(0f, 1f)
+    }
+
+    /** Full-pressure board width, retaining the independent board display calibration. */
+    internal fun calligraphyFullPressureWidthUnits(drawPathWidth: Int): Float {
+        val maxLamyWidth = lamyX1000Width(
+            LAMY_LINE_TYPE_PEN, ABS_PRESSURE_MAX_A5X2, calligraphyBaseWidth(drawPathWidth),
+        ).toFloat()
+        return (maxLamyWidth * LAMY_SCALE_TO_PIXELS_PEN * PEN_CANVAS_WIDTH_SCALE)
+            .roundToInt().coerceAtLeast(DRAW_PATH_MIN_WIDTH).toFloat()
+            .times(PEN_CANVAS_OUTPUT_SCALE)
+    }
+
+    private fun drawPathPressureWidth(drawPathWidth: Int, pressure01: Float): Float =
+        (calligraphyFullPressureWidthUnits(drawPathWidth) *
+            calligraphyPressureWidthRatio(drawPathWidth, pressure01))
+            .coerceAtLeast(DRAW_PATH_MIN_WIDTH * PEN_CANVAS_OUTPUT_SCALE)
+
+    // Native transaction 11 requires at least 51 samples and then a second point-list count.
+    private const val PRESSURE_CURVE_SAMPLE_COUNT = 51
+    private val identityPressureCurve = FloatArray(PRESSURE_CURVE_SAMPLE_COUNT * 2) { index ->
+        (index / 2).toFloat() / (PRESSURE_CURVE_SAMPLE_COUNT - 1)
     }
 
     fun nativePressureWidthUnits(drawPathType: Int, drawPathWidth: Int, pressure01: Float): Float {
@@ -210,8 +257,74 @@ object DrawPathClient {
 
     
     @Volatile private var writeGateClosed = false
+    private var pressureCurveBinder: IBinder? = null
+    private var pressureCurveAppName: String? = null
+    private var pressureCurveSessionActive = false
+
+    private fun sendPressureCurve(binder: IBinder, appName: String, enabled: Boolean, points: FloatArray) {
+        require(points.size >= PRESSURE_CURVE_SAMPLE_COUNT * 2 && points.size % 2 == 0)
+        require(points.all { it.isFinite() && it in 0f..1f })
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        try {
+            data.writeInterfaceToken(INTERFACE_TOKEN)
+            data.writeString(appName)
+            data.writeInt(if (enabled) 1 else 0)
+            data.writeInt(points.size / 2)
+            for (point in points) data.writeFloat(point)
+            data.writeInt(0) // Optional native control-point list; use the complete sampled curve above.
+            check(binder.transact(PRESSURE_MAPPING_TRANSACTION, data, reply, 0)) {
+                "drawPath rejected pressure mapping transaction"
+            }
+            val response = readReply(reply, "sendPressureCurve")
+            check(reply.dataAvail() >= 4 && reply.readInt() == 1) {
+                "drawPath pressure mapping acknowledgement is unavailable"
+            }
+            Log.i(TAG, "sendPressureCurve app=$appName enabled=$enabled samples=${points.size / 2} " +
+                "range=${points[1]}..${points.last()} reply=$response")
+        } finally {
+            data.recycle()
+            reply.recycle()
+        }
+    }
+
+    private fun ensureDefaultPressureCurve(binder: IBinder, appName: String, force: Boolean): Boolean {
+        if (!force && pressureCurveBinder == binder && pressureCurveAppName == appName) return true
+        pressureCurveBinder = null
+        pressureCurveAppName = null
+        if (!binder.isBinderAlive) return false
+        try {
+            // Reset on first contact too: an older Mosaic process may have left the global map enabled.
+            sendPressureCurve(binder, appName, false, identityPressureCurve)
+            pressureCurveBinder = binder
+            pressureCurveAppName = appName
+            return true
+        } catch (error: Throwable) {
+            Log.w(TAG, "restoreDefaultPressureCurve failed app=$appName", error)
+            return false // A later configuration or release retries the failed reset.
+        }
+    }
+
+    /** Call under DrawPathGate.writeLock, alongside pen configuration and release. */
+    fun restoreDefaultPressureCurve(binder: IBinder, appName: String) {
+        val leavingSession = pressureCurveSessionActive
+        pressureCurveSessionActive = false
+        ensureDefaultPressureCurve(binder, appName, force = leavingSession)
+    }
+
+    private fun configurePressureCurve(binder: IBinder, appName: String, sessionActive: Boolean) {
+        if (!sessionActive) {
+            restoreDefaultPressureCurve(binder, appName)
+            return
+        }
+        // Re-entering Mosaic resets any host pressure map; repeated pen/color updates share this reset.
+        pressureCurveSessionActive = ensureDefaultPressureCurve(
+            binder, appName, force = !pressureCurveSessionActive,
+        )
+    }
 
     fun disableAll(binder: IBinder, appName: String) {
+        restoreDefaultPressureCurve(binder, appName)
         if (writeGateClosed) {
             sendDisableAreas(binder, appName, listOf(DisableArea(0, 0, DISABLE_SIZE, DISABLE_SIZE)))
             return
@@ -236,13 +349,14 @@ object DrawPathClient {
         penWidth: Int,
         penColor: Int,
         areas: List<DisableArea>,
+        pressureCurveEnabled: Boolean = true,
     ) {
         writeGateClosed = false
         sendDisableAreas(binder, appName, listOf(DisableArea(0, 0, PRIME_SIZE, PRIME_SIZE)))
         
         
         sendDisableAreas(binder, appName, emptyList())
-        sendPenInfo(binder, appName, penType, penWidth, penColor)
+        sendPenInfo(binder, appName, penType, penWidth, penColor, pressureCurveEnabled)
         sendIdentityAddressMode(binder, appName)
         if (areas.isNotEmpty()) sendDisableAreas(binder, appName, areas)
     }
@@ -359,6 +473,7 @@ object DrawPathClient {
 
     
     fun release(binder: IBinder, appName: String) {
+        restoreDefaultPressureCurve(binder, appName)
         writeGateClosed = false
         sendDisableAreas(binder, appName, listOf(DisableArea(0, 0, PRIME_SIZE, PRIME_SIZE)))
     }
@@ -441,6 +556,7 @@ object DrawPathClient {
         type: Int,
         width: Int,
         color: Int,
+        pressureCurveEnabled: Boolean = true,
     ) {
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
@@ -460,6 +576,7 @@ object DrawPathClient {
                 "sendPenInfo app=$appName type=$type width=$width color=$color " +
                     "reply=$response",
             )
+            configurePressureCurve(binder, appName, sessionActive = pressureCurveEnabled)
         } finally {
             data.recycle()
             reply.recycle()

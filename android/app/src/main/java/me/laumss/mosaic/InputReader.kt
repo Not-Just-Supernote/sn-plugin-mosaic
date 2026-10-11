@@ -107,14 +107,15 @@ class InputReader(
         @Volatile private var penPressureMax = 0
         private const val PRESSURE_HISTORY_SIZE = 2048
         
-        private const val PRESSURE_SAMPLE_WAIT_MS = 160L
-        private const val PRESSURE_SAMPLE_MAX_AGE_MS = 160L
+        private const val PRESSURE_SAMPLE_WAIT_MS = 20L
+        private const val PRESSURE_SAMPLE_MAX_AGE_MS = 8L
         private val pressureHistory = ArrayDeque<PressureSample>(PRESSURE_HISTORY_SIZE)
         private val pressureSignal = java.lang.Object()
-        private data class PressureSample(val timeMs: Long, val pressure: Float)
+        private data class PressureSample(val timeMs: Long, val pressure: Float, val nibAngle: Float)
         
         @Volatile private var pressureClockOffsetMs = 0L
         @Volatile private var pressureClockOffsetReady = false
+        @Volatile private var penCalligraphySampleAvailable = false
         @Volatile var penRawTiltX = 0
             private set
         @Volatile var penRawTiltY = 0
@@ -127,12 +128,53 @@ class InputReader(
         
         @JvmStatic
         fun pressureForMotionEvent(event: MotionEvent): Float? {
-            return pressureAt(event.eventTime, event.actionMasked == MotionEvent.ACTION_DOWN)
+            return sampleAt(event.eventTime, event.actionMasked == MotionEvent.ACTION_DOWN)?.pressure
         }
 
         @JvmStatic
         fun pressureForHistoricalEvent(event: MotionEvent, index: Int): Float? {
-            return pressureAt(event.getHistoricalEventTime(index))
+            return sampleAt(event.getHistoricalEventTime(index))?.pressure
+        }
+
+        fun calligraphyNibAngleForMotionEvent(event: MotionEvent): Float =
+            sampleAt(event.eventTime)?.nibAngle ?: currentCalligraphyNibAngle()
+
+        private fun currentCalligraphyNibAngle(): Float {
+            // Zero tilt is a valid upright nib; availability comes from the EMR frame lifecycle.
+            if (!penCalligraphySampleAvailable) return Float.NaN
+            val display = hostDisplay ?: boardReader?.currentDisplay() ?: return Float.NaN
+            // drawPath's framebuffer keeps DEFAULT_ORITENTION=270 on 1872-wide panels.
+            // Its other panels, including A5X2, use 0; this is independent of display rotation.
+            val nativeRotatedPanel = maxOf(display.width, display.height) == 1872
+            val rawX = (if (penRawTiltX > 9000) penRawTiltX - 65536 else penRawTiltX).toDouble()
+            val rawY = (if (penRawTiltY > 9000) penRawTiltY - 65536 else penRawTiltY).toDouble()
+            val tiltX = if (nativeRotatedPanel) rawY else rawX
+            val tiltY = if (nativeRotatedPanel) -rawX else rawY
+            val leftHand = GestureSettings.readCached()?.leftHand ?: false
+            // These are transaction 3's LeftHand/RightHand defaults used by sendStylusCalibration.
+            val preferredGrip = when {
+                nativeRotatedPanel && leftHand -> 0.94f
+                nativeRotatedPanel -> 5.163925f
+                leftHand -> 3.035489f
+                else -> 0.1061033f
+            }.toDouble()
+            val fullTurn = Math.PI * 2.0
+            val azimuth = kotlin.math.atan2(tiltY, tiltX).let { if (it < 0.0) it + fullTurn else it }
+            var relative = azimuth - preferredGrip
+            if (relative > Math.PI) relative -= fullTurn
+            if (relative < -Math.PI) relative += fullTurn
+            val quarter = Math.PI / 4.0
+            val referenceQuadrant = when {
+                relative >= -quarter && relative < quarter -> Math.PI * 1.5
+                relative >= quarter && relative < quarter * 3.0 -> Math.PI
+                relative >= -quarter * 3.0 && relative < -quarter -> 0.0
+                else -> Math.PI * 0.5
+            }
+            // getCalligraphyDir locks this reference at pen-down. The type-15 offset is 25 degrees;
+            // the separate 10-degree brush-cache key never rounds this reference vector.
+            val nativeReference = referenceQuadrant + 0.43633232f.toDouble()
+            val screenReference = -nativeReference + display.rotation * Math.PI * 0.5
+            return kotlin.math.atan2(kotlin.math.sin(screenReference), kotlin.math.cos(screenReference)).toFloat()
         }
 
         @JvmStatic
@@ -153,7 +195,7 @@ class InputReader(
             Log.i(TAG, "pen pressure range min=$min max=$max")
         }
 
-        private fun pressureAt(eventTimeMs: Long, logMatch: Boolean = false): Float? {
+        private fun sampleAt(eventTimeMs: Long, logMatch: Boolean = false): PressureSample? {
             synchronized(pressureSignal) {
                 val deadline = SystemClock.uptimeMillis() + PRESSURE_SAMPLE_WAIT_MS
                 while (true) {
@@ -162,15 +204,17 @@ class InputReader(
                     
                     val match = pressureHistory.minByOrNull { abs(it.timeMs - eventTimeMs) }
                     val delta = match?.let { abs(it.timeMs - eventTimeMs) }
-                    if (match != null && delta != null && delta <= PRESSURE_SAMPLE_MAX_AGE_MS) {
+                    val remaining = deadline - SystemClock.uptimeMillis()
+                    val complete = (pressureHistory.peekLast()?.timeMs ?: Long.MIN_VALUE) >= eventTimeMs
+                    if (match != null && delta != null && delta <= PRESSURE_SAMPLE_MAX_AGE_MS &&
+                        (complete || remaining <= 0L)) {
                         if (logMatch) Log.i(
                             TAG,
                             "pressure matched eventTime=$eventTimeMs sampleTime=${match.timeMs} " +
                                 "delta=$delta pressure=${match.pressure} offset=$pressureClockOffsetMs",
                         )
-                        return match.pressure
+                        return match
                     }
-                    val remaining = deadline - SystemClock.uptimeMillis()
                     if (remaining <= 0L) {
                         Log.w(TAG, "drawPath pressure sample unavailable eventTime=$eventTimeMs " +
                             "first=${pressureHistory.peekFirst()?.timeMs} last=${pressureHistory.peekLast()?.timeMs} " +
@@ -328,6 +372,7 @@ class InputReader(
                 penPressureUpdatedAtMs = 0L
                 pressureClockOffsetMs = 0L
                 pressureClockOffsetReady = false
+                penCalligraphySampleAvailable = false
                 pressureSignal.notifyAll()
             }
             InputArbiter.onPenHover(false)
@@ -384,6 +429,7 @@ class InputReader(
         } finally {
             if (isPen) {
                 penClockReady = false
+                penCalligraphySampleAvailable = false
                 penReadyLatch.countDown()
             }
         }
@@ -602,22 +648,17 @@ class InputReader(
         if (type == EV_SYN && code == SYN_REPORT) {
             val pressure = framePressure ?: return
             val now = SystemClock.uptimeMillis()
-            val observedOffset = now - eventTimeMs
-            if (!pressureClockOffsetReady || abs(observedOffset - pressureClockOffsetMs) > 500L) {
-                pressureClockOffsetMs = observedOffset
-                pressureClockOffsetReady = true
-            } else {
-                
-                
-                pressureClockOffsetMs = (pressureClockOffsetMs * 7L + observedOffset) / 8L
-            }
-            val sampleTimeMs = eventTimeMs + pressureClockOffsetMs
+            // EVIOCSCLOCKID and MotionEvent both use MONOTONIC. Reader latency is separate from sample time.
+            pressureClockOffsetMs = 0L
+            pressureClockOffsetReady = true
+            val sampleTimeMs = eventTimeMs
             synchronized(pressureSignal) {
                 if (!running) return
                 penPressure01 = pressure
                 penPressureUpdatedAtMs = sampleTimeMs
+                penCalligraphySampleAvailable = penHover
                 if (pressureHistory.size == PRESSURE_HISTORY_SIZE) pressureHistory.removeFirst()
-                pressureHistory.addLast(PressureSample(sampleTimeMs, pressure))
+                pressureHistory.addLast(PressureSample(sampleTimeMs, pressure, currentCalligraphyNibAngle()))
                 pressureSignal.notifyAll()
             }
             if (firstPressureFrame) {
@@ -685,6 +726,7 @@ class InputReader(
 
     private fun setHover(hovering: Boolean, eventTimeMs: Long) {
         penHover = hovering
+        if (!hovering) penCalligraphySampleAvailable = false
         if (hovering) penHoverSinceMs = eventTimeMs
         if (routeToBoard) InputArbiter.onPenHover(hovering)
         updateTiltDirection()

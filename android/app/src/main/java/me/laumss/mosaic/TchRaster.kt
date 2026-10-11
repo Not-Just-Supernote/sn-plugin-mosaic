@@ -7,7 +7,8 @@ import android.graphics.Path
 
 
 object TchRaster {
-    data class Run(val path: Path, val width: Float)
+    data class Run(val path: Path, val width: Float, val filled: Boolean = false,
+        val minWidth: Float = width, val maxWidth: Float = width)
 
     fun runs(
         points: FloatArray,
@@ -15,6 +16,7 @@ object TchRaster {
         sampleScale: Float,
         drawPathType: Int,
         drawPathWidth: Int,
+        nibAngle: Float = Float.NaN,
     ): List<Run> {
         val n = points.size / 2
         if (n == 0) return emptyList()
@@ -29,6 +31,10 @@ object TchRaster {
         if (Shapes.kindOf(points, pressures) != null) {
             val shapeWidth = DrawPathClient.nativePressureWidthUnits(type, drawPathWidth, pressures[0])
             return listOf(Run(BoardEngine.buildPolylinePath(points), shapeWidth / sampleScale))
+        }
+
+        if (type == PenStyle.PEN.objType) {
+            return CalligraphyRaster.runs(points, pressures, sampleScale, drawPathWidth, nibAngle)
         }
 
         val widths = FloatArray(n) { index ->
@@ -118,7 +124,12 @@ object TchRaster {
             paint.alpha = 255
         }
         paint.shader = null
-        for (run in stroke.runs) {
+        val runs = if (widthScale != 1f && stroke.penStyle == PenStyle.PEN.objType && !stroke.isShape) {
+            CalligraphyRaster.runs(stroke.points, stroke.pressures, stroke.sampleScale,
+                stroke.drawPathWidth, stroke.nibAngle, widthScale)
+        } else stroke.runs
+        for (run in runs) {
+            paint.style = if (filledShape || run.filled) Paint.Style.FILL else oldStyle
             paint.strokeWidth = run.width * widthScale
             canvas.drawPath(run.path, paint)
         }

@@ -11,7 +11,7 @@ import java.nio.ByteOrder
 object BoardEngine {
 
     private const val TAG = "MosaicBoardEngine"
-    const val PROTOCOL_VERSION = 5
+    const val PROTOCOL_VERSION = 6
 
     private const val OP_ADD_STROKE = 1
     private const val OP_REMOVE_STROKES = 2
@@ -49,6 +49,7 @@ object BoardEngine {
         val sampleScale: Float,
         
         _requestedDrawPathWidth: Int = 0,
+        val nibAngle: Float = Float.NaN,
     ) {
         
         val penStyle: Int = PenStyle.normalizeStoredType(rawPenStyle)
@@ -71,18 +72,18 @@ object BoardEngine {
         } else null
         val isThread: Boolean get() = threadEnds != null
         val runs: List<TchRaster.Run> by lazy {
-            TchRaster.runs(points, pressures, sampleScale, penStyle, drawPathWidth)
+            TchRaster.runs(points, pressures, sampleScale, penStyle, drawPathWidth, nibAngle)
         }
 
         fun sameGeometry(other: StrokeRec): Boolean =
-            space == other.space && width == other.width && color == other.color && penStyle == other.penStyle && sampleScale == other.sampleScale && drawPathWidth == other.drawPathWidth &&
+            space == other.space && width == other.width && color == other.color && penStyle == other.penStyle && sampleScale == other.sampleScale && drawPathWidth == other.drawPathWidth && nibAngle.toBits() == other.nibAngle.toBits() &&
                 points.contentEquals(other.points) && pressures.contentEquals(other.pressures)
 
         fun withColor(c: Int): StrokeRec =
-            if (c == color) this else StrokeRec(id, space, width, c, points, pressures, penStyle, sampleScale, drawPathWidth)
+            if (c == color) this else StrokeRec(id, space, width, c, points, pressures, penStyle, sampleScale, drawPathWidth, nibAngle)
 
         fun withPenStyle(style: PenStyle): StrokeRec =
-            if (style.objType == penStyle) this else StrokeRec(id, space, width, color, points, pressures, style.objType, sampleScale, DrawPathClient.widthArgument(style, width))
+            if (style.objType == penStyle) this else StrokeRec(id, space, width, color, points, pressures, style.objType, sampleScale, DrawPathClient.widthArgument(style, width), nibAngle)
 
         
         fun translated(
@@ -112,6 +113,7 @@ object BoardEngine {
                 penStyle,
                 sampleScale,
                 drawPathWidth,
+                nibAngle,
             )
         }
 
@@ -124,7 +126,7 @@ object BoardEngine {
                 out[i + 1] = points[i + 1] + dy
                 i += 2
             }
-            return StrokeRec(id, space, width, color, out, pressures, penStyle, sampleScale, drawPathWidth)
+            return StrokeRec(id, space, width, color, out, pressures, penStyle, sampleScale, drawPathWidth, nibAngle)
         }
 
         
@@ -160,6 +162,7 @@ object BoardEngine {
                 penStyle,
                 sampleScale,
                 (drawPathWidth * widthScale).toInt().coerceAtLeast(1),
+                if (nibAngle.isFinite()) kotlin.math.atan2(kotlin.math.sin(nibAngle) * fy, kotlin.math.cos(nibAngle) * fx) else Float.NaN,
             )
         }
 
@@ -199,12 +202,13 @@ object BoardEngine {
                 penStyle,
                 sampleScale,
                 drawPathWidth,
+                if (nibAngle.isFinite()) nibAngle + radians else Float.NaN,
             )
         }
 
         
         fun withPoints(pts: FloatArray): StrokeRec =
-            StrokeRec(id, space, width, color, pts, if (pressures.size == pts.size / 2) pressures else Shapes.pressures(pts.size / 2), penStyle, sampleScale, drawPathWidth)
+            StrokeRec(id, space, width, color, pts, if (pressures.size == pts.size / 2) pressures else Shapes.pressures(pts.size / 2), penStyle, sampleScale, drawPathWidth, nibAngle)
 
         companion object {
             const val INK_BLACK = 0xFF000000.toInt()
@@ -787,7 +791,7 @@ object BoardEngine {
         var applied = false
         try {
             val version = buf.short.toInt()
-            if (version != PROTOCOL_VERSION && version != 4 && version != 3) {
+            if (version != PROTOCOL_VERSION && version != 5 && version != 4 && version != 3) {
                 Log.w(TAG, "applyOps: unsupported protocol version=$version")
                 return 0
             }
@@ -933,9 +937,8 @@ object BoardEngine {
 
     // Tight ink box for selection frames; strokeWorldBounds keeps the wide STROKE_PAD for redraw and hit tests.
     fun strokeInkBounds(rec: StrokeRec): RectF {
-        val maxPressure = (rec.pressures.maxOrNull() ?: 1f).coerceIn(0f, 1f)
         val rendered = runCatching {
-            DrawPathClient.nativePressureWidthUnits(PenStyle.normalizeStoredType(rec.penStyle), rec.drawPathWidth, maxPressure) / rec.sampleScale
+            rec.runs.maxOfOrNull { it.width } ?: rec.width
         }.getOrDefault(rec.width)
         val half = (rendered / 2f).coerceAtLeast(1f)
         val rect = RectF(rec.bounds.left - half, rec.bounds.top - half, rec.bounds.right + half, rec.bounds.bottom + half)
@@ -1114,6 +1117,7 @@ object BoardEngine {
         val penStyle = buf.short.toInt() and 0xffff
         val sampleScale = buf.float
         val drawPathWidth = if (version >= 4) buf.int else DrawPathClient.widthArgument(PenStyle.fromObjType(penStyle), width)
+        val nibAngle = if (version >= 6) buf.float.takeIf { it.isFinite() } ?: Float.NaN else Float.NaN
         val pointCount = buf.int
         require(pointCount > 0 && pointCount <= 1_000_000)
         val points = FloatArray(pointCount * 2)
@@ -1123,7 +1127,7 @@ object BoardEngine {
         }
         require(sampleScale.isFinite() && sampleScale > 0f)
         val drawPathType = PenStyle.normalizeStoredType(penStyle)
-        return StrokeRec(id, space, width, color, points, pressures, drawPathType, sampleScale, drawPathWidth)
+        return StrokeRec(id, space, width, color, points, pressures, drawPathType, sampleScale, drawPathWidth, nibAngle)
     }
 
     private fun readCard(buf: ByteBuffer): CardRec {

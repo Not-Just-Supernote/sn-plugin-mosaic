@@ -411,6 +411,9 @@ class MosaicBoardView(
         DrawPathGate.detach()
         val releaseBinder = drawPathBinder ?: DrawPathClient.getBinder()
         releaseBinder?.let { binder ->
+            synchronized(DrawPathGate.writeLock) {
+                DrawPathClient.restoreDefaultPressureCurve(binder, drawPathAppName)
+            }
             try {
                 val settings = GestureSettings.readCached() ?: GestureSettings.read(context)
                 synchronized(DrawPathGate.writeLock) {
@@ -495,12 +498,27 @@ class MosaicBoardView(
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
         Log.i(TAG, "window focus changed: hasFocus=$hasWindowFocus rotation=${display?.rotation}")
+        if (attached && !hasWindowFocus) restoreDrawPathPressureCurve()
         if (!attached || !hasWindowFocus) return
         handler.postDelayed({
             if (attached && hasWindowFocus) {
                 requestRotationReconfigure("windowFocusGained")
             }
         }, 200L)
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (!attached) return
+        if (visibility != VISIBLE) restoreDrawPathPressureCurve()
+        else if (hasWindowFocus()) scheduleConfigure("window-visible")
+    }
+
+    private fun restoreDrawPathPressureCurve() {
+        val binder = drawPathBinder ?: return
+        synchronized(DrawPathGate.writeLock) {
+            DrawPathClient.restoreDefaultPressureCurve(binder, drawPathAppName)
+        }
     }
 
     private fun publishHostRotation() {
@@ -521,6 +539,7 @@ class MosaicBoardView(
 
     
     private fun drawPathPenType(): Int = when (penStyle) {
+        PenStyle.PEN -> DrawPathClient.PEN_TYPE_CALLIGRAPHY
         PenStyle.FILLED_SHAPE -> DrawPathClient.PEN_TYPE_PRESSURE
         PenStyle.BRUSH -> DrawPathClient.PEN_TYPE_NEEDLE
         else -> penStyle.objType
@@ -843,7 +862,8 @@ class MosaicBoardView(
         val binder = drawPathBinder ?: return
         try {
             synchronized(DrawPathGate.writeLock) {
-                DrawPathClient.sendPenInfo(binder, drawPathAppName, drawPathPenType(), drawPathPenWidth(), color)
+                DrawPathClient.sendPenInfo(binder, drawPathAppName, drawPathPenType(), drawPathPenWidth(), color,
+                    pressureCurveEnabled = hasWindowFocus() && isShown)
                 DrawPathClient.sendPenButtonOverride(binder, drawPathAppName, drawPathPenType(), drawPathPenWidth(), color)
             }
             penConfigDirty = false
@@ -1048,6 +1068,7 @@ class MosaicBoardView(
                     penWidth = drawPathPenWidth(),
                     penColor = drawPathPenColor,
                     areas = drawPathDisableAreas(),
+                    pressureCurveEnabled = hasWindowFocus() && isShown,
                 )
                 DrawPathClient.sendStylusCalibration(binder, drawPathAppName, stylusCalibX, stylusCalibY, stylusLeftHand)
             } else {

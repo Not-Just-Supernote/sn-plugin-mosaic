@@ -456,6 +456,7 @@ class BoardInteractionController(
         ) : PenSession() {
             val points = FloatArrayList()
             val pressures = FloatArrayList()
+            var nibAngle = Float.NaN
             
             var frameLastMeaningfulX = 0f
             var frameLastMeaningfulY = 0f
@@ -1340,6 +1341,7 @@ class BoardInteractionController(
             cardY = card?.y ?: 0f,
         )
         val downPressure = InputReader.pressureForMotionEvent(e)
+        if (penStyle == PenStyle.PEN) session.nibAngle = InputReader.calligraphyNibAngleForMotionEvent(e)
         if (downPressure != null) appendWritePoint(session, wx, wy, downPressure)
         else Log.i(TAG_PEN, "DOWN write waiting for drawPath pressure source")
         session.raw(e.x, e.y)
@@ -1525,6 +1527,7 @@ class BoardInteractionController(
             penStyle.objType,
             density * BoardEngine.scale,
             DrawPathClient.widthArgument(penStyle, penWidth),
+            s.nibAngle,
         )
         val ink = synchronized(BoardEngine.lock) { InkBackdrop.resolve(draft) }
         val rec = draft.withColor(ink)
@@ -1536,19 +1539,14 @@ class BoardInteractionController(
         val committedDrawPathWidth = DrawPathClient.widthArgument(penStyle, penWidth)
         var minRasterWidth = Float.POSITIVE_INFINITY
         var maxRasterWidth = 0f
-        for (pressure in committedPressures) {
-            val width = DrawPathClient.nativePressureWidthUnits(
-                penStyle.objType,
-                committedDrawPathWidth,
-                pressure,
-            ) / (density * BoardEngine.scale).coerceAtLeast(0.001f)
-            minRasterWidth = minOf(minRasterWidth, width)
-            maxRasterWidth = maxOf(maxRasterWidth, width)
+        for (run in rec.runs) {
+            minRasterWidth = minOf(minRasterWidth, run.minWidth)
+            maxRasterWidth = maxOf(maxRasterWidth, run.maxWidth)
         }
         if (!minRasterWidth.isFinite()) minRasterWidth = 0f
         val screenMin = minRasterWidth * density * BoardEngine.scale
         val screenMax = maxRasterWidth * density * BoardEngine.scale
-        Log.i(TAG_PEN, "UP committed stroke ${s.id} style=${penStyle.name} stdWidth=$penWidth drawPathWidth=$committedDrawPathWidth pressureRange=$minPressure..$maxPressure rasterWorldRange=$minRasterWidth..$maxRasterWidth rasterScreenPxRange=$screenMin..$screenMax points=${s.points.size / 2} space=${s.space} ink=${Integer.toHexString(ink)}")
+        Log.i(TAG_PEN, "UP committed stroke ${s.id} style=${penStyle.name} stdWidth=$penWidth drawPathWidth=$committedDrawPathWidth pressureRange=$minPressure..$maxPressure rasterWorldRange=$minRasterWidth..$maxRasterWidth rasterScreenPxRange=$screenMin..$screenMax nibAngle=${rec.nibAngle} points=${s.points.size / 2} space=${s.space} ink=${Integer.toHexString(ink)}")
     }
 
     
@@ -2333,6 +2331,8 @@ class BoardInteractionController(
                     card?.y ?: 0f,
                     rec.drawPathWidth,
                     rec.color,
+                    rec.sampleScale,
+                    rec.nibAngle,
                 )
             }
             for (cardId in sel.cardIds) {
@@ -2347,6 +2347,8 @@ class BoardInteractionController(
                         card.y,
                         rec.drawPathWidth,
                         rec.color,
+                        rec.sampleScale,
+                        rec.nibAngle,
                     )
                 }
             }
@@ -2356,6 +2358,7 @@ class BoardInteractionController(
             target = file,
             strokes = out.values.toList(),
             density = density * if (surface.showsBoardChrome) 1f else notePageScale,
+            screenShortPx = host.resources.displayMetrics.let { minOf(it.widthPixels, it.heightPixels).toFloat() },
             isCurrent = { clipboardExportGeneration.get() == sequence },
         ) { result ->
             result.onSuccess { count ->
@@ -2378,7 +2381,8 @@ class BoardInteractionController(
         val d = density
         
         
-        val worldScale = 1f / (d * BoardEngine.scale)
+        // Clipboard dimensions use the fixed board scale; note pages have their intrinsic view scale.
+        val worldScale = 1f / (d * if (surface.showsBoardChrome) 1f else notePageScale)
         
         val metrics = host.resources.displayMetrics
         val transform = ClipboardStrokeIo.PasteTransform(
@@ -2399,6 +2403,7 @@ class BoardInteractionController(
                     BoardEngine.StrokeRec(
                         UUID.randomUUID().toString(), "canvas", stroke.width, stroke.color,
                         stroke.points, stroke.pressures, stroke.penStyle, stroke.sampleScale, stroke.drawPathWidth,
+                        stroke.nibAngle,
                     )
                 }
                 

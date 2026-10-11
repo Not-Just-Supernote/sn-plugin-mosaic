@@ -11,7 +11,7 @@ import { notePathFor } from './noteStore';
 
 
 
-const PROTOCOL_VERSION = 5;
+const PROTOCOL_VERSION = 6;
 
 const OP_ADD_STROKE = 1;
 const OP_REMOVE_STROKES = 2;
@@ -170,6 +170,7 @@ function writeStroke(writer: OpsWriter, stroke: InkStroke) {
   writer.u16(stroke.pen);
   writer.f32(stroke.sampleScale);
   writer.u32(stroke.drawPathWidth ?? Math.round(Math.max(0.5, Math.min(40, stroke.width)) * 100));
+  writer.f32(typeof stroke.nibAngle === 'number' && Number.isFinite(stroke.nibAngle) ? stroke.nibAngle : NaN);
   const points = stroke.points;
   
   

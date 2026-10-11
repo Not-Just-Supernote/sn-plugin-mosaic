@@ -80,6 +80,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 putInt("pen", rec.penStyle)
                 putInt("drawPathWidth", rec.drawPathWidth)
                 putDouble("sampleScale", rec.sampleScale.toDouble())
+                if (rec.nibAngle.isFinite()) putDouble("nibAngle", rec.nibAngle.toDouble())
                 putString("points", packPoints(rec.points, rec.pressures))
                 
                 
@@ -109,6 +110,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
         val pens = Arguments.createArray()
         val drawPathWidths = Arguments.createArray()
         val sampleScales = Arguments.createArray()
+        val nibAngles = Arguments.createArray()
         val bounds = Arguments.createArray()
         val pointOffsets = Arguments.createArray()
         val pointCounts = Arguments.createArray()
@@ -121,6 +123,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
             pens.pushInt(rec.penStyle)
             drawPathWidths.pushInt(rec.drawPathWidth)
             sampleScales.pushDouble(rec.sampleScale.toDouble())
+            if (rec.nibAngle.isFinite()) nibAngles.pushDouble(rec.nibAngle.toDouble()) else nibAngles.pushNull()
             bounds.pushDouble(rec.bounds.left.toDouble())
             bounds.pushDouble(rec.bounds.top.toDouble())
             bounds.pushDouble(rec.bounds.right.toDouble())
@@ -147,6 +150,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 putArray("pens", pens)
                 putArray("drawPathWidths", drawPathWidths)
                 putArray("sampleScales", sampleScales)
+                putArray("nibAngles", nibAngles)
                 putArray("bounds", bounds)
                 putArray("pointOffsets", pointOffsets)
                 putArray("pointCounts", pointCounts)
