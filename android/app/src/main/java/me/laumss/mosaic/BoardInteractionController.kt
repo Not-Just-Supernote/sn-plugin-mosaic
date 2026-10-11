@@ -71,6 +71,11 @@ class BoardInteractionController(
         const val CARD_FRAME_PREVIEW_CANCEL_MOVE_DP = 8f
         const val CARD_FRAME_CAPTURE_INK_RATIO = 0.70f
 
+        // A card stroke that starts this soon after the previous stroke on the same card is handwriting, not a card gesture.
+        const val CARD_CONTINUOUS_WRITE_MS = 1500L
+        // Room left around ink when a card grows to take in a stroke written past its edge.
+        const val CARD_GROW_PAD = 16f
+
         
         
         
@@ -445,6 +450,8 @@ class BoardInteractionController(
     private var penLastY = 0f
     
     private var sliderTwoDown = false
+    private var lastCardWriteId: String? = null
+    private var lastCardWriteAt = 0L
 
     private sealed class PenSession {
         class Write(
@@ -464,6 +471,7 @@ class BoardInteractionController(
             var frameRecognizedX = 0f
             var frameRecognizedY = 0f
             var frameEvaluations = 0
+            var continuousWrite = false
             
             var convertFromIndex = -1
             
@@ -1349,6 +1357,8 @@ class BoardInteractionController(
         session.raw(e.x, e.y)
         session.frameLastMeaningfulX = wx
         session.frameLastMeaningfulY = wy
+        session.continuousWrite = card != null && card.id == lastCardWriteId &&
+            SystemClock.uptimeMillis() - lastCardWriteAt < CARD_CONTINUOUS_WRITE_MS
         
         if (sliderTwoDown) session.convertFromIndex = 0
         penSession = session
@@ -1533,7 +1543,11 @@ class BoardInteractionController(
         )
         val ink = synchronized(BoardEngine.lock) { InkBackdrop.resolve(draft) }
         val rec = draft.withColor(ink)
-        host.commitPlainStroke { apply(BoardHistory.Change("draw").stroke(null, rec), record = true) }
+        val change = (if (s.continuousWrite) growCardForStroke(rec) else null)
+            ?: BoardHistory.Change("draw").stroke(null, rec)
+        host.commitPlainStroke { apply(change, record = true) }
+        lastCardWriteId = s.cardId
+        lastCardWriteAt = SystemClock.uptimeMillis()
         if (!marker && (ink != INK_BLACK) != trailWhite) Log.i(TAG_PEN, "[MosaicTrail] color differs from hardware trail committedWhite=${ink != INK_BLACK} trailWhite=$trailWhite stroke=${s.id}")
         val committedPressures = s.pressures.toArray()
         val minPressure = committedPressures.minOrNull() ?: 0f
@@ -1660,9 +1674,42 @@ class BoardInteractionController(
 
     
 
+    // Grows a text card to take in a stroke written past its edge; the card keeps its strokes in place on the board.
+    private fun growCardForStroke(rec: BoardEngine.StrokeRec): BoardHistory.Change? = synchronized(BoardEngine.lock) {
+        val cardId = rec.cardId ?: return null
+        val card = BoardEngine.cards[cardId] ?: return null
+        if (card.kind != "text") return null
+        val old = card.rect(RectF())
+        val ink = RectF(rec.bounds).apply { offset(card.x, card.y) }
+        if (old.contains(ink)) return null
+        val grown = RectF(old)
+        if (ink.left < old.left) grown.left = ink.left - CARD_GROW_PAD
+        if (ink.top < old.top) grown.top = ink.top - CARD_GROW_PAD
+        if (ink.right > old.right) grown.right = ink.right + CARD_GROW_PAD
+        if (ink.bottom > old.bottom) grown.bottom = ink.bottom + CARD_GROW_PAD
+        val r = RectF()
+        for (other in BoardEngine.cards.values) {
+            if (other.id != cardId && RectF.intersects(grown, other.rect(r)) && !RectF.intersects(old, r)) {
+                Log.i(TAG_PEN, "card grow skipped card=$cardId blocked-by=${other.id}")
+                return null
+            }
+        }
+        val next = card.withRect(grown)
+        val change = BoardHistory.Change("draw-grow").card(card, next)
+        if (next.x != card.x || next.y != card.y) {
+            BoardEngine.cardStrokes[cardId]?.forEach { change.stroke(it, it.translated(0f, 0f, card, next)) }
+            change.stroke(null, rec.translated(0f, 0f, card, next))
+        } else {
+            change.stroke(null, rec)
+        }
+        Log.i(TAG_PEN, "card grow card=$cardId $old -> $grown")
+        change
+    }
+
     private fun completeCardStroke(s: PenSession.Write): Boolean {
         val sourceId = s.cardId ?: return false
         if (s.points.size < 4) return false
+        if (s.continuousWrite) return false
         val source = BoardEngine.cards[sourceId] ?: return false
         val fx = s.points[0]; val fy = s.points[1]
         val lx = s.points[s.points.size - 2]; val ly = s.points[s.points.size - 1]
@@ -1671,6 +1718,13 @@ class BoardInteractionController(
         val endY = source.y + ly
         val target = BoardGeometry.topCardAt(BoardEngine.cardsByZ, endX, endY)
         if (target?.id == sourceId) return false
+        // Ending on this card's own bridge, or on a card it already links to, is writing across the link.
+        if (target == null) {
+            val bridge = BoardEngine.connectionAt(endX, endY)
+            if (bridge != null && bridge.touches(sourceId)) return false
+        } else if (BoardEngine.connectionBetween(sourceId, target.id) != null || BoardEngine.threadBetween(sourceId, target.id) != null) {
+            return false
+        }
         
         discardWriteTrail(s, if (target != null) "card-connection" else "card-from-stroke")
         if (target != null) {
@@ -1680,7 +1734,6 @@ class BoardInteractionController(
                 Log.i(TAG_PEN, "card thread rejected source=$sourceId target=${target.id} reason=color-mismatch")
                 return true
             }
-            if (BoardEngine.threadBetween(sourceId, target.id) != null) return true
             val thread = BoardEngine.threadStroke(newId("stroke-"), source, target)
             if (thread == null) {
                 Log.i(TAG_PEN, "card thread rejected source=$sourceId target=${target.id} reason=overlap")
