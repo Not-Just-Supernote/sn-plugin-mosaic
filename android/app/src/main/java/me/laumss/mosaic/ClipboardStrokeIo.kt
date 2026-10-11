@@ -176,6 +176,15 @@ class ClipboardStrokeIo {
             .getOrDefault(PenStyle.PEN.objType)
     }
 
+    /** Mosaic exports carry nibAngle; note strokes carry their pen-down tilt from Element.angles. */
+    private fun pasteNibAngle(obj: JSONObject): Float {
+        val nib = obj.optDouble("nibAngle", Double.NaN).toFloat()
+        if (nib.isFinite()) return nib
+        val tilt = obj.optJSONArray("tilt") ?: return Float.NaN
+        if (tilt.length() < 2) return Float.NaN
+        return InputReader.calligraphyNibAngleForTilt(tilt.getInt(0), tilt.getInt(1))
+    }
+
     private fun parsePaste(text: String, transform: PasteTransform): PasteBatch? {
         val root = JSONObject(text)
         val array = root.optJSONArray("strokes") ?: return null
@@ -274,7 +283,7 @@ class ClipboardStrokeIo {
                         obj.optInt("penColor", 0) == NOTE_COLOR_WHITE,
                     obj.optDouble("sampleScale", 1.0).toFloat()
                         .takeIf { it.isFinite() && it > 0f } ?: 1f,
-                    obj.optDouble("nibAngle", Double.NaN).toFloat().takeIf { it.isFinite() } ?: Float.NaN,
+                    pasteNibAngle(obj),
                 ),
             )
         }

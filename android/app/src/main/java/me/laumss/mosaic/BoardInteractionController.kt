@@ -1341,7 +1341,9 @@ class BoardInteractionController(
             cardY = card?.y ?: 0f,
         )
         val downPressure = InputReader.pressureForMotionEvent(e)
-        if (penStyle == PenStyle.PEN) session.nibAngle = InputReader.calligraphyNibAngleForMotionEvent(e)
+        // Every stroke keeps its pen-down nib so a later palette restyle to the calligraphy pen
+        // renders with the same directional nib; only the PEN raster reads it.
+        session.nibAngle = InputReader.calligraphyNibAngleForMotionEvent(e)
         if (downPressure != null) appendWritePoint(session, wx, wy, downPressure)
         else Log.i(TAG_PEN, "DOWN write waiting for drawPath pressure source")
         session.raw(e.x, e.y)
@@ -2304,7 +2306,9 @@ class BoardInteractionController(
         val pasteGeneration = clipboardPasteGeneration.incrementAndGet()
         clipboardPasteTask?.cancel(true)
         clipboardPasteTask = null
-        clipboardExportGeneration.incrementAndGet()
+        // Drop the old surface's selection file too; only bumping the generation would also cancel a pending
+        // delete and leave a stale clip_lasso.json that makes Notipal save instead of paste.
+        exportLassoStrokes(null)
         Log.i(TAG_LASSO, "clipboard work invalidated reason=$reason generation=$pasteGeneration")
     }
 

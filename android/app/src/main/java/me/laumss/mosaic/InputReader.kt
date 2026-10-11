@@ -142,12 +142,20 @@ class InputReader(
         private fun currentCalligraphyNibAngle(): Float {
             // Zero tilt is a valid upright nib; availability comes from the EMR frame lifecycle.
             if (!penCalligraphySampleAvailable) return Float.NaN
+            return calligraphyNibAngleForTilt(penRawTiltX, penRawTiltY)
+        }
+
+        /**
+         * Pen-down tilt → screen-space calligraphy nib reference. Live input passes the EMR frame
+         * tilt; pasted note strokes pass the first pair of their Element.angles.
+         */
+        fun calligraphyNibAngleForTilt(rawTiltX: Int, rawTiltY: Int): Float {
             val display = hostDisplay ?: boardReader?.currentDisplay() ?: return Float.NaN
             // drawPath's framebuffer keeps DEFAULT_ORITENTION=270 on 1872-wide panels.
             // Its other panels, including A5X2, use 0; this is independent of display rotation.
             val nativeRotatedPanel = maxOf(display.width, display.height) == 1872
-            val rawX = (if (penRawTiltX > 9000) penRawTiltX - 65536 else penRawTiltX).toDouble()
-            val rawY = (if (penRawTiltY > 9000) penRawTiltY - 65536 else penRawTiltY).toDouble()
+            val rawX = (if (rawTiltX > 9000) rawTiltX - 65536 else rawTiltX).toDouble()
+            val rawY = (if (rawTiltY > 9000) rawTiltY - 65536 else rawTiltY).toDouble()
             val tiltX = if (nativeRotatedPanel) rawY else rawX
             val tiltY = if (nativeRotatedPanel) -rawX else rawY
             val leftHand = GestureSettings.readCached()?.leftHand ?: false
