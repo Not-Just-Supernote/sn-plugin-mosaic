@@ -18,7 +18,8 @@ class ClipboardStrokeIo {
         
         private const val NOTE_COLOR_WHITE = 0xFE
         
-        private const val NOTE_PEN_TYPE_CALLIGRAPHY = 14
+        /** SDK 185 Stroke.penType for calligraphy (same as Notipal). */
+        private const val NOTE_PEN_TYPE_CALLIGRAPHY = 15
         // Blank space left between stacked pages before the note is compacted.
         private const val NOTE_PAGE_GAP = 48f
     }
