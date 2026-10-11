@@ -9,3 +9,4 @@ android/local.properties
 .env.*
 !.env.example
 React/
+.code/
