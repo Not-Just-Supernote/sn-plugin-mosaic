@@ -191,6 +191,8 @@ class BoardInteractionController(
     private var noteEntryCard: BoardEngine.CardRec? = null
     
     private var noteHeaderHoverBlocked = false
+    // Bottom of the zoomed-out note page in page units; infinite on the board.
+    private var notePageBottom = Float.POSITIVE_INFINITY
     
     private val viewportTmp = FloatArray(2)
     private val noteScrollResetTask = Runnable {
@@ -273,6 +275,7 @@ class BoardInteractionController(
         BoardEngine.replaceScene(scene)
         chrome.setNoteMode(!next.showsBoardChrome)
         content.setNoteHeader(if (next.showsBoardChrome) null else currentNoteHeader, currentNoteHeaderPlaceholder, notePageScale)
+        syncNotePageFrame()
         if (next.showsBoardChrome) setNoteHeaderHoverBlocked(false)
         syncToolMirrors(arbiter.effective(), "surface:${next.name}")
         
@@ -907,6 +910,7 @@ class BoardInteractionController(
         }
         if (record) history.push(change)
         surface.onSceneMutated()
+        syncNotePageFrame()
         regionsDirty = true
         scheduleChromeUpdate()
         
@@ -3926,7 +3930,16 @@ class BoardInteractionController(
     private fun noteOffPageHit(x: Float, y: Float): Boolean {
         if (surface.showsBoardChrome) return false
         val wx = worldX(x)
-        return wx < 0f || wx > ScrollingDocument.WIDTH || worldY(y) < -currentNoteHeaderHeight
+        val wy = worldY(y)
+        return wx < 0f || wx > ScrollingDocument.WIDTH || wy < -currentNoteHeaderHeight ||
+            (wy > notePageBottom && (surface as? NoteSurface)?.zoomedOut(BoardEngine.scale) == true)
+    }
+
+    // Zoomed out, the note page ends a little below the ink; the content view frames it there and the pen stops at it.
+    private fun syncNotePageFrame() {
+        val note = surface as? NoteSurface
+        notePageBottom = note?.zoomedOutPageBottom() ?: Float.POSITIVE_INFINITY
+        content.setNotePageFrame(if (note != null) notePageScale else 0f, notePageBottom)
     }
 
     private fun setNoteHeaderHoverBlocked(blocked: Boolean) {

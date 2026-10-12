@@ -463,6 +463,23 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         style = Paint.Style.FILL
         color = Color.BLACK
     }
+    private val pageOutsidePaint = Paint().apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
+    }
+
+    // Scale at which the note page fills the width (0 off a note) and where the page ends while zoomed out.
+    @Volatile
+    private var notePageFit = 0f
+    @Volatile
+    private var notePageBottom = Float.POSITIVE_INFINITY
+
+    fun setNotePageFrame(fitScale: Float, bottom: Float) {
+        if (notePageFit == fitScale && notePageBottom == bottom) return
+        notePageFit = fitScale
+        notePageBottom = bottom
+        if (!deferRefresh) postInvalidateOnAnimation()
+    }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
@@ -974,8 +991,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         if (!wait) postInvalidateOnAnimation()
     }
 
-    // A note page zoomed out sits on white with a black frame on its top and sides; the frame lies just outside
-    // the page, so at 100% it falls off screen.
+    // A note page sits on white with a black frame on its top and sides; the frame lies just outside the page,
+    // so at 100% it falls off screen. Zoomed out, the page also ends below the ink with a bottom frame.
     private fun drawPageBorder(canvas: Canvas, panXPx: Float, panYPx: Float, scalePx: Float, densityValue: Float) {
         val pageWidth = templatePageWidth
         if (pageWidth <= 0f) return
@@ -983,11 +1000,17 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val left = panXPx
         val right = panXPx + pageWidth * scalePx
         val top = panYPx - pageNoteHeaderHeight * scalePx
-        val bottom = height.toFloat()
-        if (top >= bottom) return
+        if (top >= height) return
+        val fit = notePageFit
+        val zoomedOut = fit > 0f && scalePx / densityValue < fit * (1f - 1e-4f)
+        val bottom = if (zoomedOut) panYPx + notePageBottom * scalePx else height.toFloat()
         canvas.drawRect(left - bw, top - bw, left, bottom, pageBorderPaint)
         canvas.drawRect(right, top - bw, right + bw, bottom, pageBorderPaint)
         canvas.drawRect(left, top - bw, right, top, pageBorderPaint)
+        if (!zoomedOut || bottom >= height) return
+        canvas.drawRect(left - bw, bottom, right + bw, bottom + bw, pageBorderPaint)
+        // Below the frame is off the page; blank it so the paper pattern stops at the frame.
+        if (!translucentFogActive()) canvas.drawRect(0f, bottom + bw, width.toFloat(), height.toFloat(), pageOutsidePaint)
     }
 
     private fun drawSelection(canvas: Canvas, panXPx: Float, panYPx: Float, scalePx: Float) {

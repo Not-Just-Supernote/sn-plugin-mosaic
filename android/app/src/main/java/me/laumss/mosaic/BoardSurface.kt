@@ -102,10 +102,22 @@ class NoteSurface(
     companion object {
         
         private const val NOTE_OVERSCROLL_SCREENS = 6f
-        // Pinch zoom inside a note runs from 50% to 150% of fit-width (100%).
-        const val MIN_ZOOM = 0.5f
+        // Pinch zoom inside a note runs from 70% to 150% of fit-width (100%).
+        const val MIN_ZOOM = 0.7f
         const val MAX_ZOOM = 1.5f
+        // Zoomed out, the page ends this far below the ink, as a share of the ink height, and is framed there.
+        private const val ZOOMED_OUT_ROOM = 0.3f
+        // White left under the bottom frame when scrolled to the end.
+        private const val ZOOMED_OUT_BOTTOM_GAP_DP = 24f
         private const val FIT_EPS = 1e-4f
+    }
+
+    fun zoomedOut(scale: Float): Boolean = scale < fitScale() * (1f - FIT_EPS)
+
+    // Bottom of the zoomed-out page in page units; never shorter than one screen at 100%.
+    fun zoomedOutPageBottom(): Float {
+        val contentH = notes.document?.contentHeight ?: 0f
+        return maxOf(contentH * (1f + ZOOMED_OUT_ROOM), viewportHeightDp() / fitScale())
     }
 
     override fun constrainScale(next: Float, start: Float): Float {
@@ -126,6 +138,11 @@ class NoteSurface(
         val viewportH = viewportHeightDp()
         val contentH = notes.document?.contentHeight ?: viewportH
         val maxPan = topInsetDp()
+        // Zoomed out, the page has an end: scrolling stops once its bottom frame is in view.
+        if (zoomedOut(scale)) {
+            val minPan = minOf(viewportH - ZOOMED_OUT_BOTTOM_GAP_DP - zoomedOutPageBottom() * scale, maxPan)
+            return value.coerceIn(minPan, maxPan)
+        }
         
         val naturalMin = minOf(viewportH - contentH * scale, maxPan)
         
