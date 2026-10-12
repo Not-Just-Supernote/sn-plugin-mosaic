@@ -578,6 +578,14 @@ class MosaicBoardView(
         }
     }
 
+    override fun onInklingOverlayDragChanged(active: Boolean) {
+        if (!attached) return
+        handler.post {
+            if (!attached) return@post
+            controller.setInklingOverlayDrag(active, "inkling")
+        }
+    }
+
     override fun onInklingCloseRequested() {
         if (!attached) return
         handler.post {

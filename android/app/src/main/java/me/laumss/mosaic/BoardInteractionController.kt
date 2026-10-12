@@ -111,6 +111,9 @@ class BoardInteractionController(
         private const val EINK_OWNER = "gesture"
         private const val NOTE_SCROLL_EINK_OWNER = "note-scroll"
         private const val NOTE_SCROLL_SETTLE_MS = 400L
+        private const val INKLING_DRAG_EINK_OWNER = "inkling-drag"
+        // 拖动结束的广播丢失时（Notipal 被杀等）也要退出拖动显示。
+        private const val INKLING_DRAG_MAX_MS = 15_000L
         
         const val GESTURE_SETTLE_MS = 600L
 
@@ -194,6 +197,53 @@ class BoardInteractionController(
     private fun resetNoteScrollMode() {
         handler.removeCallbacks(noteScrollResetTask)
         MosaicEinkRefreshModule.resetNative(NOTE_SCROLL_EINK_OWNER)
+    }
+
+    // ── Notipal 浮窗拖动 ──
+    // 与双指平移一致：白板上走 PAN_ZOOM 同款显示（A2 + 卡片临时反色 + flat），
+    // 笔记卡片里走 note-scroll 刷新模式；松手后按各自的 settle 恢复。
+
+    private var inklingDragActive = false
+    private var inklingDragOnBoard = false
+    private var inklingDragNoteModeHeld = false
+    private val inklingDragTimeoutTask = Runnable { setInklingOverlayDrag(false, "timeout") }
+    private val inklingDragNoteResetTask = Runnable {
+        inklingDragNoteModeHeld = false
+        MosaicEinkRefreshModule.resetNative(INKLING_DRAG_EINK_OWNER)
+    }
+
+    fun setInklingOverlayDrag(active: Boolean, reason: String) {
+        handler.removeCallbacks(inklingDragTimeoutTask)
+        if (active) handler.postDelayed(inklingDragTimeoutTask, INKLING_DRAG_MAX_MS)
+        if (active == inklingDragActive) return
+        inklingDragActive = active
+        if (active) {
+            inklingDragOnBoard = surface.showsBoardChrome
+            if (inklingDragOnBoard) {
+                presentation.acquire(BoardPresentation.Reason.INKLING_DRAG)
+            } else {
+                handler.removeCallbacks(inklingDragNoteResetTask)
+                inklingDragNoteModeHeld = true
+                MosaicEinkRefreshModule.applyNative(MosaicEinkRefreshModule.MODE_NOTE_SCROLL, INKLING_DRAG_EINK_OWNER)
+            }
+        } else if (inklingDragOnBoard) {
+            presentation.release(BoardPresentation.Reason.INKLING_DRAG)
+        } else {
+            handler.removeCallbacks(inklingDragNoteResetTask)
+            handler.postDelayed(inklingDragNoteResetTask, NOTE_SCROLL_SETTLE_MS)
+        }
+        Log.i(TAG, "inkling overlay drag active=$active board=$inklingDragOnBoard reason=$reason")
+    }
+
+    private fun resetInklingOverlayDrag() {
+        handler.removeCallbacks(inklingDragTimeoutTask)
+        handler.removeCallbacks(inklingDragNoteResetTask)
+        if (inklingDragNoteModeHeld) {
+            inklingDragNoteModeHeld = false
+            MosaicEinkRefreshModule.resetNative(INKLING_DRAG_EINK_OWNER)
+        }
+        inklingDragActive = false
+        inklingDragOnBoard = false
     }
 
     fun setNotesDirectory(path: String) {
@@ -708,6 +758,7 @@ class BoardInteractionController(
         content.setGestureThrottle(false)
         overlay.clearAll()
         content.clearSettleWaiters()
+        resetInklingOverlayDrag()
         presentation.reset("detach")
         handler.removeCallbacksAndMessages(null)
     }

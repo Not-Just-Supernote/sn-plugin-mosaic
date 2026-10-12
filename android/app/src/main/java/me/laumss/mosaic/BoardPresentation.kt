@@ -17,6 +17,9 @@ class BoardPresentation(
         
         
         PAN_ZOOM(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true),
+
+        // Notipal 浮窗在白板上被拖动：与双指平移相同的显示，被浮窗让出的区域按 A2 快刷。
+        INKLING_DRAG(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true),
         
         TRANSFORM(MosaicEinkRefreshModule.MODE_DEFAULT, flat = true, suspendFog = false),
         

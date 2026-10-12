@@ -21,6 +21,9 @@ object InklingLink {
 
     
     const val ACTION_OVERLAY_RECTS = "me.laumss.mosaic.INKLING_OVERLAY_RECTS"
+
+    /** Notipal 浮窗拖动开始 / 结束，extra `active`。 */
+    const val ACTION_OVERLAY_DRAG = "me.laumss.mosaic.INKLING_OVERLAY_DRAG"
     
     
     const val ACTION_REQUEST = "me.laumss.mosaic.INKLING_REQUEST"
@@ -61,6 +64,9 @@ object InklingLink {
 
         
         fun onInklingSurfaceChanged(surface: String, noteRef: String?)
+
+        /** Notipal 浮窗拖动开始 / 结束。 */
+        fun onInklingOverlayDragChanged(active: Boolean)
     }
 
     @Volatile private var toolbarRect: Rect? = null
@@ -84,6 +90,7 @@ object InklingLink {
                 when (intent?.action) {
                     ACTION_TOOLBAR_RECT -> onToolbarRect(intent)
                     ACTION_OVERLAY_RECTS -> onOverlayRects(intent)
+                    ACTION_OVERLAY_DRAG -> onOverlayDrag(intent)
                     ACTION_REQUEST -> onRequest(intent)
                 }
             }
@@ -91,6 +98,7 @@ object InklingLink {
         val filter = IntentFilter().apply {
             addAction(ACTION_TOOLBAR_RECT)
             addAction(ACTION_OVERLAY_RECTS)
+            addAction(ACTION_OVERLAY_DRAG)
             addAction(ACTION_REQUEST)
         }
         try {
@@ -225,6 +233,12 @@ object InklingLink {
         Log.i(TAG, "overlay rects=$next")
         
         host?.onInklingToolbarRectChanged()
+    }
+
+    private fun onOverlayDrag(intent: Intent) {
+        val active = intent.getBooleanExtra("active", false)
+        Log.i(TAG, "overlay drag active=$active")
+        host?.onInklingOverlayDragChanged(active)
     }
 
     private fun onRequest(intent: Intent) {
