@@ -204,7 +204,7 @@ class BoardInteractionController(
 
     // ── Notipal 浮窗拖动 ──
     // 与双指平移一致：白板上走 PAN_ZOOM 同款显示（A2 + 卡片临时反色 + flat），
-    // 笔记卡片里走 note-scroll 刷新模式；松手后按各自的 settle 恢复。
+    // 笔记卡片里只切 A2 刷新、不改卡片显示；松手后按各自的 settle 恢复。
 
     private var inklingDragActive = false
     private var inklingDragOnBoard = false
@@ -227,7 +227,7 @@ class BoardInteractionController(
             } else {
                 handler.removeCallbacks(inklingDragNoteResetTask)
                 inklingDragNoteModeHeld = true
-                MosaicEinkRefreshModule.applyNative(MosaicEinkRefreshModule.MODE_NOTE_SCROLL, INKLING_DRAG_EINK_OWNER)
+                MosaicEinkRefreshModule.applyNative(MosaicEinkRefreshModule.MODE_A2, INKLING_DRAG_EINK_OWNER)
             }
         } else if (inklingDragOnBoard) {
             presentation.release(BoardPresentation.Reason.INKLING_DRAG)
@@ -3831,7 +3831,7 @@ class BoardInteractionController(
             presentation.acquire(BoardPresentation.Reason.PAN_ZOOM)
         } else {
             handler.removeCallbacks(noteScrollResetTask)
-            MosaicEinkRefreshModule.applyNative(MosaicEinkRefreshModule.MODE_NOTE_SCROLL, NOTE_SCROLL_EINK_OWNER)
+            MosaicEinkRefreshModule.applyNative(MosaicEinkRefreshModule.MODE_A2, NOTE_SCROLL_EINK_OWNER)
         }
         armPanZoom()
         val bnd = activeRegion?.bounds

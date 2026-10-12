@@ -21,7 +21,6 @@ class MosaicEinkRefreshModule(
         const val MODE_DEFAULT = 7
         
         const val MODE_A2 = 4
-        const val MODE_NOTE_SCROLL = 11
 
         @Volatile private var instance: WeakReference<MosaicEinkRefreshModule>? = null
 
@@ -74,7 +73,6 @@ class MosaicEinkRefreshModule(
     }
 
     private fun effectiveMode(): Int? = when {
-        requests.containsValue(MODE_NOTE_SCROLL) -> MODE_NOTE_SCROLL
         requests.containsValue(MODE_A2) -> MODE_A2
         else -> requests.values.lastOrNull()
     }
