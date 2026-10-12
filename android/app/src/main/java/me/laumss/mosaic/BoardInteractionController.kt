@@ -4508,6 +4508,7 @@ class BoardInteractionController(
     override fun onToggleTouch() = setTouchEnabled(!touchEnabled, fromJs = false)
 
     override fun onPenBlockChanged() {
+        InklingLink.setChromeMenuOpen(chrome.blocksPen)
         refreshHostToolFlags()
         keepNoteTopOnToolbarChange()
     }

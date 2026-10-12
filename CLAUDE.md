@@ -112,7 +112,7 @@ JS 依赖的 `React/src/` 不在仓库里，JS 部分现在无法编译。项目
 
 交换目录是 `/sdcard/EXPORT/mosaic/`。Mosaic 把选中的笔迹实时写进 `clip_lasso.json`。Notipal 把图片放进 `inbox/`，Mosaic 每 0.8 秒检查一次。
 
-Notipal 浮动工具条所在区域不能书写。导入只在白板上处理，笔记卡片里收到的内容等回到白板再处理。
+Notipal 浮动工具条所在区域不能书写。笔粗细、图形、模板二级菜单或更多菜单打开时（`BoardChromeView.blocksPen`），状态广播带上 `chromeMenu`，Notipal 收起它的所有浮窗，关闭后再放回。导入只在白板上处理，笔记卡片里收到的内容等回到白板再处理。
 
 在文档里选中文字后按 Mosaic 按钮，白板中央生成一张文字卡。
 

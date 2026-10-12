@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Rect
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 
 
@@ -74,6 +76,14 @@ object InklingLink {
     @Volatile private var boardVisible = false
     @Volatile private var surface = SURFACE_BOARD
     @Volatile private var noteRef: String? = null
+    // 笔粗细 / 图形 / 模板二级菜单或「更多」菜单开着：Notipal 收起它的浮窗。随 BOARD_STATE 的 chromeMenu 发出。
+    @Volatile private var chromeMenuOpen = false
+    @Volatile private var chromeMenuPublished = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+    // 换菜单时先关后开发生在同一次点击里，合并到下一轮再发，Notipal 不会看到中间的「已关闭」。
+    private val publishChromeMenu = Runnable {
+        if (boardVisible && chromeMenuOpen != chromeMenuPublished) publishState("chrome-menu")
+    }
 
     private var host: Host? = null
     private var receiver: BroadcastReceiver? = null
@@ -150,6 +160,7 @@ object InklingLink {
             noteRef = null
             toolbarRect = null
             overlayRects = emptyList()
+            chromeMenuOpen = false
         }
         publishState(reason)
     }
@@ -159,7 +170,15 @@ object InklingLink {
         if (surface == next && noteRef == ref) return
         surface = next
         noteRef = ref
-        publishState(reason)
+        // 白板关着时（关闭后在后台恢复上次的笔记）只记下，下次 setBoardVisible(true) 一起发。
+        if (boardVisible) publishState(reason)
+    }
+
+    /** Mosaic 自己的菜单开关，在主线程调用。 */
+    fun setChromeMenuOpen(open: Boolean) {
+        chromeMenuOpen = open
+        mainHandler.removeCallbacks(publishChromeMenu)
+        mainHandler.post(publishChromeMenu)
     }
 
     fun currentSurface(): String = surface
@@ -181,10 +200,13 @@ object InklingLink {
                     putExtra("visible", boardVisible)
                     putExtra("surface", surface)
                     putExtra("noteRef", noteRef)
+                    putExtra("chromeMenu", boardVisible && chromeMenuOpen)
                     putExtra("reason", reason)
                 },
             )
-            Log.i(TAG, "state published visible=$boardVisible surface=$surface noteRef=$noteRef reason=$reason")
+            chromeMenuPublished = boardVisible && chromeMenuOpen
+            Log.i(TAG, "state published visible=$boardVisible surface=$surface noteRef=$noteRef " +
+                "chromeMenu=$chromeMenuPublished reason=$reason")
         } catch (error: Throwable) {
             Log.e(TAG, "state publish failed", error)
         }

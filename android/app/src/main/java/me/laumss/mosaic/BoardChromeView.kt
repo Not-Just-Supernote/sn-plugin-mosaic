@@ -1006,6 +1006,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
     }
 
     fun hideSwitcher() {
+        val wasOpen = switcherOpen
         if (syncAddressInput.hasFocus()) hideSyncKeyboard()
         switcherRoot.visibility = View.GONE
         hidePopups()
@@ -1013,6 +1014,9 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         if (toolbarHiddenByMenu) {
             toolbarHiddenByMenu = false
             applyToolbarVisibility()
+            listener?.onPenBlockChanged()
+        } else if (wasOpen) {
+            // 菜单关掉也要通知，Notipal 靠它把浮窗放回来。
             listener?.onPenBlockChanged()
         }
     }
