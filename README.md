@@ -70,6 +70,8 @@ Images shared through Notipal arrive as image cards.
 
 Note Cards give you a long vertically scrolling space for handwriting. You can keep scrolling down and writing for as long as you need. Selecting and dragging can grab all strokes below a point at once.
 
+Inside a Note Card, pinch to zoom between 50% and 150%. A two-finger gesture either pans or zooms, never both. At 100% the page fills the screen width and only scrolls up and down; releasing a pinch close to 100% snaps back to it. Zoomed out, the page sits on white with a black frame, and you can only write inside the frame.
+
 Pull down from the top of a Note Card to go back to the whiteboard. Its thumbnail also updates in the side menu.
 
 Text cards can use either a white or black style. Dark cards use white text and handwriting automatically. Connections are made between cards using the same color, and a card pulled from another card keeps that style.

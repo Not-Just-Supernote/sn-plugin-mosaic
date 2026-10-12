@@ -54,6 +54,9 @@ class BoardInteractionController(
         private const val TRAIL_HYSTERESIS_DP = 6f
         
         private const val ZOOM_SNAP_RATIO = 0.03f
+        // Releasing a note pinch this close to 100% snaps back to the page filling the width.
+        private const val NOTE_ZOOM_SNAP_RATIO = 0.08f
+        private const val NOTE_PAN_ZOOM_LOCK_SLOP_DP = 12f
         
         private const val ROTATE_SNAP_DEG = 3f
         
@@ -563,6 +566,8 @@ class BoardInteractionController(
 
     private val fingers = LinkedHashMap<Int, Finger>()
 
+    private enum class PanZoomLock { NONE, PAN, ZOOM }
+
     private sealed class FingerGesture {
         object Idle : FingerGesture()
         
@@ -585,6 +590,8 @@ class BoardInteractionController(
             
             var lastCenterX = startCenterX
             var lastCenterY = startCenterY
+            // In a note, the gesture locks to pan or zoom once one motion passes the slop; the board does both at once.
+            var lock = PanZoomLock.NONE
         }
         object ScreenTool : FingerGesture()
         class Move(val fingerId: Int) : FingerGesture()
@@ -1185,7 +1192,7 @@ class BoardInteractionController(
             return
         }
         if (penContact) return
-        setNoteHeaderHoverBlocked(noteHeaderHit(penHoverY))
+        setNoteHeaderHoverBlocked(noteHeaderHit(penHoverX, penHoverY) || noteOffPageHit(penHoverX, penHoverY))
         if (eraserMode) {
         }
         
@@ -1253,13 +1260,14 @@ class BoardInteractionController(
             }
             else -> cancelFingerGestures("pen-down")
         }
-        if (surfaceSwitching || chrome.consumesPoint(x, y) || inklingToolbarHit(x, y) || noteHeaderHit(y)) {
+        if (surfaceSwitching || chrome.consumesPoint(x, y) || inklingToolbarHit(x, y) || noteHeaderHit(x, y) || noteOffPageHit(x, y)) {
             Log.i(
                 TAG_PEN,
                 "DOWN rejected: ${when {
                     surfaceSwitching -> "surface-switching"
                     inklingToolbarHit(x, y) -> "inkling-toolbar"
-                    noteHeaderHit(y) -> "note-header"
+                    noteHeaderHit(x, y) -> "note-header"
+                    noteOffPageHit(x, y) -> "note-off-page"
                     else -> "chrome"
                 }}",
             )
@@ -3247,7 +3255,7 @@ class BoardInteractionController(
             }
         }
         
-        if (noteHeaderHit(y) && lasso == null && !selectBelowArmed) {
+        if (noteHeaderHit(x, y) && lasso == null && !selectBelowArmed) {
             fingerGesture = FingerGesture.CardPending(id, NOTE_HEADER_PENDING)
             cancelCardLongPress()
             val task = Runnable {
@@ -3867,14 +3875,28 @@ class BoardInteractionController(
         g.lastCenterX = cx
         g.lastCenterY = cy
         val dist = max(1f, hypot(b.x - a.x, b.y - a.y))
-        val ratio = dist / g.startDistance
+        if (!surface.showsBoardChrome && g.lock == PanZoomLock.NONE) {
+            val spread = abs(dist - g.startDistance)
+            val travel = hypot(cx - g.startCenterX, cy - g.startCenterY)
+            val slop = NOTE_PAN_ZOOM_LOCK_SLOP_DP * d
+            if (spread < slop && travel < slop) return
+            g.lock = if (spread >= travel) PanZoomLock.ZOOM else PanZoomLock.PAN
+            // Start from here so the slop already travelled does not jump the page.
+            resnapPanZoom(g)
+            Log.i(TAG_PAN, "note gesture locked ${g.lock} spread=$spread travel=$travel")
+            return
+        }
+        val ratio = if (g.lock == PanZoomLock.PAN) 1f else dist / g.startDistance
         val nextScale = surface.constrainScale(g.startScale * ratio, g.startScale)
         
         val startCxDp = g.startCenterX / d
         val startCyDp = g.startCenterY / d
         val worldCx = (startCxDp - g.startPanX) / g.startScale
         val worldCy = (startCyDp - g.startPanY) / g.startScale
-        surface.constrainPan(cx / d - worldCx * nextScale, cy / d - worldCy * nextScale, nextScale, viewportTmp)
+        // A locked zoom stays anchored where it started instead of following the fingers.
+        val anchorX = if (g.lock == PanZoomLock.ZOOM) startCxDp else cx / d
+        val anchorY = if (g.lock == PanZoomLock.ZOOM) startCyDp else cy / d
+        surface.constrainPan(anchorX - worldCx * nextScale, anchorY - worldCy * nextScale, nextScale, viewportTmp)
         
         
         val panX = snapPanToPx(viewportTmp[0])
@@ -3897,8 +3919,15 @@ class BoardInteractionController(
     private fun noteTopInsetWorld(): Float = toolbarHeightWorld() + currentNoteHeaderHeight * BoardEngine.scale
 
     
-    private fun noteHeaderHit(y: Float): Boolean =
-        !surface.showsBoardChrome && currentNoteHeaderHeight > 0f && worldY(y) < 0f
+    private fun noteHeaderHit(x: Float, y: Float): Boolean =
+        !surface.showsBoardChrome && currentNoteHeaderHeight > 0f && worldY(y) < 0f && !noteOffPageHit(x, y)
+
+    // Zoomed out, the white around the note page cannot be written on.
+    private fun noteOffPageHit(x: Float, y: Float): Boolean {
+        if (surface.showsBoardChrome) return false
+        val wx = worldX(x)
+        return wx < 0f || wx > ScrollingDocument.WIDTH || worldY(y) < -currentNoteHeaderHeight
+    }
 
     private fun setNoteHeaderHoverBlocked(blocked: Boolean) {
         if (noteHeaderHoverBlocked == blocked) return
@@ -3925,12 +3954,13 @@ class BoardInteractionController(
         val snapped = when {
             scale == g.startScale -> scale
             surface.showsBoardChrome -> magneticZoom(scale)
-            abs(scale - notePageScale) <= notePageScale * ZOOM_SNAP_RATIO -> notePageScale
+            abs(scale - notePageScale) <= notePageScale * NOTE_ZOOM_SNAP_RATIO -> notePageScale
             else -> scale
         }
         if (snapped != scale) {
-            val ax = g.lastCenterX / density
-            val ay = g.lastCenterY / density
+            val zoomLocked = g.lock == PanZoomLock.ZOOM
+            val ax = (if (zoomLocked) g.startCenterX else g.lastCenterX) / density
+            val ay = (if (zoomLocked) g.startCenterY else g.lastCenterY) / density
             val p = BoardGeometry.zoomAroundScreenPoint(panX, panY, scale, snapped, ax, ay)
             surface.constrainPan(p[0], p[1], snapped, viewportTmp)
             panX = snapPanToPx(viewportTmp[0]); panY = snapPanToPx(viewportTmp[1]); scale = snapped

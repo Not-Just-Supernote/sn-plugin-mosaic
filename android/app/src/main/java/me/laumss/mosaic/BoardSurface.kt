@@ -102,19 +102,23 @@ class NoteSurface(
     companion object {
         
         private const val NOTE_OVERSCROLL_SCREENS = 6f
-        // Pinch zoom inside a note runs from fit-width (100%) to 150%.
+        // Pinch zoom inside a note runs from 50% to 150% of fit-width (100%).
+        const val MIN_ZOOM = 0.5f
         const val MAX_ZOOM = 1.5f
+        private const val FIT_EPS = 1e-4f
     }
 
     override fun constrainScale(next: Float, start: Float): Float {
         val fit = fitScale()
-        return next.coerceIn(fit, fit * MAX_ZOOM)
+        return next.coerceIn(fit * MIN_ZOOM, fit * MAX_ZOOM)
     }
 
-    // Horizontal pan only exists while zoomed in; the page never leaves the view edges.
+    // At 100% the page is pinned to the view edges. Zoomed in, it always covers the view width;
+    // zoomed out, it moves freely but stays wholly inside the view width. Both limits meet at 100%.
     override fun constrainPan(panX: Float, panY: Float, scale: Float, out: FloatArray) {
-        val minPanX = minOf(0f, viewportWidthDp() - ScrollingDocument.WIDTH * scale)
-        out[0] = panX.coerceIn(minPanX, 0f)
+        val slack = viewportWidthDp() - ScrollingDocument.WIDTH * scale
+        out[0] = if (kotlin.math.abs(scale - fitScale()) <= fitScale() * FIT_EPS) 0f
+            else panX.coerceIn(minOf(0f, slack), maxOf(0f, slack))
         out[1] = clampPanY(panY, scale)
     }
 

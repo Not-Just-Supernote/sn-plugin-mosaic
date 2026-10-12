@@ -113,8 +113,9 @@ object TemplatePaper {
 
         
         
-        val rowLeft = world.left
-        val rowRight = world.right
+        // On a page, ruled lines stop at the page edges so the white around a zoomed-out page stays blank.
+        val rowLeft = if (bounded) maxOf(world.left, 0f) else world.left
+        val rowRight = if (bounded) minOf(world.right, pageWidth) else world.right
         if (rowRight <= rowLeft) return
 
         // On a page, the first row sits one side margin below the header divider.

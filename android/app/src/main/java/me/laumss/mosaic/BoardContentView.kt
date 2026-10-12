@@ -139,6 +139,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         private const val NOTE_HEADER_DIVIDER_COLOR = 0xFF9A9A9A.toInt()
         private const val NOTE_HEADER_DIVIDER_WIDTH = 2f
         private const val NOTE_HEADER_PLACEHOLDER_COLOR = 0xFF9A9A9A.toInt()
+        private const val NOTE_PAGE_BORDER_DP = 2f
 
         
         private fun forEachTextRun(
@@ -458,6 +459,10 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         strokeWidth = CARD_SELECTED_WIDTH
     }
     private val tilePaint = Paint().apply { isFilterBitmap = false }
+    private val pageBorderPaint = Paint().apply {
+        style = Paint.Style.FILL
+        color = Color.BLACK
+    }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
@@ -857,6 +862,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             if (missing == 0 && !previewing) releaseFallbackLocked()
         }
 
+        drawPageBorder(canvas, panXPx, panYPx, scalePx, densityValue)
         drawSelection(canvas, panXPx, panYPx, scalePx)
 
         if (settleRequested && missing == 0 && stale == 0 && !deferRefresh) {
@@ -966,6 +972,22 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             }
         }
         if (!wait) postInvalidateOnAnimation()
+    }
+
+    // A note page zoomed out sits on white with a black frame on its top and sides; the frame lies just outside
+    // the page, so at 100% it falls off screen.
+    private fun drawPageBorder(canvas: Canvas, panXPx: Float, panYPx: Float, scalePx: Float, densityValue: Float) {
+        val pageWidth = templatePageWidth
+        if (pageWidth <= 0f) return
+        val bw = NOTE_PAGE_BORDER_DP * densityValue
+        val left = panXPx
+        val right = panXPx + pageWidth * scalePx
+        val top = panYPx - pageNoteHeaderHeight * scalePx
+        val bottom = height.toFloat()
+        if (top >= bottom) return
+        canvas.drawRect(left - bw, top - bw, left, bottom, pageBorderPaint)
+        canvas.drawRect(right, top - bw, right + bw, bottom, pageBorderPaint)
+        canvas.drawRect(left, top - bw, right, top, pageBorderPaint)
     }
 
     private fun drawSelection(canvas: Canvas, panXPx: Float, panYPx: Float, scalePx: Float) {
