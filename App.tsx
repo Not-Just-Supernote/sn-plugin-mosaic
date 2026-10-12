@@ -17,6 +17,7 @@ import { loadBoard, saveBoard } from './boardStore';
 import {
   RESTORE_TARGET_EVENT,
   consumeNativePendingRestore,
+  deleteNoteShot,
   ensureArchivePermissions,
   focusNoteShot,
   insertNoteShot,
@@ -672,7 +673,7 @@ export default function App(): React.JSX.Element {
         case 'connectionAdd': {
           const index = model.connections.findIndex(c => c.id === op.id)
           const connection = connectionFromCommand(op)
-          if (index >= 0) model.connections[index] = { ...model.connections[index], locked: connection.locked === true || model.connections[index].locked === true }
+          if (index >= 0) model.connections[index] = { ...model.connections[index], locked: connection.locked === true }
           else model.connections.push(connection)
           structureChanged = true;
           break;
@@ -699,6 +700,20 @@ export default function App(): React.JSX.Element {
           }
           else if (op.name === 'touchEnabled') setTouchEnabled(op.value);
           else if (op.name === 'noteShotReady') void insertShotIntoNote(op);
+          else if (op.name === 'deleteNoteShot') {
+            void deleteNoteShot(op.shotId)
+              .then(() => {
+                if (noteShotSessionRef.current?.id === op.shotId) noteShotSessionRef.current = null;
+              })
+              .catch(error => {
+                console.log(`[MosaicNoteShot] delete failed id=${op.shotId}: ${String(error)}`);
+                ToastAndroid.show(t('noteShotDeleteFailed'), ToastAndroid.LONG);
+              })
+              .finally(() => {
+                const viewTag = findNodeHandle(boardRef.current);
+                if (viewTag !== null) NativeModules.MosaicBoardEngine?.reloadNoteLinks?.(viewTag);
+              });
+          }
           else if (op.name === 'recognizeLasso') void recognizeLassoToCard();
           else if (op.name === 'saveArchive') {
             void (async () => {

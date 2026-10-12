@@ -15,6 +15,35 @@ class NoteController {
     private lateinit var directory: File
     private var pending: Runnable? = null
     private var previewed: Map<String, BoardEngine.StrokeRec> = emptyMap()
+    fun discardCopiedAssets(dir: String, refs: Collection<String>) {
+        io.execute {
+            for (ref in refs) {
+                require(ref.matches(Regex("note-[a-zA-Z0-9-]+")))
+                File(dir, "$ref.mnote").delete()
+                File(dir, ref).deleteRecursively()
+            }
+        }
+    }
+    fun copyAssets(dir: String, refs: Map<String, String>, done: (Result<Unit>) -> Unit) {
+        val root = File(dir)
+        io.execute {
+            val created = ArrayList<File>()
+            val result = runCatching {
+                for ((source, target) in refs) {
+                    require(source.matches(Regex("note-[a-zA-Z0-9-]+")) && target.matches(Regex("note-[a-zA-Z0-9-]+")))
+                    val file = File(root, "$target.mnote")
+                    val preview = File(root, target)
+                    require(!file.exists() && !preview.exists())
+                    created.add(file); created.add(preview)
+                    File(root, "$source.mnote").copyTo(file)
+                    val originalPreview = File(root, source)
+                    if (originalPreview.isDirectory) check(originalPreview.copyRecursively(preview))
+                }
+            }
+            if (result.isFailure) created.forEach { it.deleteRecursively() }
+            ui.post { done(result) }
+        }
+    }
     fun open(dir: String, ref: String, create: Boolean, done: (Result<ScrollingDocument>) -> Unit) {
         require(ref.matches(Regex("note-[a-zA-Z0-9-]+")))
         directory = File(dir)

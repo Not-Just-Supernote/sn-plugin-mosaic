@@ -66,6 +66,7 @@ const STRINGS = {
   noteName: { zh: '笔记 {number}', en: 'Note {number}' },
   noteShotNeedsNote: { zh: '只能插入到笔记中（PDF 文档不支持）', en: 'Snapshots can only be inserted into notes, not PDF documents.' },
   noteShotFailed: { zh: '插入笔记失败', en: 'Could not insert into the note.' },
+  noteShotDeleteFailed: { zh: '删除失败，记录已保留，请重试', en: 'Deletion failed. The record was kept; please retry.' },
   noteLinks: { zh: '已插入笔记', en: 'Inserted into notes' },
   noteLinkFallback: { zh: '笔记', en: 'Note' },
   mosaicPermissionNeeded: {

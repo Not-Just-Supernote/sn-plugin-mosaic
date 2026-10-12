@@ -2,6 +2,7 @@ package me.laumss.mosaic
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.PointF
 import android.util.Log
 import java.io.File
 import kotlin.math.max
@@ -18,7 +19,19 @@ object CardImageCache {
     
     private val cache = object : LinkedHashMap<String, Entry>(16, 0.75f, true) {}
     private val failedAt = HashMap<String, Long>()
+    private val naturalSizes = HashMap<String, PointF>()
     private var bytes = 0L
+
+    fun naturalSize(path: String): PointF? = synchronized(this) {
+        naturalSizes[path]?.let { return PointF(it.x, it.y) }
+        if (path.isEmpty()) return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val size = PointF(bounds.outWidth.toFloat(), bounds.outHeight.toFloat())
+        naturalSizes[path] = size
+        PointF(size.x, size.y)
+    }
 
     
     fun get(path: String, targetLongPx: Int, alpha: Boolean = false): Bitmap? = synchronized(this) {
@@ -50,6 +63,7 @@ object CardImageCache {
     fun clear() = synchronized(this) {
         cache.clear()
         failedAt.clear()
+        naturalSizes.clear()
         bytes = 0L
     }
 
@@ -65,6 +79,7 @@ object CardImageCache {
             }
         }
         failedAt.keys.removeAll { it == path || it.startsWith(prefix) }
+        naturalSizes.keys.removeAll { it == path || it.startsWith(prefix) }
     }
 
     private fun evictLocked() {

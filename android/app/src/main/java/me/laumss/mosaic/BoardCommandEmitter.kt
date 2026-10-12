@@ -206,6 +206,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 
                 putString("content", rec.content)
                 putString("noteRef", rec.noteRef)
+                if (rec.kind == "image" && rec.imagePath.isNotEmpty()) putString("imageRef", java.io.File(rec.imagePath).name)
                 putString("bgColor", rec.bgColor)
                 putString("textColor", rec.textColor)
                 putString("title", rec.title)

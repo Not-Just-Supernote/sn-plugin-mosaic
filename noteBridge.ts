@@ -124,6 +124,8 @@ type PageSize = { width: number; height: number };
 type ShotStore = { v: 1; shots: Record<string, NoteShotRecord> };
 
 let storeQueue: Promise<unknown> = Promise.resolve();
+const pendingShotDeletes = new Map<string, Promise<void>>();
+const deletedShotIds = new Set<string>();
 
 
 
@@ -183,7 +185,7 @@ async function writeStoreNow(store: ShotStore): Promise<void> {
   const path = await resolveStorePath();
   const tmpPath = `${path}.tmp`;
   await RNFS.writeFile(tmpPath, JSON.stringify({ v: 1, shots }), 'utf8');
-  if (await RNFS.exists(path)) await RNFS.unlink(path);
+  // Both paths share a directory; Android renames the completed file over the previous store.
   await RNFS.moveFile(tmpPath, path);
 }
 
@@ -202,6 +204,72 @@ async function getShotRecord(id: string): Promise<NoteShotRecord | null> {
   return (await readStoreNow()).shots[id] ?? null;
 }
 
+type ShotPicture = { page: number; num: number; layer?: number };
+
+async function shotPicturesOnPage(record: NoteShotRecord, page: number): Promise<ShotPicture[]> {
+  const response: any = await PluginFileAPI.getElements(page, record.notePath);
+  if (response?.success !== true || !Array.isArray(response.result)) throw new Error('Could not read the target note page');
+  const elements: any[] = response.result;
+  try {
+    return elements.filter(element => element?.type === TYPE_PICTURE && shotIdOf(element.userData) === record.id)
+      .map(element => {
+        const num = element.numInPage;
+        if (!Number.isInteger(num) || num < 1) throw new Error('Invalid picture element index');
+        const layer = Number.isInteger(element.layerNum) && element.layerNum >= 0 ? element.layerNum : undefined;
+        return { page, num, layer };
+      });
+  } finally {
+    elements.forEach(recycleElement);
+  }
+}
+
+async function deleteNoteShotNow(id: string): Promise<void> {
+  const record = await getShotRecord(id);
+  if (record === null) return;
+  if (!deletedShotIds.has(id)) {
+    if (!(await ensurePermission(FILE_READ_PERMISSION, '读取待删除的笔记图片')) ||
+        !(await ensurePermission(FILE_WRITE_PERMISSION, '更新笔记图片')) ||
+        !(await ensurePermission('plugin.permission.FILE:DELETE', '删除已插入笔记的图片'))) {
+      throw new Error('Note picture deletion permission required');
+    }
+    const countResponse: any = await PluginFileAPI.getNoteTotalPageNum(record.notePath);
+    if (countResponse?.success !== true || !Number.isInteger(countResponse.result) || countResponse.result < 1) {
+      throw new Error('Could not read the target note page count');
+    }
+    const count: number = countResponse.result;
+    const recordedPageValid = Number.isInteger(record.page) && record.page >= 0 && record.page < count;
+    let matches = recordedPageValid ? await shotPicturesOnPage(record, record.page) : [];
+    if (matches.length === 0) {
+      for (let page = 0; page < count; page++) {
+        if (recordedPageValid && page === record.page) continue;
+        matches.push(...await shotPicturesOnPage(record, page));
+      }
+    }
+    if (matches.length > 1) throw new Error('Multiple pictures carry this insertion ID');
+    const picture = matches[0];
+    if (picture !== undefined) {
+      const current: any = await PluginCommAPI.getCurrentFilePath();
+      if (current?.success !== true || typeof current.result !== 'string') throw new Error('Could not resolve the active file');
+      const response: any = current.result === record.notePath
+        ? await PluginCommAPI.deletePageElements([picture.num], picture.page, picture.layer)
+        : await PluginFileAPI.deleteElements(record.notePath, picture.page, [picture.num]);
+      if (response?.success !== true || response.result !== true) throw new Error('Host note picture deletion failed');
+      if ((await shotPicturesOnPage(record, picture.page)).length > 0) throw new Error('Picture deletion is awaiting confirmation');
+    }
+    deletedShotIds.add(id);
+  }
+  await updateStore(store => { delete store.shots[id]; });
+  console.log(`${LOG} delete ok id=${id} note=${record.notePath}`);
+}
+
+export function deleteNoteShot(id: string): Promise<void> {
+  const pending = pendingShotDeletes.get(id);
+  if (pending !== undefined) return pending;
+  const operation = deleteNoteShotNow(id).finally(() => { pendingShotDeletes.delete(id); });
+  pendingShotDeletes.set(id, operation);
+  return operation;
+}
+
 async function saveShotRecord(
   id: string,
   notePath: string,
@@ -211,6 +279,7 @@ async function saveShotRecord(
 ): Promise<void> {
   const now = new Date().toISOString();
   await updateStore(store => {
+    if (deletedShotIds.has(id)) return;
     const previous = store.shots[id];
     const versions = (previous?.versions ?? []).filter(v => v.sig !== version?.sig);
     if (version !== null) versions.push(version);
@@ -595,6 +664,10 @@ export async function insertNoteShot(
 
 
 async function updateNoteShot(target: NoteShotTarget, record: NoteShotRecord | null, png: NoteShotPng): Promise<boolean> {
+  if (deletedShotIds.has(target.id) || pendingShotDeletes.has(target.id)) {
+    await deleteFile(png.path);
+    return false;
+  }
   const startedAt = Date.now();
   let keepPng = false;
   let staleOwnPng: string | null = null;

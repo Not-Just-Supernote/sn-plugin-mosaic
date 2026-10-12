@@ -121,6 +121,11 @@ class MosaicBoardEngineModule(
         withView(viewTag) { it.controller.focusNoteShot(shotJson) }
     }
 
+    @ReactMethod
+    fun reloadNoteLinks(viewTag: Int) {
+        withView(viewTag) { it.reloadNoteLinks() }
+    }
+
     
     @ReactMethod
     fun renderNoteShot(viewTag: Int, shotJson: String, promise: Promise) {

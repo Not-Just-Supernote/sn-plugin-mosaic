@@ -57,7 +57,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         private const val CARD_SELECTED_COLOR = Color.BLACK
         private const val CARD_SELECTED_WIDTH = 2f
         private const val CARD_RADIUS = 0f
-        private const val CARD_HANDLE_SIZE = 18f
         
         private const val CARD_TEXT_SIZE = CardTextFormat.BODY_SIZE
         private const val CARD_TEXT_COLOR = Color.BLACK
@@ -68,8 +67,12 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         }
 
         
-        fun measureTextCardSize(raw: String, maxWidth: Float = BoardGeometry.DEFAULT_CARD_WIDTH): android.graphics.PointF {
-            val m = CardTextFormat.WEB
+        fun measureTextCardSize(
+            raw: String,
+            maxWidth: Float = BoardGeometry.DEFAULT_CARD_WIDTH,
+            m: CardTextFormat.Metrics = CardTextFormat.WEB,
+            limitHeight: Boolean = true,
+        ): android.graphics.PointF {
             val innerMax = (maxWidth - m.padX * 2f).coerceAtLeast(1f)
             var contentW = 0f
             var y = m.padTop
@@ -79,7 +82,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             }
             return android.graphics.PointF(
                 (contentW + m.padX * 2f).coerceIn(BoardGeometry.MIN_CARD_SIZE, maxWidth),
-                (y + m.padBottom).coerceIn(BoardGeometry.MIN_CARD_SIZE, BoardGeometry.MAX_CARD_SIZE),
+                (y + m.padBottom).coerceIn(BoardGeometry.MIN_CARD_SIZE,
+                    if (limitHeight) BoardGeometry.MAX_CARD_SIZE else Float.MAX_VALUE),
             )
         }
 
@@ -445,15 +449,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private val strokeQueryScratch get() = rasterScratch.get().strokeQueryScratch
     
     private val selectionBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        color = CARD_SELECTED_COLOR
-        strokeWidth = CARD_SELECTED_WIDTH
-    }
-    private val handleFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = Color.WHITE
-    }
-    private val handleBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = CARD_SELECTED_COLOR
         strokeWidth = CARD_SELECTED_WIDTH
@@ -1030,23 +1025,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
                 val bottom = panYPx + (card.y + card.height) * scalePx
                 selectionBorderPaint.strokeWidth = CARD_SELECTED_WIDTH * scalePx
                 canvas.drawRect(left, top, right, bottom, selectionBorderPaint)
-                val half = CARD_HANDLE_SIZE * scalePx / 2f
-                handleBorderPaint.strokeWidth = CARD_SELECTED_WIDTH * scalePx
-                val centerX = (left + right) / 2f
-                val centerY = (top + bottom) / 2f
-                val anchors = floatArrayOf(
-                    left, top, centerX, top, right, top,
-                    right, centerY, right, bottom, centerX, bottom,
-                    left, bottom, left, centerY,
-                )
-                var index = 0
-                while (index < anchors.size) {
-                    val ax = anchors[index]
-                    val ay = anchors[index + 1]
-                    canvas.drawRect(ax - half, ay - half, ax + half, ay + half, handleFillPaint)
-                    canvas.drawRect(ax - half, ay - half, ax + half, ay + half, handleBorderPaint)
-                    index += 2
-                }
+                // Group members have outlines; the outer selection owns the resize handles.
             }
         }
     }
@@ -1307,12 +1286,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     }
 
     
-    private fun neckTouchesHidden(neck: BoardEngine.NeckRec, hidden: String?, scene: BoardEngine.RenderSnapshot): Boolean {
-        val hiddenId = hidden ?: return false
-        val connection = scene.connections[neck.id] ?: return false
-        return connection.fromId == hiddenId || connection.toId == hiddenId
-    }
-
     
     private fun shadowedIntersects(bounds: RectF, world: RectF): Boolean =
         bounds.left < world.right && bounds.top < world.bottom &&
@@ -1344,7 +1317,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         var unionOk = true
         
         for (neck in scene.necks) {
-            if (neckTouchesHidden(neck, hidden, scene)) continue
             if (!shadowedIntersects(neck.bounds, world)) continue
             shadowCopiesOf(null, neck.path)
             canvas.drawPath(shadowPathNear, shadowEdgePaint)
@@ -1368,7 +1340,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val save = canvas.save()
         if (unionOk) canvas.clipPath(shadowFarUnion)
         for (neck in scene.necks) {
-            if (neckTouchesHidden(neck, hidden, scene)) continue
             if (!shadowedIntersects(neck.bounds, world)) continue
             shadowCopiesOf(null, neck.path)
             canvas.drawPath(shadowPathNear, shadowPaint)
@@ -1392,16 +1363,17 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         
         if (emphasis) {
             drawFlatShadow(canvas, world, hidden, scene)
-            drawThreads(canvas, world, hidden, scene, emphasis)
         } else {
             drawSilhouetteShadow(canvas, world, hidden, scene)
-            drawThreads(canvas, world, hidden, scene, emphasis)
-            
-            for (neck in scene.necks) {
-                if (neckTouchesHidden(neck, hidden, scene)) continue
-                if (!RectF.intersects(neck.bounds, world)) continue
-                neckFillPaint.color = if (neck.dark) CARD_COLORED_FILL_COLOR else CARD_FILL_COLOR
-                canvas.drawPath(neck.path, neckFillPaint)
+        }
+        drawThreads(canvas, world, scene, emphasis)
+        for (neck in scene.necks) {
+            if (!RectF.intersects(neck.bounds, world)) continue
+            neckFillPaint.color = if (neck.dark) CARD_COLORED_FILL_COLOR else CARD_FILL_COLOR
+            canvas.drawPath(neck.path, neckFillPaint)
+            if (emphasis) {
+                emphasisStrokePaint.color = if (dark) Color.WHITE else CARD_OUTLINE_EMPHASIS_COLOR
+                canvas.drawPath(neck.path, emphasisStrokePaint)
             }
         }
         for (card in scene.cardsByZ) {
@@ -1429,9 +1401,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     }
 
     
-    private fun drawThreads(canvas: Canvas, world: RectF, hidden: String?, scene: BoardEngine.RenderSnapshot, emphasis: Boolean) {
+    private fun drawThreads(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot, emphasis: Boolean) {
         for (thread in scene.threads) {
-            if (hidden != null && thread.touches(hidden)) continue
             if (!RectF.intersects(thread.bounds, world)) continue
             threadPaint.color = if (emphasis || thread.dark) Color.BLACK else THREAD_COLOR
             canvas.drawPath(thread.path, threadPaint)
@@ -1443,6 +1414,12 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val cardRect = RectF()
         val off = CARD_SHADOW_OFFSET
         val far = CARD_SHADOW_EXTENT
+        for (neck in scene.necks) {
+            if (!shadowedIntersects(neck.bounds, world)) continue
+            shadowCopiesOf(null, neck.path)
+            canvas.drawPath(shadowPathNear, flatShadowPaint)
+            canvas.drawPath(shadowPathFar, flatShadowPaint)
+        }
         for (card in scene.cardsByZ) {
             if (card.id == hidden) continue
             card.rect(cardRect)

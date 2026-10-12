@@ -446,11 +446,12 @@ class MosaicBoardView(
 
     
     
-    private fun reloadNoteLinks() {
+    fun reloadNoteLinks() {
         val file = NoteLinks.storeFile(reactContext) ?: return
         Thread({
             val dirty = NoteLinks.reload(file)
             if (dirty.isNotEmpty()) contentView.markWorldDirty(dirty)
+            handler.post { chromeView.refreshNoteLinks() }
         }, "MosaicNoteLinks").start()
     }
 

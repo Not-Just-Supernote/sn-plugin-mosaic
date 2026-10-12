@@ -498,22 +498,23 @@ class BoardInteractionController(
     }
 
     private fun connectedComponent(cardId: String): List<String> = synchronized(BoardEngine.lock) {
-        val seen = LinkedHashSet<String>()
-        val queue = ArrayDeque<String>()
-        seen.add(cardId); queue.add(cardId)
-        while (queue.isNotEmpty()) {
-            val current = queue.removeFirst()
-            for (connection in BoardEngine.connections.values) {
-                if (!connection.locked) continue
-                val next = when {
-                    connection.fromId == current -> connection.toId
-                    connection.toId == current -> connection.fromId
-                    else -> null
-                } ?: continue
-                if (BoardEngine.cards.containsKey(next) && seen.add(next)) queue.add(next)
-            }
+        ConnectionBindings.expand(listOf(cardId), BoardEngine.cards.keys, BoardEngine.connections.values)
+    }
+
+    private fun expandBoundSelection(sel: LassoSelection): LassoSelection = synchronized(BoardEngine.lock) {
+        if (sel.cardIds.isEmpty()) return@synchronized sel
+        val cards = ConnectionBindings.expand(sel.cardIds, BoardEngine.cards.keys, BoardEngine.connections.values)
+        val cardSet = cards.toHashSet()
+        val bridges = BoardEngine.connections.values.filter {
+            it.locked && it.fromId in cardSet && it.toId in cardSet
+        }.mapTo(HashSet()) { it.id }
+        if (bridges.isEmpty()) return@synchronized sel
+        val strokes = sel.strokeIds.filterTo(LinkedHashSet()) { it in BoardEngine.strokes }
+        for (stroke in BoardEngine.strokes.values) {
+            if (stroke.cardId in cardSet || stroke.connectionId in bridges) strokes.add(stroke.id)
         }
-        seen.toList()
+        val expanded = LassoSelection(sel.rect, cards, strokes.toList(), sel.fromLasso)
+        LassoSelection(selectionFrame(expanded), cards, expanded.strokeIds, sel.fromLasso)
     }
 
     private fun selectConnectedComponent(card: BoardEngine.CardRec) {
@@ -559,7 +560,7 @@ class BoardInteractionController(
     private var selectBelowArmed = false
     private var selectBelowPendingRestore = false
 
-    class LassoSelection(val rect: RectF, val cardIds: List<String>, val strokeIds: List<String>)
+    class LassoSelection(val rect: RectF, val cardIds: List<String>, val strokeIds: List<String>, val fromLasso: Boolean = false)
     private var lasso: LassoSelection? = null
 
     
@@ -994,6 +995,7 @@ class BoardInteractionController(
             if (emitCommands) emitter.commit()
         }
         if (record) history.push(change)
+        lasso?.let { setLasso(it) }
         surface.onSceneMutated()
         syncNotePageFrame()
         regionsDirty = true
@@ -1008,6 +1010,7 @@ class BoardInteractionController(
         val commands = if (emitCommands) ArrayList<() -> Unit>() else null
         val pendingUpserts = ArrayList<BoardEngine.StrokeRec>()
         val pendingRemovals = ArrayList<String>()
+        val connectionUpdates = LinkedHashSet<String>()
         BoardEngine.mutate {
             fun flushUpserts() {
                 if (pendingUpserts.isEmpty()) return
@@ -1017,11 +1020,6 @@ class BoardInteractionController(
                     commands?.add {
                         if (records.size == 1) emitter.strokeUpsert(records[0])
                         else emitter.strokeUpsertBatch(records)
-                    }
-                    val connectionIds = records.mapNotNull { it.connectionId }.toSet()
-                    for (id in connectionIds) {
-                        val connection = BoardEngine.connections[id] ?: continue
-                        commands?.add { emitter.connectionAdd(connection) }
                     }
                 }
                 pendingUpserts.clear()
@@ -1039,6 +1037,8 @@ class BoardInteractionController(
                     is BoardHistory.Diff.Stroke -> {
                         val target = if (forward) diff.after else diff.before
                         val source = if (forward) diff.before else diff.after
+                        source?.connectionId?.let(connectionUpdates::add)
+                        target?.connectionId?.let(connectionUpdates::add)
                         if (target == null) {
                             flushUpserts()
                             source?.let {
@@ -1075,6 +1075,7 @@ class BoardInteractionController(
                             }
                         } else {
                             addConnection(target)
+                            connectionUpdates.add(target.id)
                             commands?.add { emitter.connectionAdd(target) }
                         }
                     }
@@ -1083,6 +1084,11 @@ class BoardInteractionController(
             flushUpserts(); flushRemovals()
         }
         commands?.forEach { it() }
+        if (emitCommands) {
+            for (id in connectionUpdates) {
+                BoardEngine.connections[id]?.let { emitter.connectionAdd(it) }
+            }
+        }
     }
 
     fun undo() {
@@ -1942,7 +1948,7 @@ class BoardInteractionController(
             return
         }
         val frame = selectionFrame(hits)
-        val selection = LassoSelection(frame, hits.cardIds, hits.strokeIds)
+        val selection = LassoSelection(frame, hits.cardIds, hits.strokeIds, fromLasso = true)
         Log.i(TAG_LASSO, "finalize query=$query frame=$frame cards=${selection.cardIds.size} strokes=${selection.strokeIds.size}")
         setLasso(selection)
     }
@@ -2070,7 +2076,8 @@ class BoardInteractionController(
         }.isEmpty
     }
 
-    private fun setLasso(next: LassoSelection?) {
+    private fun setLasso(requested: LassoSelection?) {
+        val next = requested?.let(::expandBoundSelection)
         
         
         if (next == null && selectBelowPendingRestore) {
@@ -2148,7 +2155,8 @@ class BoardInteractionController(
             else -> listOf("trash")
         }
         
-        val types = if (canInsertIntoHostNote()) baseTypes + "shot" else baseTypes
+        val actions = baseTypes + "copy"
+        val types = if (canInsertIntoHostNote(current)) actions + "shot" else actions
         
         val onDark = singleCard &&
             (BoardEngine.cards[current.cardIds[0]]?.colored == true)
@@ -2195,7 +2203,7 @@ class BoardInteractionController(
 
     
     private fun selectionRotatable(sel: LassoSelection): Boolean =
-        sel.strokeIds.isNotEmpty() && !isSingleCardSelection(sel)
+        sel.strokeIds.isNotEmpty() && sel.cardIds.isEmpty()
 
     
     private fun lassoActionRects(frame: RectF, types: List<String>): List<Pair<RectF, String>> {
@@ -2245,6 +2253,7 @@ class BoardInteractionController(
     private fun handleLassoAction(action: String) {
         when (action) {
             "trash" -> deleteLassoSelection()
+            "copy" -> copyLassoSelection()
             "note" -> onConvertCardToNote()
             "black" -> toggleSelectedCardBlack()
             "recognize" -> onRecognizeLasso()
@@ -2323,6 +2332,38 @@ class BoardInteractionController(
         apply(BoardHistory.Change("shape-$action").stroke(stroke, next), record = true)
         Log.i(TAG_LASSO, "shape convert $kind -> $action")
         selectStroke(next)
+    }
+
+    private var selectionCopyBusy = false
+
+    private fun copyLassoSelection() {
+        val sel = lasso ?: return
+        if (selectionCopyBusy || surfaceSwitching) return
+        val offset = 24f / BoardEngine.scale.coerceAtLeast(0.01f)
+        val plan = SelectionCopy.build(sel.cardIds, sel.strokeIds, BoardEngine.snapshotScene(), offset, notesDirectory, ::newId)
+        if (plan.change.isEmpty) return
+        fun commit() {
+            apply(plan.change, record = true)
+            val frame = RectF(sel.rect).apply { offset(offset, offset) }
+            val copied = LassoSelection(frame, plan.cardIds, plan.strokeIds, sel.fromLasso)
+            setLasso(LassoSelection(selectionFrame(copied), copied.cardIds, copied.strokeIds, copied.fromLasso))
+            Log.i(TAG_LASSO, "copy cards=${plan.cardIds.size} strokes=${plan.strokeIds.size} offset=$offset")
+        }
+        if (plan.noteRefs.isEmpty()) { commit(); return }
+        if (notesDirectory.isBlank()) return
+        selectionCopyBusy = true
+        val directory = notesDirectory
+        val generation = clipboardPasteGeneration.get()
+        noteController.copyAssets(directory, plan.noteRefs) { result ->
+            selectionCopyBusy = false
+            result.onFailure { Log.e(TAG_LASSO, "copy note assets failed", it) }
+            if (result.isFailure) return@copyAssets
+            if (lasso !== sel || generation != clipboardPasteGeneration.get() || !surface.showsBoardChrome || surfaceSwitching) {
+                noteController.discardCopiedAssets(directory, plan.noteRefs.values)
+                return@copyAssets
+            }
+            commit()
+        }
     }
 
     private fun deleteLassoSelection() {
@@ -2745,7 +2786,7 @@ class BoardInteractionController(
         card.rect(session.startRect)
         session.inkBounds = attachedInkWorldBounds(card.id)
         hideCardFromTiles(card.id)
-        overlay.showCardPreview(worldRectToPx(session.preview, RectF()), true)
+        overlay.showCardPreview(worldRectToPx(session.preview, RectF()), card.kind)
         presentation.acquire(BoardPresentation.Reason.TRANSFORM)
         Log.i(TAG, "[CardAdjust] resize begin card=${card.id} handle=$handle corner=${handle.isCorner} pen=$isPen")
         return session
@@ -2779,6 +2820,8 @@ class BoardInteractionController(
             if (m.handle.movesTop) m.preview.top = min(m.preview.top, ib.top)
             if (m.handle.movesBottom) m.preview.bottom = max(m.preview.bottom, ib.bottom)
         }
+        CardSizeConstraints.constrainRect(m.card, m.preview, m.handle,
+            proportional = m.card.kind == "image" && m.handle.isCorner)
     }
 
     
@@ -2787,7 +2830,7 @@ class BoardInteractionController(
         if (!isSingleCardSelection(sel)) return
         val card = BoardEngine.cards[sel.cardIds[0]] ?: return
         val frame = card.rect(RectF()).apply { inset(-LASSO_BOUNDS_PAD, -LASSO_BOUNDS_PAD) }
-        lasso = LassoSelection(frame, sel.cardIds, sel.strokeIds)
+        lasso = LassoSelection(frame, sel.cardIds, sel.strokeIds, sel.fromLasso)
         BoardEngine.mutate { setSelection(selectionIds()) }
         updateLassoOverlay()
     }
@@ -2795,59 +2838,21 @@ class BoardInteractionController(
     
     private fun singleCardFrameHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
         val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardEngine.scale, 0.25f)
-        val r = sel.rect
-        val cx = r.centerX(); val cy = r.centerY()
-        fun hit(ax: Float, ay: Float) = hypot(wx - ax, wy - ay) <= radius
         val kind = sel.cardIds.firstOrNull()?.let { BoardEngine.cards[it]?.kind }
-        if (kind == "note") {
-            return when {
-                hit(r.right, cy) -> BoardGeometry.Handle.RIGHT
-                hit(r.left, cy) -> BoardGeometry.Handle.LEFT
-                else -> null
-            }
-        }
-        if (kind == "image") {
-            if (hit(r.right, r.top)) return BoardGeometry.Handle.TOP_RIGHT
-            if (hit(r.right, r.bottom)) return BoardGeometry.Handle.BOTTOM_RIGHT
-            if (hit(r.left, r.bottom)) return BoardGeometry.Handle.BOTTOM_LEFT
-        }
-        return when {
-            hit(cx, r.top) -> BoardGeometry.Handle.TOP
-            hit(r.right, cy) -> BoardGeometry.Handle.RIGHT
-            hit(cx, r.bottom) -> BoardGeometry.Handle.BOTTOM
-            hit(r.left, cy) -> BoardGeometry.Handle.LEFT
-            else -> null
-        }
+        return ResizeHandles.hit(ResizeHandles.forCard(kind), sel.rect, wx, wy, radius)
     }
 
     
     private fun shapeEdgeHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
         val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardEngine.scale, 0.25f)
-        val r = sel.rect
-        val cx = r.centerX(); val cy = r.centerY()
-        fun hit(ax: Float, ay: Float) = hypot(wx - ax, wy - ay) <= radius
-        return when {
-            hit(cx, r.top) -> BoardGeometry.Handle.TOP
-            hit(r.right, cy) -> BoardGeometry.Handle.RIGHT
-            hit(cx, r.bottom) -> BoardGeometry.Handle.BOTTOM
-            hit(r.left, cy) -> BoardGeometry.Handle.LEFT
-            else -> null
-        }
+        return ResizeHandles.hit(ResizeHandles.forSelection(false, true, false), sel.rect, wx, wy, radius)
     }
 
     
     private fun selectionCornerHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
         if (isSingleCardSelection(sel)) return null
         val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardEngine.scale, 0.25f)
-        val r = sel.rect
-        fun hit(ax: Float, ay: Float) = hypot(wx - ax, wy - ay) <= radius
-        
-        return when {
-            hit(r.right, r.top) -> BoardGeometry.Handle.TOP_RIGHT
-            hit(r.right, r.bottom) -> BoardGeometry.Handle.BOTTOM_RIGHT
-            hit(r.left, r.bottom) -> BoardGeometry.Handle.BOTTOM_LEFT
-            else -> null
-        }
+        return ResizeHandles.hit(ResizeHandles.forSelection(true, shapeKindOf(sel) != null, false), sel.rect, wx, wy, radius)
     }
 
     private fun beginSelectionResize(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, sel: LassoSelection, handle: BoardGeometry.Handle): MoveSession.SelectionResize {
@@ -2902,6 +2907,7 @@ class BoardInteractionController(
                 else -> {}
             }
             m.preview.set(left, top, right, bottom)
+            constrainSelectionResize(m)
             return
         }
         val oldCornerX = if (handle.movesLeft) start.left else start.right
@@ -2920,6 +2926,18 @@ class BoardInteractionController(
         val left = if (handle.movesLeft) ax - newW else ax
         val top = if (handle.movesTop) ay - newH else ay
         m.preview.set(left, top, left + newW, top + newH)
+        constrainSelectionResize(m)
+    }
+
+    private fun constrainSelectionResize(m: MoveSession.SelectionResize) {
+        val start = m.startRect
+        val scale = CardSizeConstraints.selectionScale(m.cards,
+            m.preview.width() / start.width(), m.preview.height() / start.height(), m.handle.isCorner)
+        val w = start.width() * scale.x
+        val h = start.height() * scale.y
+        val x = if (m.handle.movesLeft) start.right - w else start.left
+        val y = if (m.handle.movesTop) start.bottom - h else start.top
+        m.preview.set(x, y, x + w, y + h)
     }
 
     
@@ -2965,6 +2983,12 @@ class BoardInteractionController(
         synchronized(BoardEngine.lock) {
             for (id in sel.cardIds) BoardEngine.cards[id]?.let { cards.add(it); cardRects.add(worldRectToPx(it.rect(), RectF())) }
             for (id in sel.strokeIds) BoardEngine.strokes[id]?.let { strokes.add(it) }
+            val cardIds = sel.cardIds.toHashSet()
+            for (connection in BoardEngine.connections.values) {
+                if (connection.fromId in cardIds && connection.toId in cardIds) {
+                    BoardEngine.necks[connection.id]?.let { inkPath.addPath(it.path, m) }
+                }
+            }
             for (s in strokes) {
                 
                 
@@ -3004,7 +3028,7 @@ class BoardInteractionController(
         when (m) {
             is MoveSession.CardResize -> {
                 computeResizePreview(m, wx, wy)
-                overlay.showCardPreview(worldRectToPx(m.preview, RectF()), true)
+                overlay.showCardPreview(worldRectToPx(m.preview, RectF()), m.card.kind)
             }
             is MoveSession.Selection -> {
                 m.dx = dx
@@ -3083,7 +3107,7 @@ class BoardInteractionController(
                     }
                     apply(change, record = true)
                     val rect = RectF(m.selection.rect).apply { offset(dx, dy) }
-                    lasso = LassoSelection(rect, m.selection.cardIds, m.selection.strokeIds)
+                    lasso = LassoSelection(rect, m.selection.cardIds, m.selection.strokeIds, m.selection.fromLasso)
                     BoardEngine.mutate { setSelection(selectionIds()) }
                     Log.i(TAG_LASSO, "reassigned strokes=${m.strokes.size} destination=${if (destInGroup) "unchanged:in-selection" else destination?.id ?: "canvas"}")
                 }
@@ -3121,7 +3145,7 @@ class BoardInteractionController(
                     }
                     apply(change, record = true)
                     val newRect = RectF(m.preview)
-                    lasso = LassoSelection(newRect, m.selection.cardIds, m.selection.strokeIds)
+                    lasso = LassoSelection(newRect, m.selection.cardIds, m.selection.strokeIds, m.selection.fromLasso)
                     BoardEngine.mutate { setSelection(selectionIds()) }
                 }
                 updateLassoOverlay()
@@ -3139,8 +3163,8 @@ class BoardInteractionController(
                     }
                     apply(change, record = true)
                     
-                    val sel = LassoSelection(m.selection.rect, m.selection.cardIds, m.selection.strokeIds)
-                    lasso = LassoSelection(selectionFrame(sel), sel.cardIds, sel.strokeIds)
+                    val sel = LassoSelection(m.selection.rect, m.selection.cardIds, m.selection.strokeIds, m.selection.fromLasso)
+                    lasso = LassoSelection(selectionFrame(sel), sel.cardIds, sel.strokeIds, sel.fromLasso)
                     BoardEngine.mutate { setSelection(selectionIds()) }
                 }
                 updateLassoOverlay()
@@ -4542,7 +4566,10 @@ class BoardInteractionController(
     override fun onApplySizeLevel(level: BoardGeometry.SizeLevel) {
         val id = selectedCardId ?: return
         val card = BoardEngine.cards[id] ?: return
-        apply(BoardHistory.Change("size-level").card(card, card.withRect(level.rect)), record = true)
+        val rect = RectF(level.rect)
+        CardSizeConstraints.constrainRect(card, rect, BoardGeometry.Handle.BOTTOM_RIGHT,
+            proportional = card.kind == "image")
+        apply(BoardHistory.Change("size-level").card(card, card.withRect(rect)), record = true)
     }
 
     override fun onToggleCardAccent() {
@@ -4728,6 +4755,12 @@ class BoardInteractionController(
         Log.i(TAG_SHOT, "locate link id=$shotId region=$region scale=$scale")
     }
 
+    override fun onDeleteNoteLink(shotId: String) {
+        emitter.begin()
+        emitter.action("deleteNoteShot") { putString("shotId", shotId) }
+        emitter.commit()
+    }
+
     
 
     
@@ -4741,14 +4774,17 @@ class BoardInteractionController(
     private class NoteShotPng(val path: String, val width: Int, val height: Int, val hotspot: NoteShotExport.Hotspot)
 
     
-    private fun canInsertIntoHostNote(): Boolean =
-        surface.showsBoardChrome && MosaicNoteShotModule.currentHostNotePath() != null
+    private fun canInsertIntoHostNote(sel: LassoSelection): Boolean =
+        surface.showsBoardChrome && MosaicNoteShotModule.currentHostNotePath() != null &&
+            synchronized(BoardEngine.lock) {
+                SelectionActions.canInsertNoteImage(sel.fromLasso, sel.cardIds, sel.strokeIds, BoardEngine.strokes.values)
+            }
 
     
     private fun onInsertLassoIntoNote() {
         val sel = lasso ?: return
-        if (!canInsertIntoHostNote()) {
-            Log.i(TAG_SHOT, "insert skipped: host file is not a note or surface=${surface.name}")
+        if (!canInsertIntoHostNote(sel)) {
+            Log.i(TAG_SHOT, "insert requires a lasso region containing handwriting and a host note; surface=${surface.name}")
             return
         }
         if (noteShotBusy) {

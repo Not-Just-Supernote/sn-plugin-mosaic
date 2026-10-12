@@ -19,7 +19,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
-import android.content.res.ColorStateList
 import android.widget.TextView
 import kotlin.math.min
 
@@ -88,6 +87,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         fun onLocateNoteCard(cardId: String)
         
         fun onLocateNoteLink(shotId: String)
+        fun onDeleteNoteLink(shotId: String)
         fun onSwitcherDismissed()
         
         fun onPenStyle(style: PenStyle, width: Float)
@@ -142,13 +142,10 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
     private var syncEnabled = false
     private var syncState = "off"
     
-    private val translucentButton = textButton("", 17f).apply { alpha = 0.5f }
+    private val translucentButton = textButton("", 17f)
     
-    private val translucentSlider = SeekBar(context).apply {
+    private val translucentSlider = TranslucentSeekBar(context).apply {
         max = (TranslucentStore.MAX_LEVEL - TranslucentStore.MIN_LEVEL) / TranslucentStore.STEP
-        progressTintList = ColorStateList.valueOf(INK)
-        progressBackgroundTintList = ColorStateList.valueOf(MUTED)
-        thumbTintList = ColorStateList.valueOf(INK)
     }
     private val translucentLevelText = TextView(context).apply {
         textSize = 14f
@@ -482,6 +479,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
     private fun levelOf(progress: Int): Int = TranslucentStore.MIN_LEVEL + progress * TranslucentStore.STEP
 
     private fun applyTranslucentSliderEnabled() {
+        if (!translucentActive) translucentSlider.setTracking(false)
         translucentSlider.isEnabled = translucentActive
         translucentLevelGroup.alpha = if (translucentActive) 1f else 0.4f
     }
@@ -647,9 +645,12 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
                 translucentLevelText.text = "${levelOf(progress)}%"
             }
-            override fun onStartTrackingTouch(bar: SeekBar) = Unit
+            override fun onStartTrackingTouch(bar: SeekBar) {
+                translucentSlider.setTracking(true)
+            }
             
             override fun onStopTrackingTouch(bar: SeekBar) {
+                translucentSlider.setTracking(false)
                 listener?.onTranslucentLevel(levelOf(bar.progress))
             }
         })
@@ -689,13 +690,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         saveArchiveButton.setOnClickListener { listener?.onSaveArchive() }
         val loadArchiveButton = textButton(MosaicStrings.t(MosaicStrings.Key.archiveLoad), 15f)
         loadArchiveButton.setOnClickListener { listener?.onLoadArchive() }
-        val archiveRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, dp(8f))
-        }
-        archiveRow.addView(saveArchiveButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)))
-        archiveRow.addView(loadArchiveButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(8f) })
         menuHeader.addView(
             View(context),
             LinearLayout.LayoutParams(0, 0, 1f),
@@ -707,7 +701,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)),
         )
         switcherPanel.addView(menuHeader)
-        switcherPanel.addView(archiveRow)
 
         
         val syncRow = LinearLayout(context).apply {
@@ -717,6 +710,8 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         }
         syncRow.addView(syncAddressInput, LinearLayout.LayoutParams(0, dp(40f), 1f))
         syncRow.addView(syncButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(8f) })
+        syncRow.addView(saveArchiveButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(8f) })
+        syncRow.addView(loadArchiveButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(8f) })
         syncRow.addView(syncStatus, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(10f) })
         switcherPanel.addView(syncRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
@@ -870,6 +865,13 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
     }
 
     
+    fun refreshNoteLinks() {
+        if (!switcherOpen) return
+        showNoteLinks(NoteLinks.list())
+        layoutSwitcherPanel()
+        listener?.onPenBlockChanged()
+    }
+
     private fun showNoteLinks(links: List<NoteLinks.Link>) {
         linksList.removeAllViews()
         linksPanel.visibility = if (links.isEmpty()) View.GONE else View.VISIBLE
@@ -906,6 +908,16 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
                 isSingleLine = true
             })
             row.addView(meta, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            val delete = textButton(MosaicStrings.t(MosaicStrings.Key.deleteNoteLink), 16f).apply {
+                setPadding(dp(6f), 0, dp(6f), 0)
+                contentDescription = MosaicStrings.t(MosaicStrings.Key.deleteNoteLink)
+                setOnClickListener {
+                    isEnabled = false
+                    text = "…"
+                    listener?.onDeleteNoteLink(link.id)
+                }
+            }
+            row.addView(delete, LinearLayout.LayoutParams(dp(64f), dp(48f)).apply { marginStart = dp(12f) })
             linksList.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
     }

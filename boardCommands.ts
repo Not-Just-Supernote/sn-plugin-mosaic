@@ -29,7 +29,7 @@ export type BoardCommand =
       pointOffsets: number[]; pointCounts: number[]; points: string;
     }
   | { type: 'strokesRemove'; ids: string[] }
-  | { type: 'cardUpsert'; id: string; x: number; y: number; width: number; height: number; zIndex: number; kind: string; content?: string; noteRef?: string; bgColor?: string; textColor?: string; title?: string }
+  | { type: 'cardUpsert'; id: string; x: number; y: number; width: number; height: number; zIndex: number; kind: string; content?: string; noteRef?: string; imageRef?: string; bgColor?: string; textColor?: string; title?: string }
   | { type: 'cardsRemove'; ids: string[] }
   | { type: 'connectionAdd'; id: string; from: string; to: string; locked?: boolean }
   | { type: 'connectionsRemove'; ids: string[] }
@@ -44,6 +44,7 @@ export type BoardCommand =
   | { type: 'action'; name: 'insertTextCard'; text: string; x: number; y: number; width?: number; height?: number; source?: 'inkling' | 'doc' }
   
   | { type: 'action'; name: 'recognizeLasso' }
+  | { type: 'action'; name: 'deleteNoteShot'; shotId: string }
   | { type: 'action'; name: 'saveArchive' }
   | { type: 'action'; name: 'loadArchive' }
   
@@ -215,6 +216,7 @@ export function cardFromCommand(
       
       content: op.content ?? existing.content,
       noteRef: op.noteRef || undefined,
+      imageRef: op.imageRef ?? existing.imageRef,
       title: op.title || undefined,
     }
   }
@@ -230,6 +232,7 @@ export function cardFromCommand(
   };
   card.kind = op.kind as Card['kind'];
   if (op.noteRef) card.noteRef = op.noteRef;
+  if (op.imageRef) card.imageRef = op.imageRef;
   if (op.title) card.title = op.title;
   return card;
 }

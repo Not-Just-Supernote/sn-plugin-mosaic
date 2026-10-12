@@ -2,7 +2,7 @@ import { NativeModules } from 'react-native';
 import RNFS from 'react-native-fs';
 import { NativePluginManager } from 'sn-plugin-lib';
 import { CARD_DEFAULTS } from './React/src/boardFormat';
-import { clampCardSize, MIN_IMAGE_CARD_SIZE } from './React/src/cardGeometry';
+import { MAX_CARD_SIZE, MIN_IMAGE_CARD_SIZE } from './React/src/cardGeometry';
 import { generateId } from './React/src/id';
 import type { Card } from './React/src/types';
 
@@ -112,8 +112,13 @@ export function imageCardSizeFor(
 ): { width: number; height: number } {
   const w = Math.max(1, natural.width);
   const h = Math.max(1, natural.height);
-  const ratio = Math.max(longSide, MIN_IMAGE_CARD_SIZE) / Math.max(w, h);
-  return clampCardSize(w * ratio, h * ratio, 'image');
+  // Apply both size limits through one scale so the card keeps the image's aspect.
+  // For extreme aspect ratios, the maximum long side takes priority over the minimum short side.
+  const ratio = Math.min(
+    MAX_CARD_SIZE / Math.max(w, h),
+    Math.max(longSide / Math.max(w, h), MIN_IMAGE_CARD_SIZE / Math.min(w, h)),
+  );
+  return { width: w * ratio, height: h * ratio };
 }
 
 

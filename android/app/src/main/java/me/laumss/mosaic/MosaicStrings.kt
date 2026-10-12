@@ -46,6 +46,7 @@ object MosaicStrings {
         archiveLoad,
         noteLinks,
         noteLinkFallback,
+        deleteNoteLink,
     }
 
     private val STRINGS: Map<Key, Pair<String, String>> = mapOf(
@@ -79,6 +80,7 @@ object MosaicStrings {
         Key.archiveLoad to ("读取" to "Load"),
         Key.noteLinks to ("已插入笔记" to "Inserted into notes"),
         Key.noteLinkFallback to ("笔记" to "Note"),
+        Key.deleteNoteLink to ("删除" to "Delete"),
     )
 
     fun noteName(number: Int): String =

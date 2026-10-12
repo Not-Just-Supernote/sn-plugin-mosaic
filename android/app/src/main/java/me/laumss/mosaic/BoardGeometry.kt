@@ -134,7 +134,9 @@ object BoardGeometry {
         val dy = worldY - startY
         val requestedW = start.width() + (if (handle.movesRight) dx else 0f) - (if (handle.movesLeft) dx else 0f)
         val requestedH = start.height() + (if (handle.movesBottom) dy else 0f) - (if (handle.movesTop) dy else 0f)
-        val size = clampCardSize(requestedW, requestedH, kind)
+        val size = if (kind == "image") PointF(
+            requestedW.coerceIn(1f, MAX_CARD_SIZE), requestedH.coerceIn(1f, MAX_CARD_SIZE),
+        ) else clampCardSize(requestedW, requestedH, kind)
         val x = if (handle.movesLeft) start.right - size.x else start.left
         val y = if (handle.movesTop) start.bottom - size.y else start.top
         out.set(x, y, x + size.x, y + size.y)
@@ -175,6 +177,14 @@ object BoardGeometry {
     private fun applyAspectSize(requestedW: Float, aspect: Float, kind: String?, handle: Handle, start: RectF, out: RectF) {
         val lo = minCardSize(kind)
         val a = if (aspect > 0f) aspect else 1f
+        if (kind == "image") {
+            val w = requestedW.coerceIn(0.001f, min(MAX_CARD_SIZE, MAX_CARD_SIZE / a))
+            val h = w * a
+            val x = if (handle.movesLeft) start.right - w else start.left
+            val y = if (handle.movesTop) start.bottom - h else start.top
+            out.set(x, y, x + w, y + h)
+            return
+        }
         var w = max(lo, min(MAX_CARD_SIZE, requestedW))
         var h = w * a
         if (h > MAX_CARD_SIZE) { h = MAX_CARD_SIZE; w = h / a }
@@ -339,11 +349,12 @@ object BoardGeometry {
         for (factor in SIZE_LEVEL_FACTORS) {
             val grow = factor > 1f
             val rawW = neighbor.width * factor
-            val rawH = if (card.kind == "note" && card.width > 0f) rawW * (card.height / card.width)
+            val rawH = if ((card.kind == "note" || card.kind == "image") && card.width > 0f) rawW * (card.height / card.width)
                        else neighbor.height * factor
             if (!grow && (rawW < minSide * SIZE_LEVEL_SHRINK_NEAR_RATIO || rawH < minSide * SIZE_LEVEL_SHRINK_NEAR_RATIO)) continue
             if (grow && (rawW > MAX_CARD_SIZE || rawH > MAX_CARD_SIZE)) continue
-            val clamped = clampCardSize(rawW, rawH, card.kind)
+            val clamped = if (card.kind == "image") CardSizeConstraints.fit(card, rawW, rawH, proportional = true)
+                else clampCardSize(rawW, rawH, card.kind).let { CardSizeConstraints.fit(card, it.x, it.y) }
             val width = clamped.x
             val height = if (card.kind == "note" && card.width > 0f) {
                 (width * (card.height / card.width)).coerceIn(MIN_CARD_SIZE, MAX_CARD_SIZE)

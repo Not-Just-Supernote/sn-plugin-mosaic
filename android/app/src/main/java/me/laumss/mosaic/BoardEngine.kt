@@ -157,7 +157,7 @@ object BoardEngine {
             val widthScale = kotlin.math.sqrt(kotlin.math.abs(fx * fy))
             return StrokeRec(
                 id,
-                if (destinationCard == null) "canvas" else "card:${destinationCard.id}",
+                if (destinationCard != null) "card:${destinationCard.id}" else if (connectionId != null) space else "canvas",
                 (width * widthScale).coerceAtLeast(0.5f),
                 color,
                 out,
@@ -370,6 +370,7 @@ object BoardEngine {
         val m = Mutation(); synchronized(lock) {
             strokes.clear(); cards.clear(); connections.clear(); necks.clear(); selectedCardIds.clear(); cardsByZ=emptyList(); canvasStrokeGrid.clear(); cardStrokes.clear(); threads.clear(); threadShapes.clear()
             snapshot.strokes.forEach { m.addStroke(it) }; snapshot.cards.forEach { m.upsertCard(it) }; snapshot.connections.forEach { connections[it.id]=it }; snapshot.necks.forEach { necks[it.id]=it }; selectedCardIds.addAll(snapshot.selected); rebuildCardOrderLocked()
+            ConnectionBindings.refresh(connections, strokes.values)
             m.refreshThreadsLocked()
         }
         hiddenCardId = null
@@ -489,19 +490,14 @@ object BoardEngine {
             if (existing != null) {
                 if (existing.sameGeometry(rec)) return
                 removeStrokeLocked(rec.id)
+                existing.connectionId?.let(touchedConnections::add)
                 addDirty(strokeWorldBounds(existing))
                 moved = true
             }
             if (rec.isThread || existing?.isThread == true) touchedThreads.add(rec.id)
             insertStrokeLocked(rec)
             addDirty(strokeWorldBounds(rec))
-            rec.connectionId?.let { connectionId ->
-                val connection = connections[connectionId]
-                if (connection != null && !connection.locked) {
-                    connections[connectionId] = connection.withLocked(true)
-                    touchedConnections.add(connectionId)
-                }
-            }
+            rec.connectionId?.let(touchedConnections::add)
         }
 
         
@@ -541,6 +537,7 @@ object BoardEngine {
                     
                     strokes.remove(rec.id)
                     removedRecords.add(existing)
+                    existing.connectionId?.let(lockConnections::add)
                 }
                 strokes[rec.id] = rec
                 finalWrites.remove(rec.id)
@@ -609,13 +606,7 @@ object BoardEngine {
                     bucket.addAll(added)
                 }
             }
-            for (connectionId in lockConnections) {
-                val connection = connections[connectionId] ?: continue
-                if (!connection.locked) {
-                    connections[connectionId] = connection.withLocked(true)
-                    touchedConnections.add(connectionId)
-                }
-            }
+            touchedConnections.addAll(lockConnections)
             if (left.isFinite()) addDirty(RectF(left, top, right, bottom))
             if (records.size > 128) {
                 val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000.0
@@ -626,6 +617,7 @@ object BoardEngine {
 
         fun removeStroke(id: String): StrokeRec? {
             val rec = removeStrokeLocked(id) ?: return null
+            rec.connectionId?.let(touchedConnections::add)
             if (rec.isThread) touchedThreads.add(id)
             addDirty(strokeWorldBounds(rec))
             moved = true
@@ -674,7 +666,7 @@ object BoardEngine {
                 nextIds.add(c.id)
                 val previous = connections[c.id]
                 if (previous == null) newConnections.add(c.id)
-                if (previous == null || previous.fromId != c.fromId || previous.toId != c.toId || previous.locked != c.locked) touchedConnections.add(c.id)
+                touchedConnections.add(c.id)
             }
             for (id in connections.keys) if (id !in nextIds) touchedConnections.add(id)
             connections.clear()
@@ -714,6 +706,11 @@ object BoardEngine {
 
         
         fun refreshNecksLocked() {
+            if (touchedConnections.isNotEmpty()) {
+                val changed = ConnectionBindings.refresh(connections, strokes.values)
+                touchedConnections.addAll(changed)
+                if (changed.isNotEmpty()) selectionDirty = true
+            }
             if (touchedCards.isEmpty() && touchedConnections.isEmpty()) return
             val ids = LinkedHashSet<String>(touchedConnections)
             if (touchedCards.isNotEmpty()) {

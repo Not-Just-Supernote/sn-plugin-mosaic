@@ -54,7 +54,7 @@ class InteractionOverlayView(context: Context) : View(context) {
 
     
     private var cardPreview: RectF? = null
-    private var cardPreviewHandles = false
+    private var cardPreviewHandles: List<BoardGeometry.Handle> = emptyList()
 
     
     private var framePreview: RectF? = null
@@ -191,10 +191,10 @@ class InteractionOverlayView(context: Context) : View(context) {
 
     
 
-    fun showCardPreview(rectPx: RectF, handles: Boolean) {
+    fun showCardPreview(rectPx: RectF, kind: String) {
         val r = cardPreview ?: RectF().also { cardPreview = it }
         r.set(rectPx)
-        cardPreviewHandles = handles
+        cardPreviewHandles = ResizeHandles.forCard(kind)
         invalidate()
     }
 
@@ -276,7 +276,8 @@ class InteractionOverlayView(context: Context) : View(context) {
         if (!lassoVisible) return false
         val frame = lassoFrame ?: return false
         val r = MOVE_HANDLE_RADIUS_DP * density + slopPx
-        val dx = x - frame.left; val dy = y - frame.top
+        val center = moveHandleCenter(frame)
+        val dx = x - center.x; val dy = y - center.y
         return dx * dx + dy * dy <= r * r
     }
 
@@ -486,10 +487,10 @@ class InteractionOverlayView(context: Context) : View(context) {
 
         cardPreview?.let { r ->
             canvas.drawRect(r, solidPaint)
-            if (cardPreviewHandles) drawHandles(canvas, r, d)
+            drawHandles(canvas, r, d, cardPreviewHandles)
         }
 
-        if (lassoVisible) {
+        if (lassoVisible && cardPreview == null) {
             lassoFrame?.let { frame ->
                 
                 if (lassoOnDark) setLassoInk(Color.WHITE, INK)
@@ -500,6 +501,7 @@ class InteractionOverlayView(context: Context) : View(context) {
                 val type = lassoActionTypes[i]
                 when (type) {
                     "trash" -> drawTrashButton(canvas, lassoActionRects[i], d)
+                    "copy" -> drawCopyButton(canvas, lassoActionRects[i], d)
                     "note" -> drawNoteButton(canvas, lassoActionRects[i], d)
                     "black" -> drawBlackButton(canvas, lassoActionRects[i], d)
                     "edit-text" -> drawEditTextButton(canvas, lassoActionRects[i], d)
@@ -519,6 +521,8 @@ class InteractionOverlayView(context: Context) : View(context) {
             val cards = if (moveScaled) moveCardsScaled else moveCards
             val path = if (moveScaled) movePathScaled else movePath
             if (moveFrameVisible) canvas.drawRect(frame, thinDashPaint)
+            if (moveScaled && moveFrameVisible) drawHandles(canvas, frame, d,
+                ResizeHandles.forSelection(lassoCornerHandles, lassoEdgeHandles, lassoHorizontalEdgesOnly))
             for (c in cards) canvas.drawRect(c, solidPaint)
             if (!path.isEmpty) canvas.drawPath(path, inkPaint)
             canvas.restoreToCount(save)
@@ -546,59 +550,39 @@ class InteractionOverlayView(context: Context) : View(context) {
         fillWhite.color = paper
     }
 
-    private fun drawHandles(canvas: Canvas, r: RectF, d: Float) {
+    private fun drawHandles(canvas: Canvas, r: RectF, d: Float, handles: List<BoardGeometry.Handle>) {
         val half = HANDLE_DP * d / 2f
-        val cx = r.centerX()
-        val cy = r.centerY()
-        val anchors = floatArrayOf(
-            r.left, r.top, cx, r.top, r.right, r.top,
-            r.right, cy, r.right, r.bottom, cx, r.bottom,
-            r.left, r.bottom, r.left, cy,
-        )
-        var i = 0
-        while (i < anchors.size) {
-            val ax = anchors[i]
-            val ay = anchors[i + 1]
+        for (handle in handles) {
+            val ax = ResizeHandles.x(handle, r)
+            val ay = ResizeHandles.y(handle, r)
             canvas.drawRect(ax - half, ay - half, ax + half, ay + half, fillWhite)
             canvas.drawRect(ax - half, ay - half, ax + half, ay + half, solidPaint)
-            i += 2
         }
+    }
+
+    private fun moveHandleCenter(frame: RectF): android.graphics.PointF {
+        if (!lassoCornerHandles) return android.graphics.PointF(frame.left, frame.top)
+        val avoid = ArrayList(lassoActionRects)
+        if (lassoRotateHandle) {
+            val center = FloatArray(2)
+            rotateHandleCenter(frame, density, topInsetPx, center)
+            val radius = ROTATE_HANDLE_RADIUS_DP * density
+            avoid.add(RectF(center[0] - radius, center[1] - radius, center[0] + radius, center[1] + radius))
+        }
+        return ResizeHandles.moveCenter(frame, density, topInsetPx, width.toFloat(), height.toFloat(), avoid)
     }
 
     private fun drawLassoFrame(canvas: Canvas, r: RectF, d: Float) {
         canvas.drawRect(r, thinDashPaint)
         
         val hr = MOVE_HANDLE_RADIUS_DP * d
-        canvas.drawCircle(r.left, r.top, hr, fillWhite)
-        canvas.drawCircle(r.left, r.top, hr, thinDashPaint)
-        canvas.drawText("✥", r.left, r.top + arrowPaint.textSize * 0.36f, arrowPaint)
+        val move = moveHandleCenter(r)
+        canvas.drawCircle(move.x, move.y, hr, fillWhite)
+        canvas.drawCircle(move.x, move.y, hr, thinDashPaint)
+        canvas.drawText("✥", move.x, move.y + arrowPaint.textSize * 0.36f, arrowPaint)
         if (lassoRotateHandle) drawRotateHandle(canvas, r, d)
-        if (lassoCornerHandles) {
-            
-            val half = HANDLE_DP * d / 2f
-            val corners = floatArrayOf(r.right, r.top, r.right, r.bottom, r.left, r.bottom)
-            var i = 0
-            while (i < corners.size) {
-                val ax = corners[i]; val ay = corners[i + 1]
-                canvas.drawRect(ax - half, ay - half, ax + half, ay + half, fillWhite)
-                canvas.drawRect(ax - half, ay - half, ax + half, ay + half, solidPaint)
-                i += 2
-            }
-        }
-        if (lassoEdgeHandles) {
-            
-            val half = HANDLE_DP * d / 2f
-            val cx = r.centerX(); val cy = r.centerY()
-            val edges = if (lassoHorizontalEdgesOnly) floatArrayOf(r.right, cy, r.left, cy)
-                        else floatArrayOf(cx, r.top, r.right, cy, cx, r.bottom, r.left, cy)
-            var i = 0
-            while (i < edges.size) {
-                val ax = edges[i]; val ay = edges[i + 1]
-                canvas.drawRect(ax - half, ay - half, ax + half, ay + half, fillWhite)
-                canvas.drawRect(ax - half, ay - half, ax + half, ay + half, solidPaint)
-                i += 2
-            }
-        }
+        drawHandles(canvas, r, d,
+            ResizeHandles.forSelection(lassoCornerHandles, lassoEdgeHandles, lassoHorizontalEdgesOnly))
         if (!lassoCornerHandles && !lassoEdgeHandles) {
             
             val len = LASSO_CORNER_DP * d
@@ -692,6 +676,22 @@ class InteractionOverlayView(context: Context) : View(context) {
             canvas.drawOval(cx - s * .72f, cy - s * .43f, cx + s * .72f, cy - s * .05f, solidPaint)
             canvas.drawLine(cx - s * 1.05f, cy + s * 1.1f, cx + s * 1.05f, cy - s * 1.1f, solidPaint)
         }
+    }
+
+    private fun drawCopyButton(canvas: Canvas, r: RectF, d: Float) {
+        canvas.drawCircle(r.centerX(), r.centerY(), r.width() / 2f, fillWhite)
+        canvas.drawCircle(r.centerX(), r.centerY(), r.width() / 2f, thinDashPaint)
+        val cx = r.centerX(); val cy = r.centerY()
+        canvas.drawRoundRect(RectF(cx - 10f * d, cy - 6f * d, cx + 5f * d, cy + 12f * d),
+            2f * d, 2f * d, solidPaint)
+        val back = Path().apply {
+            moveTo(cx - 5f * d, cy - 6f * d)
+            lineTo(cx - 5f * d, cy - 12f * d)
+            lineTo(cx + 10f * d, cy - 12f * d)
+            lineTo(cx + 10f * d, cy + 6f * d)
+            lineTo(cx + 5f * d, cy + 6f * d)
+        }
+        canvas.drawPath(back, solidPaint)
     }
 
     private fun drawTrashButton(canvas: Canvas, r: RectF, d: Float) {
