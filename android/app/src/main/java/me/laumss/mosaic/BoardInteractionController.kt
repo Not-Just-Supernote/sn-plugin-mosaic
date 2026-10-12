@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Path
 import android.graphics.Point
+import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
@@ -275,6 +276,7 @@ class BoardInteractionController(
         BoardEngine.replaceScene(scene)
         chrome.setNoteMode(!next.showsBoardChrome)
         content.setNoteHeader(if (next.showsBoardChrome) null else currentNoteHeader, currentNoteHeaderPlaceholder, notePageScale)
+        noteToolbarInset = toolbarHeightWorld()
         syncNotePageFrame()
         if (next.showsBoardChrome) setNoteHeaderHoverBlocked(false)
         syncToolMirrors(arbiter.effective(), "surface:${next.name}")
@@ -528,6 +530,8 @@ class BoardInteractionController(
             var frameRecognizedY = 0f
             var frameEvaluations = 0
             var continuousWrite = false
+            // Set once the stroke leaves a note page; later points are dropped.
+            var clipped = false
             
             var convertFromIndex = -1
             
@@ -1434,6 +1438,9 @@ class BoardInteractionController(
         pressure: Float?,
     ): Boolean {
         if (pressure == null || !pressure.isFinite() || pressure !in 0f..1f) return false
+        if (s.clipped) return false
+        // A stroke that runs off a note page ends at the edge; the system ink is blocked there too.
+        if (noteInkOffPage(wx, wy)) { s.clipped = true; return false }
         s.points.add(wx - s.cardX)
         s.points.add(wy - s.cardY)
         s.pressures.add(pressure)
@@ -3931,11 +3938,36 @@ class BoardInteractionController(
         if (surface.showsBoardChrome) return false
         val wx = worldX(x)
         val wy = worldY(y)
-        return wx < 0f || wx > ScrollingDocument.WIDTH || wy < -currentNoteHeaderHeight ||
-            (wy > notePageBottom && (surface as? NoteSurface)?.zoomedOut(BoardEngine.scale) == true)
+        return wx < 0f || wx > ScrollingDocument.WIDTH || wy < -currentNoteHeaderHeight || noteBelowPageEnd(wy)
     }
 
-    // Zoomed out, the note page ends a little below the ink; the content view frames it there and the pen stops at it.
+    private fun noteBelowPageEnd(wy: Float): Boolean =
+        wy > notePageBottom && (surface as? NoteSurface)?.zoomedOut(BoardEngine.scale) == true
+
+    // Ink inside a note stays on the writable page: below the header, between the sides, above the zoomed-out end.
+    private fun noteInkOffPage(wx: Float, wy: Float): Boolean =
+        !surface.showsBoardChrome && (wx < 0f || wx > ScrollingDocument.WIDTH || wy < 0f || noteBelowPageEnd(wy))
+
+    // Off-page parts of the view in view pixels, handed to the system ink service so it never draws there.
+    fun noteOffPageRectsPx(): List<Rect> {
+        if (surface.showsBoardChrome || surfaceSwitching) return emptyList()
+        val w = host.width
+        val h = host.height
+        if (w <= 0 || h <= 0) return emptyList()
+        val left = screenX(0f).toInt().coerceIn(0, w)
+        val right = kotlin.math.ceil(screenX(ScrollingDocument.WIDTH)).toInt().coerceIn(0, w)
+        val top = screenY(-currentNoteHeaderHeight).toInt().coerceIn(0, h)
+        val zoomedOut = (surface as? NoteSurface)?.zoomedOut(BoardEngine.scale) == true
+        val bottom = if (zoomedOut) kotlin.math.ceil(screenY(notePageBottom)).toInt().coerceIn(0, h) else h
+        val out = ArrayList<Rect>(4)
+        if (left > 0) out.add(Rect(0, 0, left, h))
+        if (right < w) out.add(Rect(right, 0, w, h))
+        if (right > left && top > 0) out.add(Rect(left, 0, right, top))
+        if (right > left && bottom < h) out.add(Rect(left, bottom, right, h))
+        return out
+    }
+
+    // Zoomed out, the note page ends where the ink ends; the content view frames it there and the pen stops at it.
     private fun syncNotePageFrame() {
         val note = surface as? NoteSurface
         notePageBottom = note?.zoomedOutPageBottom() ?: Float.POSITIVE_INFINITY
@@ -4392,7 +4424,28 @@ class BoardInteractionController(
 
     override fun onToggleTouch() = setTouchEnabled(!touchEnabled, fromJs = false)
 
-    override fun onPenBlockChanged() = refreshHostToolFlags()
+    override fun onPenBlockChanged() {
+        refreshHostToolFlags()
+        keepNoteTopOnToolbarChange()
+    }
+
+    // Toolbar height the note's top inset was last laid out with.
+    private var noteToolbarInset = 0f
+
+    // When the toolbar hides or shows in a note, a page resting at its top follows the toolbar edge,
+    // so hiding it leaves no blank band and showing it does not cover the header.
+    private fun keepNoteTopOnToolbarChange() {
+        val now = toolbarHeightWorld()
+        val before = noteToolbarInset
+        noteToolbarInset = now
+        if (surface.showsBoardChrome || now == before) return
+        val scale = BoardEngine.scale
+        val restingTop = before + currentNoteHeaderHeight * scale
+        val panY = if (BoardEngine.panY >= restingTop - 0.5f) BoardEngine.panY + (now - before) else BoardEngine.panY
+        surface.constrainPan(BoardEngine.panX, panY, scale, viewportTmp)
+        commitViewport(snapPanToPx(viewportTmp[0]), snapPanToPx(viewportTmp[1]), scale)
+        Log.i(TAG, "note toolbar inset $before->$now panY ${BoardEngine.panY}")
+    }
 
     override fun onDeleteSelectedCard() {
         val id = selectedCardId ?: return

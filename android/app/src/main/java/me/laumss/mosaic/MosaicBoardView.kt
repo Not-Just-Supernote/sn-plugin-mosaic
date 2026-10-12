@@ -567,6 +567,10 @@ class MosaicBoardView(
         
         
         areas.addAll(InklingLink.overlayDisableAreas())
+        // Around a zoomed-out note page; refreshed by the hover rearm before every stroke.
+        for (r in controller.noteOffPageRectsPx()) {
+            areas.add(DrawPathClient.DisableArea(loc[0] + r.left, loc[1] + r.top, r.width(), r.height()))
+        }
         return areas
     }
 

@@ -105,20 +105,16 @@ class NoteSurface(
         // Pinch zoom inside a note runs from 70% to 150% of fit-width (100%).
         const val MIN_ZOOM = 0.7f
         const val MAX_ZOOM = 1.5f
-        // Zoomed out, the page ends this far below the ink, as a share of the ink height, and is framed there.
-        private const val ZOOMED_OUT_ROOM = 0.3f
-        // White left under the bottom frame when scrolled to the end.
-        private const val ZOOMED_OUT_BOTTOM_GAP_DP = 24f
+        // Zoomed out, the page can be dragged past its top or bottom frame by this share of its on-screen
+        // height (at most this share of the screen), onto white that cannot be written on.
+        private const val ZOOMED_OUT_OVERDRAG = 0.3f
         private const val FIT_EPS = 1e-4f
     }
 
     fun zoomedOut(scale: Float): Boolean = scale < fitScale() * (1f - FIT_EPS)
 
-    // Bottom of the zoomed-out page in page units; never shorter than one screen at 100%.
-    fun zoomedOutPageBottom(): Float {
-        val contentH = notes.document?.contentHeight ?: 0f
-        return maxOf(contentH * (1f + ZOOMED_OUT_ROOM), viewportHeightDp() / fitScale())
-    }
+    // Zoomed out, the page ends where the ink ends; this is that bottom edge in page units.
+    fun zoomedOutPageBottom(): Float = notes.document?.contentHeight ?: (viewportHeightDp() / fitScale())
 
     override fun constrainScale(next: Float, start: Float): Float {
         val fit = fitScale()
@@ -138,10 +134,12 @@ class NoteSurface(
         val viewportH = viewportHeightDp()
         val contentH = notes.document?.contentHeight ?: viewportH
         val maxPan = topInsetDp()
-        // Zoomed out, the page has an end: scrolling stops once its bottom frame is in view.
+        // Zoomed out, the page is framed at both ends and can be dragged a little past either frame.
         if (zoomedOut(scale)) {
-            val minPan = minOf(viewportH - ZOOMED_OUT_BOTTOM_GAP_DP - zoomedOutPageBottom() * scale, maxPan)
-            return value.coerceIn(minPan, maxPan)
+            val pageH = zoomedOutPageBottom() * scale
+            val overdrag = ZOOMED_OUT_OVERDRAG * minOf(pageH, viewportH)
+            val minPan = minOf(viewportH - pageH, maxPan) - overdrag
+            return value.coerceIn(minPan, maxPan + overdrag)
         }
         
         val naturalMin = minOf(viewportH - contentH * scale, maxPan)

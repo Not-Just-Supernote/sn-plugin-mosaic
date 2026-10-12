@@ -992,7 +992,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     }
 
     // A note page sits on white with a black frame on its top and sides; the frame lies just outside the page,
-    // so at 100% it falls off screen. Zoomed out, the page also ends below the ink with a bottom frame.
+    // so at 100% it falls off screen. Zoomed out, the page also ends at the ink with a bottom frame.
     private fun drawPageBorder(canvas: Canvas, panXPx: Float, panYPx: Float, scalePx: Float, densityValue: Float) {
         val pageWidth = templatePageWidth
         if (pageWidth <= 0f) return
@@ -1007,10 +1007,13 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         canvas.drawRect(left - bw, top - bw, left, bottom, pageBorderPaint)
         canvas.drawRect(right, top - bw, right + bw, bottom, pageBorderPaint)
         canvas.drawRect(left, top - bw, right, top, pageBorderPaint)
-        if (!zoomedOut || bottom >= height) return
+        if (!zoomedOut) return
+        // Above and below the frame is off the page; blank it so the paper pattern stops at the frame.
+        val blank = !translucentFogActive()
+        if (blank && top - bw > 0f) canvas.drawRect(0f, 0f, width.toFloat(), top - bw, pageOutsidePaint)
+        if (bottom >= height) return
         canvas.drawRect(left - bw, bottom, right + bw, bottom + bw, pageBorderPaint)
-        // Below the frame is off the page; blank it so the paper pattern stops at the frame.
-        if (!translucentFogActive()) canvas.drawRect(0f, bottom + bw, width.toFloat(), height.toFloat(), pageOutsidePaint)
+        if (blank) canvas.drawRect(0f, bottom + bw, width.toFloat(), height.toFloat(), pageOutsidePaint)
     }
 
     private fun drawSelection(canvas: Canvas, panXPx: Float, panYPx: Float, scalePx: Float) {

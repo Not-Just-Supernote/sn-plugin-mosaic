@@ -70,7 +70,7 @@ Images shared through Notipal arrive as image cards.
 
 Note Cards give you a long vertically scrolling space for handwriting. You can keep scrolling down and writing for as long as you need. Selecting and dragging can grab all strokes below a point at once.
 
-Inside a Note Card, pinch to zoom between 70% and 150%. A two-finger gesture either pans or zooms, never both. At 100% the page fills the screen width and only scrolls up and down; releasing a pinch close to 100% snaps back to it. Zoomed out, the page sits on white with a black frame, and you can only write inside the frame. The frame closes a little below your writing (30% of its height), so you cannot scroll endlessly into blank space while zoomed out.
+Inside a Note Card, pinch to zoom between 70% and 150%. A two-finger gesture either pans or zooms, never both. At 100% the page fills the screen width and only scrolls up and down; releasing a pinch close to 100% snaps back to it. Zoomed out, the page sits on white with a black frame that closes right where your writing ends, and you can only write inside the frame. You can drag the page a little past its top or bottom frame (about 30% of its height) to look around it, but not endlessly.
 
 Pull down from the top of a Note Card to go back to the whiteboard. Its thumbnail also updates in the side menu.
 
