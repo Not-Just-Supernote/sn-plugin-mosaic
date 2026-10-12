@@ -4291,9 +4291,12 @@ class BoardInteractionController(
             apply(pre, record = true)
             source = BoardEngine.cards[source.id] ?: return
         }
-        
+        // The note is a 480-wide column; ink from a wider card is scaled to fit, otherwise its right side is cut off.
+        val fit = (ScrollingDocument.WIDTH / source.width).coerceAtMost(1f)
         val moved = synchronized(BoardEngine.lock) {
-            BoardEngine.cardStrokes[source.id]?.map { it.translated(0f, 0f, null, null) } ?: emptyList()
+            BoardEngine.cardStrokes[source.id]?.map {
+                if (fit < 1f) it.scaled(fit, fit, 0f, 0f, null, null) else it.translated(0f, 0f, null, null)
+            } ?: emptyList()
         }
         val ref = "note-" + UUID.randomUUID().toString().replace("-", "").take(12)
         noteController.open(notesDirectory, ref, create = true) { result ->
