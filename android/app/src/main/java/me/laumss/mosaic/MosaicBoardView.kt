@@ -424,6 +424,8 @@ class MosaicBoardView(
         }
         drawPathActive = false
         configured = false
+        // A suspend asked for in this session (scene cache, note tap) must not outlive it.
+        suspendRequested = false
         drawPathBinder = null
         stylusContact = false
         awaitingStrokeCommit = false

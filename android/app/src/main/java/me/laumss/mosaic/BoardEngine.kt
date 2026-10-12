@@ -777,6 +777,10 @@ object BoardEngine {
             Log.w(TAG, "applyOps: base64 decode failed", error)
             return 0
         }
+        return applyOpsBytes(bytes)
+    }
+
+    fun applyOpsBytes(bytes: ByteArray): Int {
         val buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
         var count = 0
         val startedAt = System.nanoTime()
@@ -1106,6 +1110,58 @@ object BoardEngine {
         x >= b.left - r && x <= b.right + r && y >= b.top - r && y <= b.bottom + r
 
     
+
+    // Writes a scene in the same op stream JS sends (cards, connections, then strokes), for SceneCache.
+    fun encodeSceneOps(scene: SceneSnapshot): ByteArray {
+        val w = OpsWriter()
+        val strokes = scene.strokes.filter { it.points.size >= 2 && it.pressures.isNotEmpty() }
+        w.short(PROTOCOL_VERSION)
+        w.int(scene.cards.size + 1 + strokes.size)
+        for (c in scene.cards) {
+            w.byte(OP_UPSERT_CARD)
+            w.str(c.id); w.float(c.x); w.float(c.y); w.float(c.width); w.float(c.height); w.int(c.zIndex)
+            w.str(c.kind); w.str(c.content); w.str(c.imagePath); w.str(c.noteRef)
+            w.str(c.bgColor); w.str(c.textColor); w.str(c.title)
+        }
+        w.byte(OP_SET_CONNECTIONS)
+        w.int(scene.connections.size)
+        for (c in scene.connections) {
+            w.str(c.id); w.str(c.fromId); w.str(c.toId); w.byte(if (c.locked) 1 else 0)
+        }
+        for (s in strokes) {
+            w.byte(OP_ADD_STROKE)
+            w.str(s.id); w.str(s.space); w.float(s.width); w.int(s.color); w.short(s.penStyle)
+            w.float(s.sampleScale); w.int(s.drawPathWidth); w.float(s.nibAngle)
+            val angles = if (s.angles.size % 2 == 0) s.angles else IntArray(0)
+            w.int(angles.size)
+            for (a in angles) w.int(a)
+            val count = minOf(s.points.size / 2, s.pressures.size)
+            w.int(count)
+            for (i in 0 until count) { w.float(s.points[2 * i]); w.float(s.points[2 * i + 1]); w.float(s.pressures[i]) }
+        }
+        return w.toByteArray()
+    }
+
+    private class OpsWriter {
+        private var buf: ByteBuffer = ByteBuffer.allocate(256 * 1024).order(ByteOrder.LITTLE_ENDIAN)
+        private fun ensure(n: Int) {
+            if (buf.remaining() >= n) return
+            val next = ByteBuffer.allocate(maxOf(buf.capacity() * 2, buf.position() + n)).order(ByteOrder.LITTLE_ENDIAN)
+            buf.flip()
+            next.put(buf)
+            buf = next
+        }
+        fun byte(v: Int) { ensure(1); buf.put(v.toByte()) }
+        fun short(v: Int) { ensure(2); buf.putShort(v.toShort()) }
+        fun int(v: Int) { ensure(4); buf.putInt(v) }
+        fun float(v: Float) { ensure(4); buf.putFloat(v) }
+        fun str(v: String) {
+            var bytes = v.toByteArray(Charsets.UTF_8)
+            if (bytes.size > 0xffff) bytes = bytes.copyOf(0xffff)
+            short(bytes.size); ensure(bytes.size); buf.put(bytes)
+        }
+        fun toByteArray(): ByteArray = buf.array().copyOf(buf.position())
+    }
 
     private fun readString(buf: ByteBuffer): String {
         val length = buf.short.toInt() and 0xffff

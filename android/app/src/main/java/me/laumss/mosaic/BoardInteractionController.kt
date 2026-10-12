@@ -13,6 +13,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import android.widget.FrameLayout
@@ -64,7 +65,10 @@ class BoardInteractionController(
         private const val SHAPE_MIN_DRAG_DP = 8f
 
         
-        private const val NOTE_RESTORE_PAINT_HOLD_MS = 500L
+        // Longest the board stays unpainted at launch while a saved note reopens.
+        private const val NOTE_RESTORE_PAINT_HOLD_MS = 2000L
+        // Longest the pen waits for JS's scene while the board shows only the scene cache.
+        private const val SCENE_CACHE_PEN_HOLD_MS = 5000L
 
         
         const val ACCENT_BG_COLOR = "#FFF9E3"
@@ -254,16 +258,77 @@ class BoardInteractionController(
 
     fun setNotesDirectory(path: String) {
         notesDirectory = path
+        if (path.isNotBlank()) MosaicSession.saveNotesDirectory(host.context, path)
         restoreSessionNote()
     }
 
-    
+    // Reopens the note the plugin was closed in, as soon as its card is in the scene (from the scene cache or JS).
     private fun restoreSessionNote() {
         if (suspendedBoard != null || surfaceSwitching) return
         val ref = MosaicSession.savedNoteRef(host.context) ?: return
-        
-        
-        host.post { if (host.width > 0 && host.height > 0) openNote(ref) }
+        val hasCard = synchronized(BoardEngine.lock) { BoardEngine.cards.values.any { it.noteRef == ref } }
+        if (!hasCard) {
+            // JS's own scene has no such card: the note is gone, so the board shows normally.
+            if (SceneCache.jsSceneArrived) {
+                MosaicSession.saveNoteRef(host.context, null)
+                releasePaintHold("session-note-missing")
+            }
+            return
+        }
+        whenLaidOut { openNote(ref) }
+    }
+
+    private fun whenLaidOut(action: () -> Unit) {
+        if (host.width > 0 && host.height > 0) { host.post(action); return }
+        host.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
+            override fun onLayoutChange(v: View, left: Int, top: Int, right: Int, bottom: Int, oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int) {
+                if (v.width <= 0 || v.height <= 0) return
+                v.removeOnLayoutChangeListener(this)
+                v.post(action)
+            }
+        })
+    }
+
+    // At launch the board draws Kotlin's cached scene until JS has read board.mosaic, then reopens a saved note
+    // from it at once. Nothing is loaded when the scene is already in memory.
+    private fun loadSceneCache() {
+        val empty = synchronized(BoardEngine.lock) { BoardEngine.cards.isEmpty() && BoardEngine.strokes.isEmpty() }
+        if (!empty || SceneCache.jsSceneArrived) return
+        val generation = SceneCache.jsGeneration
+        val context = host.context
+        SceneCache.load(context) { bytes ->
+            WhiteboardSceneGate.dispatch {
+                if (SceneCache.jsGeneration != generation || SceneCache.jsSceneArrived) return@dispatch
+                if (InputRouter.sink !== this || surfaceSwitching || suspendedBoard != null) return@dispatch
+                val stillEmpty = synchronized(BoardEngine.lock) { BoardEngine.cards.isEmpty() && BoardEngine.strokes.isEmpty() }
+                if (!stillEmpty) return@dispatch
+                val ops = BoardEngine.applyOpsBytes(bytes)
+                Log.i(TAG, "scene cache drawn ops=$ops")
+                content.requestInitialRaster()
+                regionsDirty = true
+                scheduleChromeUpdate()
+                if (MosaicSession.savedNoteRef(context) != null) restoreSessionNote() else holdPenForJsScene()
+            }
+        }
+    }
+
+    // Strokes written on the cached board before JS has loaded would be lost when JS's scene replaces it.
+    private var penHeldForJsScene = false
+    private val releasePenForJsSceneTask = Runnable { releasePenForJsScene("timeout") }
+
+    private fun holdPenForJsScene() {
+        if (penHeldForJsScene) return
+        penHeldForJsScene = true
+        host.setDrawPathSuspended(true, "scene-cache")
+        host.postDelayed(releasePenForJsSceneTask, SCENE_CACHE_PEN_HOLD_MS)
+    }
+
+    private fun releasePenForJsScene(reason: String, notifyHost: Boolean = true) {
+        host.removeCallbacks(releasePenForJsSceneTask)
+        if (!penHeldForJsScene) return
+        penHeldForJsScene = false
+        if (notifyHost) host.setDrawPathSuspended(false, "scene-cache:$reason")
+        Log.i(TAG, "pen released after scene cache reason=$reason")
     }
 
     
@@ -317,7 +382,7 @@ class BoardInteractionController(
                 val scale = ScrollingDocument.viewScale(host.width / density)
                 notePageScale = scale
                 setPageNoteHeader(BoardContentView.noteHeaderOf(sourceCard))
-                val note = NoteSurface(noteController, host.context, { host.height / density }, { host.width / density }, { notePageScale }, ::noteTopInsetWorld, ::closeNote)
+                val note = NoteSurface(noteController, host.context, { host.height / density }, { host.width / density }, { notePageScale }, ::noteTopInsetWorld, ::closeNote) { exitFromNote("launcher-pull") }
                 val panY = toolbarHeightWorld() + currentNoteHeaderHeight * scale - doc.clampScroll(doc.scrollY, host.height / density / scale) * scale
                 val scene = BoardEngine.SceneSnapshot(doc.strokes, emptyList(), emptyList(), emptyList(), emptyList(), 0f, panY, scale)
                 enterSurface(note, scene)
@@ -350,6 +415,8 @@ class BoardInteractionController(
                 enterSurface(whiteboard, suspended.scene)
                 setLasso(suspended.lasso)
                 WhiteboardSceneGate.release()
+                // A note reopened from the scene cache can close before JS has loaded the board.
+                if (!SceneCache.jsSceneArrived) holdPenForJsScene()
                 val card = synchronized(BoardEngine.lock) { BoardEngine.cards.values.firstOrNull { it.noteRef == doc.ref } }
                 if (card != null) {
                     val size = FloatArray(2); noteCardBoardSize(doc.contentHeight, card.width, size, BoardContentView.noteHeaderOf(card))
@@ -718,6 +785,10 @@ class BoardInteractionController(
             content.setHoldPaint(true)
             host.postDelayed(releasePaintHoldTask, NOTE_RESTORE_PAINT_HOLD_MS)
         }
+        if (notesDirectory.isBlank()) MosaicSession.savedNotesDirectory(host.context)?.let { notesDirectory = it }
+        SceneCache.onJsSceneApplied = { releasePenForJsScene("js-scene") }
+        loadSceneCache()
+        restoreSessionNote()
         scheduleChromeUpdate()
     }
 
@@ -732,6 +803,9 @@ class BoardInteractionController(
     }
 
     fun detach() {
+        SceneCache.onJsSceneApplied = null
+        // The view drops its suspend request itself once the system ink is released.
+        releasePenForJsScene("detach", notifyHost = false)
         resetNoteScrollMode()
         closeCardEditor()
         releasePaintHold("detach")
@@ -754,6 +828,7 @@ class BoardInteractionController(
         }
         
         MosaicSession.saveViewport(host.context, BoardEngine.panX, BoardEngine.panY, BoardEngine.scale)
+        SceneCache.save(host.context, BoardEngine.snapshotScene())
         surfaceSwitching = false
         if (InputRouter.sink === this) InputRouter.sink = null
         chrome.listener = null
@@ -875,9 +950,14 @@ class BoardInteractionController(
             surface.onCloseRequested(BoardSurface.CloseSource.TOOLBAR)
             return
         }
-        
+        exitFromNote("inkling-close")
+    }
+
+    // Saves the open note and closes the plugin without leaving the note, so the next launch reopens it.
+    private fun exitFromNote(reason: String) {
+        if (surfaceSwitching || suspendedBoard == null) return
         surfaceSwitching = true
-        cancelActiveInteractions("inkling-close")
+        cancelActiveInteractions(reason)
         val liveStrokes = synchronized(BoardEngine.lock) { BoardEngine.strokes.values.toList() }
         val compacted = ScrollingDocument.compact(liveStrokes)
         if (compacted.isNotEmpty() || noteController.document?.strokes?.isEmpty() != false) {
@@ -885,7 +965,8 @@ class BoardInteractionController(
         }
         noteController.flush(true) { result ->
             surfaceSwitching = false
-            result.onFailure { Log.e(TAG, "note save failed on inkling close", it) }
+            result.onFailure { Log.e(TAG, "note save failed on exit reason=$reason", it) }
+            Log.i(TAG, "exit from note reason=$reason")
             whiteboard.onCloseRequested(BoardSurface.CloseSource.TOOLBAR)
         }
     }
@@ -1268,11 +1349,13 @@ class BoardInteractionController(
             }
             else -> cancelFingerGestures("pen-down")
         }
-        if (surfaceSwitching || chrome.consumesPoint(x, y) || inklingToolbarHit(x, y) || noteHeaderHit(x, y) || noteOffPageHit(x, y)) {
+        val waitingForJsScene = penHeldForJsScene && surface.showsBoardChrome
+        if (surfaceSwitching || waitingForJsScene || chrome.consumesPoint(x, y) || inklingToolbarHit(x, y) || noteHeaderHit(x, y) || noteOffPageHit(x, y)) {
             Log.i(
                 TAG_PEN,
                 "DOWN rejected: ${when {
                     surfaceSwitching -> "surface-switching"
+                    waitingForJsScene -> "scene-cache"
                     inklingToolbarHit(x, y) -> "inkling-toolbar"
                     noteHeaderHit(x, y) -> "note-header"
                     noteOffPageHit(x, y) -> "note-off-page"

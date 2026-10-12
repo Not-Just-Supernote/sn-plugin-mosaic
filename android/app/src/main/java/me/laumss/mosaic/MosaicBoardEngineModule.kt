@@ -16,6 +16,36 @@ class MosaicBoardEngineModule(
 
     override fun getName(): String = "MosaicBoardEngine"
 
+    // JS replaces the whole scene as clearScene, a run of applyOps, then documentReplaced. Those calls are gathered
+    // here and run as one UI step, so no frame rasters the empty board between the clear and the new content.
+    private val replaceLock = Any()
+    private var replacing: ArrayList<() -> Unit>? = null
+    private val main = Handler(Looper.getMainLooper())
+    // JS skips documentReplaced while the board view is not mounted yet; the gathered scene still goes in then.
+    private val replaceTimeout = Runnable { flushReplace(null) }
+
+    private fun enqueue(action: () -> Unit) {
+        synchronized(replaceLock) {
+            replacing?.let { it.add(action); return }
+        }
+        WhiteboardSceneGate.dispatch(action)
+    }
+
+    private fun flushReplace(viewTag: Int?): Boolean {
+        val batch = synchronized(replaceLock) { replacing.also { replacing = null } } ?: return false
+        main.removeCallbacks(replaceTimeout)
+        WhiteboardSceneGate.dispatch {
+            batch.forEach { it() }
+            SceneCache.jsSceneApplied()
+            viewTag?.let { resolveView(it) }?.controller?.onDocumentReplaced()
+        }
+        return true
+    }
+
+    private fun resolveView(viewTag: Int): MosaicBoardView? = try {
+        reactApplicationContext.getNativeModule(UIManagerModule::class.java)?.resolveView(viewTag) as? MosaicBoardView
+    } catch (_: Throwable) { null }
+
     
     @ReactMethod(isBlockingSynchronousMethod = true)
     fun getCurrentSurface(): String = InklingLink.currentSurface()
@@ -27,13 +57,13 @@ class MosaicBoardEngineModule(
     
     @ReactMethod
     fun applyOps(base64: String) {
-        WhiteboardSceneGate.dispatch { BoardEngine.applyOps(base64) }
+        enqueue { BoardEngine.applyOps(base64) }
     }
 
     
     @ReactMethod
     fun setViewport(panX: Double, panY: Double, scale: Double) {
-        WhiteboardSceneGate.dispatch { BoardEngine.setViewport(panX.toFloat(), panY.toFloat(), scale.toFloat()) }
+        enqueue { BoardEngine.setViewport(panX.toFloat(), panY.toFloat(), scale.toFloat()) }
     }
 
     
@@ -41,7 +71,7 @@ class MosaicBoardEngineModule(
     fun setViewportIfUnset(panX: Double, panY: Double, scale: Double) {
         val ctx = reactApplicationContext
         if (MosaicSession.savedViewport(ctx) != null) return
-        WhiteboardSceneGate.dispatch {
+        enqueue {
             BoardEngine.setViewport(panX.toFloat(), panY.toFloat(), scale.toFloat())
             MosaicSession.saveViewport(ctx, BoardEngine.panX, BoardEngine.panY, BoardEngine.scale)
         }
@@ -58,13 +88,20 @@ class MosaicBoardEngineModule(
     
     @ReactMethod
     fun clearScene() {
-        WhiteboardSceneGate.dispatch { BoardEngine.clearScene() }
+        SceneCache.jsReplaceStarted()
+        flushReplace(null)
+        synchronized(replaceLock) { replacing = arrayListOf({ BoardEngine.clearScene() }) }
+        main.postDelayed(replaceTimeout, REPLACE_TIMEOUT_MS)
     }
 
     
     @ReactMethod
     fun documentReplaced(viewTag: Int) {
-        withView(viewTag) { it.controller.onDocumentReplaced() }
+        if (flushReplace(viewTag)) return
+        withView(viewTag) {
+            SceneCache.jsSceneApplied()
+            it.controller.onDocumentReplaced()
+        }
     }
 
     
@@ -125,7 +162,7 @@ class MosaicBoardEngineModule(
     fun invalidateImages(paths: ReadableArray) {
         val list = ArrayList<String>()
         for (i in 0 until paths.size()) paths.getString(i)?.let { list.add(it) }
-        WhiteboardSceneGate.dispatch { BoardEngine.invalidateImages(list) }
+        enqueue { BoardEngine.invalidateImages(list) }
     }
 
     
@@ -136,12 +173,14 @@ class MosaicBoardEngineModule(
     fun removeListeners(count: Int) = Unit
 
     private fun withView(viewTag: Int, onMissing: (() -> Unit)? = null, block: (MosaicBoardView) -> Unit) {
-        Handler(Looper.getMainLooper()).post {
-            val view = try {
-                reactApplicationContext.getNativeModule(UIManagerModule::class.java)?.resolveView(viewTag)
-            } catch (_: Throwable) { null }
-            val board = view as? MosaicBoardView
+        main.post {
+            val board = resolveView(viewTag)
             if (board == null) onMissing?.invoke() else WhiteboardSceneGate.dispatch { block(board) }
         }
+    }
+
+    private companion object {
+        // Long enough for JS to encode a large board between the clear and the last applyOps.
+        const val REPLACE_TIMEOUT_MS = 3000L
     }
 }

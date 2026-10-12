@@ -91,6 +91,8 @@ class NoteSurface(
     private val topInsetDp: () -> Float,
     
     private val close: () -> Unit,
+    // Leaves the plugin from inside the note; the next launch reopens this note.
+    private val exitPlugin: () -> Unit,
 ) : BoardSurface {
     override val name = "note"
     override val emitsCommands = false
@@ -157,8 +159,9 @@ class NoteSurface(
         notes.document?.scrollY = ((topInsetDp() - panY) / scale).coerceAtLeast(0f)
     }
 
+    // The close button goes back to the board; pulling down from the top leaves the plugin, as on the board.
     override fun onCloseRequested(source: BoardSurface.CloseSource) {
-        close()
+        if (source == BoardSurface.CloseSource.LAUNCHER_PULL) exitPlugin() else close()
         if (source == BoardSurface.CloseSource.LAUNCHER_PULL) {
             
             context.sendBroadcast(Intent("com.ratta.supernote.launcher.BroadcastReceiver.slidebarstatusbar").putExtra("lockStatusbar", false))

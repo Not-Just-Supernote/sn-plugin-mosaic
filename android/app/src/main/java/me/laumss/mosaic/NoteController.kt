@@ -72,6 +72,7 @@ class NoteController {
 object MosaicSession {
     private const val PREFS = "mosaic_session"
     private const val KEY_NOTE_REF = "noteRef"
+    private const val KEY_NOTES_DIR = "notesDir"
     private const val KEY_PAN_X = "panX"
     private const val KEY_PAN_Y = "panY"
     private const val KEY_SCALE = "scale"
@@ -88,6 +89,15 @@ object MosaicSession {
     fun savedNoteRef(context: android.content.Context): String? =
         context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
             .getString(KEY_NOTE_REF, null)
+
+    // The notes folder JS last reported, so a saved note can reopen before JS reports it again.
+    fun saveNotesDirectory(context: android.content.Context, path: String) {
+        context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).edit().putString(KEY_NOTES_DIR, path).apply()
+    }
+
+    fun savedNotesDirectory(context: android.content.Context): String? =
+        context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
+            .getString(KEY_NOTES_DIR, null)?.takeIf { java.io.File(it).isDirectory }
 
     
     fun saveViewport(context: android.content.Context, panX: Float, panY: Float, scale: Float) {

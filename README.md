@@ -72,7 +72,7 @@ Note Cards give you a long vertically scrolling space for handwriting. You can k
 
 Inside a Note Card, pinch to zoom between 70% and 150%. A two-finger gesture either pans or zooms, never both. At 100% the page fills the screen width and only scrolls up and down; releasing a pinch close to 100% snaps back to it. Zoomed out, the page sits on white with a black frame that closes right where your writing ends, and you can only write inside the frame. You can drag the page a little past its top or bottom frame (about 30% of its height) to look around it, but not endlessly.
 
-Pull down from the top of a Note Card to go back to the whiteboard. Its thumbnail also updates in the side menu.
+Inside a Note Card, the close button goes back to the whiteboard, and pulling down from the top closes Mosaic just as it does on the whiteboard. The next time you open Mosaic, it opens straight into that Note Card. Either way, its thumbnail also updates in the side menu.
 
 Text cards can use either a white or black style. Dark cards use white text and handwriting automatically. Connections are made between cards using the same color, and a card pulled from another card keeps that style.
 
