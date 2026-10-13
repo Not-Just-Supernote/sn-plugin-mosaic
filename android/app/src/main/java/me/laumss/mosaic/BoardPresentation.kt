@@ -13,15 +13,16 @@ class BoardPresentation(
     private val settleMs: Long,
 ) {
     
-    enum class Reason(val einkMode: Int?, val flat: Boolean, val suspendFog: Boolean) {
+    // motion：画面跟着手移动的手势，按系统 Note 的做法开关 regal（见 EinkRegal）。
+    enum class Reason(val einkMode: Int?, val flat: Boolean, val suspendFog: Boolean, val motion: Boolean = false) {
         
         
-        PAN_ZOOM(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true),
+        PAN_ZOOM(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true, motion = true),
 
         // Notipal 浮窗在白板上被拖动：与双指平移相同的显示，被浮窗让出的区域按 A2 快刷。
         INKLING_DRAG(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true),
         
-        TRANSFORM(MosaicEinkRefreshModule.MODE_DEFAULT, flat = true, suspendFog = false),
+        TRANSFORM(MosaicEinkRefreshModule.MODE_DEFAULT, flat = true, suspendFog = false, motion = true),
         
         TOOL(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false),
         
@@ -63,12 +64,15 @@ class BoardPresentation(
     fun acquire(reason: Reason) {
         handler.removeCallbacks(settleTask)
         lingering.remove(reason)
+        // 先开 regal，再切模式和样子：从静止到移动的这一帧由 regal 清残影。
+        if (reason.motion && reason !in active) EinkRegal.begin(content.context, reason.name)
         if (active.add(reason)) commit("acquire:$reason")
         if (lingering.isNotEmpty()) handler.postDelayed(settleTask, settleMs)
     }
 
     fun release(reason: Reason, linger: Boolean = true) {
         val wasActive = active.remove(reason)
+        if (wasActive && reason.motion) EinkRegal.end(content.context, reason.name)
         if (linger) {
             
             if (!wasActive) return
@@ -88,9 +92,16 @@ class BoardPresentation(
     
     fun refresh(why: String) = commit("refresh:$why")
 
+    // 手势真正开始移动时调用。换样的图块还没上屏时先不关 regal，等下一次移动再试。
+    fun moved(reason: Reason) {
+        if (!reason.motion || reason !in active || content.isLookPending) return
+        EinkRegal.moved(content.context, reason.name)
+    }
+
     
     fun reset(why: String) {
         handler.removeCallbacks(settleTask)
+        EinkRegal.restore(content.context, why)
         active.clear()
         lingering.clear()
         commit("reset:$why", force = true)

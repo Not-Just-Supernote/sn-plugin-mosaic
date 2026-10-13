@@ -1239,7 +1239,8 @@ class BoardInteractionController(
         
         
         presentation.set(BoardPresentation.Reason.TOOL, eraserMode)
-        presentation.set(BoardPresentation.Reason.LASSO, lassoMode || (lasso != null && !penContact))
+        // 只在套索工具下用 auto；选中后静止时交还宿主刷新，长按拖卡片和拖边改尺寸都只在拖动时切一次。
+        presentation.set(BoardPresentation.Reason.LASSO, lassoMode)
     }
 
     private fun refreshHostToolFlags() = syncToolMirrors(arbiter.effective(), "flags")
@@ -3123,6 +3124,7 @@ class BoardInteractionController(
     }
 
     private fun updateMoveSession(m: MoveSession, wx: Float, wy: Float) {
+        presentation.moved(BoardPresentation.Reason.TRANSFORM)
         val dx = wx - m.startWorldX
         val dy = wy - m.startWorldY
         when (m) {
@@ -4061,6 +4063,7 @@ class BoardInteractionController(
             presentation.acquire(BoardPresentation.Reason.PAN_ZOOM)
         } else {
             handler.removeCallbacks(noteScrollResetTask)
+            EinkRegal.begin(host.context, NOTE_SCROLL_EINK_OWNER)
             MosaicEinkRefreshModule.applyNative(MosaicEinkRefreshModule.MODE_A2, NOTE_SCROLL_EINK_OWNER)
         }
         armPanZoom()
@@ -4136,6 +4139,8 @@ class BoardInteractionController(
         g.overscroll = null
         g.frames++
         BoardEngine.setViewport(panX, panY, nextScale)
+        if (surface.showsBoardChrome) presentation.moved(BoardPresentation.Reason.PAN_ZOOM)
+        else EinkRegal.moved(host.context, NOTE_SCROLL_EINK_OWNER)
         if (g.frames % 10 == 0) {
             val centerX = (host.width / density / 2f - panX) / nextScale
             val centerY = (host.height / density / 2f - panY) / nextScale
@@ -4257,6 +4262,7 @@ class BoardInteractionController(
         panZoomArmed = false
         presentation.release(BoardPresentation.Reason.PAN_ZOOM)
         if (!surface.showsBoardChrome) {
+            EinkRegal.end(host.context, NOTE_SCROLL_EINK_OWNER)
             handler.removeCallbacks(noteScrollResetTask)
             handler.postDelayed(noteScrollResetTask, NOTE_SCROLL_SETTLE_MS)
         }

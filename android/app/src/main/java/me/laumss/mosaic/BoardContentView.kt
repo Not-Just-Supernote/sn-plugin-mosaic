@@ -35,6 +35,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         private const val PERF_LOG_INTERVAL_MS = 1000L
         
         private const val GESTURE_FRAME_MIN_MS = 70L
+        // 换样图块最多等这么久，超时就跟随视口，不让手势卡住。
+        private const val LOOK_WAIT_MAX_MS = 400L
 
         
         
@@ -804,11 +806,16 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         if (holdPaint) return
         val startedAt = System.nanoTime()
         if (gestureThrottle) lastGestureFrameAt = SystemClock.uptimeMillis()
-        val scale = BoardEngine.scale
+        if (lookPending && lookDrained) {
+            lookPending = false
+            removeCallbacks(lookTimeoutTask)
+        }
+        val holdView = lookPending
+        val scale = if (holdView) lookScale else BoardEngine.scale
         val densityValue = density
         val scalePx = scale * densityValue
-        val panXPx = BoardEngine.panX * densityValue
-        val panYPx = BoardEngine.panY * densityValue
+        val panXPx = (if (holdView) lookPanX else BoardEngine.panX) * densityValue
+        val panYPx = (if (holdView) lookPanY else BoardEngine.panY) * densityValue
         val tilePx = TILE_WORLD * scalePx
         if (width == 0 || height == 0 || tilePx <= 0f) return
 
@@ -963,12 +970,38 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         outlineEmphasis = flatCards
         this.darkCards = darkCards
         gestureTemplateHidden = hideTemplate
-        rerasterAllTiles(atomic = true)
+        removeCallbacks(lookTimeoutTask)
+        lookPanX = BoardEngine.panX
+        lookPanY = BoardEngine.panY
+        lookScale = BoardEngine.scale
+        lookDrained = false
+        // 先置位：图块线程可能在 rerasterAllTiles 返回前就画完。
+        lookPending = true
+        if (rerasterAllTiles(atomic = true)) postDelayed(lookTimeoutTask, LOOK_WAIT_MAX_MS) else lookPending = false
     }
+
+    // 手势换样（扁平、临时反色）的图块还没画完。这期间画面停在换样时的视口：
+    // 手指已经在动时若按新视口出帧，灰卡会以旧样子在 A2 下移动，滑动开头留下残影。
+    @Volatile
+    private var lookPending = false
+    // 图块已画完，等下一帧上屏。
+    @Volatile
+    private var lookDrained = false
+    private var lookPanX = 0f
+    private var lookPanY = 0f
+    private var lookScale = 1f
+    private val lookTimeoutTask = Runnable {
+        if (!lookPending) return@Runnable
+        Log.w(TAG, "gesture look not ready after ${LOOK_WAIT_MAX_MS}ms, following viewport")
+        lookPending = false
+        postInvalidateOnAnimation()
+    }
+
+    val isLookPending: Boolean get() = lookPending
 
     
     
-    private fun rerasterAllTiles(atomic: Boolean = false) {
+    private fun rerasterAllTiles(atomic: Boolean = false): Boolean {
         var wait = false
         synchronized(cacheLock) {
             for (entry in cache.values) entry.dirty = true
@@ -984,6 +1017,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             }
         }
         if (!wait) postInvalidateOnAnimation()
+        return wait
     }
 
     // A note page sits on white with a black frame on its top and sides; the frame lies just outside the page,
@@ -1126,6 +1160,15 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     
     private fun notifyTileProcessed(produced: Boolean) {
+        if (lookPending) {
+            // 换样期间不逐块出帧，全部画完一起上屏。
+            if (!lookDrained && synchronized(cacheLock) { pending.isEmpty() && rasteringKeys.isEmpty() }) {
+                lookDrained = true
+                invalidateWhenFresh = false
+                postInvalidateOnAnimation()
+            }
+            return
+        }
         if (invalidateWhenFresh) {
             val drained = synchronized(cacheLock) { pending.isEmpty() && rasteringKeys.isEmpty() }
             if (drained) {

@@ -189,6 +189,7 @@ class MosaicEinkRefreshModule(
         UiThreadUtil.runOnUiThread {
             requests.clear()
             applyRefreshMode(null)
+            EinkRegal.restore(reactApplicationContext, "module-invalidate")
         }
         super.invalidate()
     }
