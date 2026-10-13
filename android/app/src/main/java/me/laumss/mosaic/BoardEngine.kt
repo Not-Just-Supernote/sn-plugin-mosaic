@@ -340,18 +340,20 @@ object BoardEngine {
         val markers: Map<String, List<StrokeRec>>,
         val connections: Map<String, ConnectionRec>,
         val necks: List<NeckRec>,
-        val hiddenCardId: String?,
         val scale: Float,
         val threads: List<ThreadRec> = emptyList(),
     )
 
     
     fun renderSnapshot(world: RectF): RenderSnapshot = synchronized(lock) {
+        val hiddenCards = hiddenCardIds
+        val hiddenStrokes = hiddenStrokeIds
         val canvas = ArrayList<StrokeRec>()
         queryCanvasStrokes(world, canvas)
-        val orderedCards = cardsByZ.toList()
-        val cardMap = HashMap<String, CardRec>(orderedCards.size)
-        for (card in orderedCards) cardMap[card.id] = card
+        if (hiddenStrokes.isNotEmpty()) canvas.removeAll { it.id in hiddenStrokes }
+        val cardMap = HashMap<String, CardRec>(cardsByZ.size)
+        for (card in cardsByZ) cardMap[card.id] = card
+        val orderedCards = if (hiddenCards.isEmpty()) cardsByZ.toList() else cardsByZ.filter { it.id !in hiddenCards }
         val attached = HashMap<String, List<StrokeRec>>(cardStrokes.size)
         
         
@@ -360,10 +362,13 @@ object BoardEngine {
         for (card in orderedCards) {
             card.rect(cardRect)
             if (!RectF.intersects(cardRect, world)) continue
-            cardStrokes[card.id]?.let { attached[card.id] = it.toList() }
+            cardStrokes[card.id]?.let { list ->
+                attached[card.id] = if (hiddenStrokes.isEmpty()) list.toList() else list.filter { it.id !in hiddenStrokes }
+            }
         }
         val markers = HashMap<String, MutableList<StrokeRec>>()
         for (stroke in strokes.values) {
+            if (stroke.id in hiddenStrokes) continue
             if (stroke.penStyle == PenStyle.MARKER.objType) {
                 markers.getOrPut(stroke.space) { ArrayList(2) }.add(stroke)
             }
@@ -375,10 +380,14 @@ object BoardEngine {
             cardStrokes = attached,
             markers = markers,
             connections = HashMap(connections),
-            necks = necks.values.toList(),
-            hiddenCardId = hiddenCardId,
+            necks = if (hiddenCards.isEmpty()) necks.values.toList() else necks.values.filter { neck ->
+                val connection = connections[neck.id]
+                connection == null || (connection.fromId !in hiddenCards && connection.toId !in hiddenCards)
+            },
             scale = scale,
-            threads = threadShapes.values.toList(),
+            threads = if (hiddenCards.isEmpty()) threadShapes.values.toList() else threadShapes.values.filter { thread ->
+                thread.fromId !in hiddenCards && thread.toId !in hiddenCards
+            },
         )
     }
 
@@ -390,7 +399,8 @@ object BoardEngine {
             ConnectionBindings.refresh(connections, strokes.values)
             m.refreshThreadsLocked()
         }
-        hiddenCardId = null
+        hiddenCardIds = emptySet()
+        hiddenStrokeIds = emptySet()
         setViewport(snapshot.panX, snapshot.panY, snapshot.scale); m.invalidateAll(); m.dispatch()
         listener?.onSelectionChanged()
     }
@@ -406,7 +416,9 @@ object BoardEngine {
     val selectedCardIds = LinkedHashSet<String>()
 
     
-    @Volatile var hiddenCardId: String? = null
+    // 拖动、改尺寸、旋转时原位置不画这些卡片和笔迹，连同卡片的桥和线；预览由叠加层画。
+    @Volatile var hiddenCardIds: Set<String> = emptySet()
+    @Volatile var hiddenStrokeIds: Set<String> = emptySet()
 
     var cardsByZ: List<CardRec> = emptyList()
         private set

@@ -50,9 +50,9 @@ JS 依赖的 `React/src/` 不在仓库里，JS 部分现在无法编译。项目
 
 ## 刷新模式
 
-刷新模式在 `BoardPresentation.kt` 里按原因叠加，任一原因要 A2 就用 A2。双指平移缩放和 Notipal 浮窗拖动用 A2，期间卡片临时反色；拖动、缩放、旋转选中内容（含长按拖卡片、拖边改尺寸）用 auto（模式 7）；橡皮和套索工具下也用 auto。选中后静止时不占 auto。
+刷新模式在 `BoardPresentation.kt` 里按原因叠加，任一原因要 A2 就用 A2。双指平移缩放和 Notipal 浮窗拖动用 A2，期间灰卡和桥临时画成白底，文字和手写不反色，和笔记卡一样，黑卡照旧（`whiteCards`）；拖动、旋转选中内容（含长按拖卡片）用 auto（模式 7），拖边或拖角改尺寸（单卡和套索选中）用 DTH（模式 5，`RESIZE`），都不换样，底纹和阴影照常；原位置的卡片（连同桥和线）和选中的笔迹从内容层拿掉（`BoardEngine.hiddenCardIds`、`hiddenStrokeIds`），只看叠加层的预览。橡皮和套索工具下也用 auto。选中后静止时不占 auto。
 
-换样的图块没画完之前，内容层停在按下时的视口，不跟着手指出帧，否则灰卡以旧样子在 A2 下移动，滑动开头留下残影。逻辑在 `BoardContentView` 的 `lookPending`。
+换样的图块没画完之前，内容层停在按下时的视口，不跟着手指出帧，否则灰卡以灰色在 A2 下移动，滑动开头留下残影。逻辑在 `BoardContentView` 的 `lookPending`。
 
 移动手势按系统 Note 的做法开关 regal（硬件清残影）：按下时开，第一次真正移动时关，松手再开。代码在 `EinkRegal.kt`，宿主有 Note 的 `HandWriteClient` 时调它，否则走 `sendHwcCmd(1020, [9, 0/1])`。
 

@@ -22,7 +22,11 @@ class BoardPresentation(
         // Notipal 浮窗在白板上被拖动：与双指平移相同的显示，被浮窗让出的区域按 A2 快刷。
         INKLING_DRAG(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true),
         
-        TRANSFORM(MosaicEinkRefreshModule.MODE_DEFAULT, flat = true, suspendFog = false, motion = true),
+        // 拖动、改尺寸、旋转不换样，原位置由控制器从内容层拿掉，只看叠加层的预览。
+        TRANSFORM(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false, motion = true),
+
+        // 拖边或拖角改尺寸（单卡和套索选中）：DTH，其余同 TRANSFORM。
+        RESIZE(MosaicEinkRefreshModule.MODE_DTH, flat = false, suspendFog = false, motion = true),
         
         TOOL(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false),
         
@@ -38,7 +42,7 @@ class BoardPresentation(
     data class State(
         val flatCards: Boolean,
         
-        val darkCards: Boolean,
+        val whiteCards: Boolean,
         val hideTemplate: Boolean,
         val suspendFog: Boolean,
         val einkMode: Int?,
@@ -123,8 +127,8 @@ class BoardPresentation(
             val m = r.einkMode ?: continue
             if (eink == null || m == MosaicEinkRefreshModule.MODE_A2) eink = m
         }
-        val dark = eink == MosaicEinkRefreshModule.MODE_A2
-        return State(flat, dark, flat && isBoardSurface(), fog, eink)
+        val white = eink == MosaicEinkRefreshModule.MODE_A2
+        return State(flat, white, flat && isBoardSurface(), fog, eink)
     }
 
     private fun commit(why: String, force: Boolean = false) {
@@ -132,17 +136,17 @@ class BoardPresentation(
         val prev = applied
         if (next == prev && !force) return
         applied = next
-        val looksChanged = force || next.flatCards != prev.flatCards || next.darkCards != prev.darkCards ||
+        val looksChanged = force || next.flatCards != prev.flatCards || next.whiteCards != prev.whiteCards ||
             next.hideTemplate != prev.hideTemplate
         val einkChanged = force || next.einkMode != prev.einkMode
         
         val mode = next.einkMode
         if (einkChanged && mode != null) MosaicEinkRefreshModule.applyNative(mode, einkOwner)
-        val leavingDark = looksChanged && prev.darkCards && !next.darkCards && !force
-        if (looksChanged) content.setGesturePresentation(next.flatCards, next.darkCards, next.hideTemplate)
+        val leavingWhite = looksChanged && prev.whiteCards && !next.whiteCards && !force
+        if (looksChanged) content.setGesturePresentation(next.flatCards, next.whiteCards, next.hideTemplate)
         if (einkChanged) resetGen++
         if (einkChanged && next.einkMode == null) {
-            if (leavingDark) {
+            if (leavingWhite) {
                 
                 
                 val gen = resetGen

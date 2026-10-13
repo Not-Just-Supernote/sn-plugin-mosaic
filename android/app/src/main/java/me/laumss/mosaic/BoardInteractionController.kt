@@ -213,7 +213,7 @@ class BoardInteractionController(
     }
 
     // ── Notipal 浮窗拖动 ──
-    // 与双指平移一致：白板上走 PAN_ZOOM 同款显示（A2 + 卡片临时反色 + flat），
+    // 与双指平移一致：白板上走 PAN_ZOOM 同款显示（A2 + 灰卡临时白底 + flat），
     // 笔记卡片里只切 A2 刷新、不改卡片显示；松手后按各自的 settle 恢复。
 
     private var inklingDragActive = false
@@ -844,7 +844,8 @@ class BoardInteractionController(
         penSession = null
         penMoveSession = null
         fingerMoveSession = null
-        BoardEngine.hiddenCardId = null
+        BoardEngine.hiddenCardIds = emptySet()
+        BoardEngine.hiddenStrokeIds = emptySet()
         fingers.clear()
         fingerGesture = FingerGesture.Idle
         sliderTwoDown = false
@@ -1328,8 +1329,7 @@ class BoardInteractionController(
         trailCause = "card"
         if (top != null) {
             
-            val tempDark = presentation.state.darkCards && top.kind != "image" && top.kind != "note"
-            if (!top.colored && !tempDark) return false
+            if (!top.colored) return false
             if (trailWhite) return true
             val r = top.rect(trailScratchRect)
             r.inset(h, h)
@@ -1337,9 +1337,8 @@ class BoardInteractionController(
         }
         
         if (!trailWhite) return false
-        val anyTempDark = presentation.state.darkCards
         for (c in BoardEngine.cardsByZ) {
-            if (!c.colored && !(anyTempDark && c.kind != "image" && c.kind != "note")) continue
+            if (!c.colored) continue
             val r = c.rect(trailScratchRect)
             r.inset(-h, -h)
             if (r.contains(wx, wy)) return true
@@ -2850,9 +2849,9 @@ class BoardInteractionController(
         card.rect(session.preview)
         card.rect(session.startRect)
         session.inkBounds = attachedInkWorldBounds(card.id)
-        hideCardFromTiles(card.id)
+        hideFromTiles(listOf(card.id))
         overlay.showCardPreview(worldRectToPx(session.preview, RectF()), card.kind)
-        presentation.acquire(BoardPresentation.Reason.TRANSFORM)
+        presentation.acquire(BoardPresentation.Reason.RESIZE)
         Log.i(TAG, "[CardAdjust] resize begin card=${card.id} handle=$handle corner=${handle.isCorner} pen=$isPen")
         return session
     }
@@ -2972,7 +2971,8 @@ class BoardInteractionController(
         val inkPath = Path()
         collectSelectionPreview(sel, ArrayList(), ArrayList(), cardRects, inkPath)
         overlay.beginMovePreview(worldRectToPx(sel.rect, RectF()), cardRects, inkPath, PEN_WIDTH_DP * BoardEngine.scale * density)
-        presentation.acquire(BoardPresentation.Reason.TRANSFORM)
+        hideFromTiles(sel.cardIds, sel.strokeIds)
+        presentation.acquire(BoardPresentation.Reason.RESIZE)
         Log.i(TAG_LASSO, "resize begin cards=${cards.size} strokes=${strokes.size} handle=$handle pen=$isPen")
         return session
     }
@@ -3051,6 +3051,7 @@ class BoardInteractionController(
         val framePx = worldRectToPx(sel.rect, RectF())
         overlay.beginMovePreview(framePx, emptyList(), inkPath, PEN_WIDTH_DP * BoardEngine.scale * density)
         overlay.updateRotatePreview(0f, framePx.centerX(), framePx.centerY())
+        hideFromTiles(sel.cardIds, sel.strokeIds)
         presentation.acquire(BoardPresentation.Reason.TRANSFORM)
         Log.i(TAG_LASSO, "rotate begin strokes=${strokes.size} pen=$isPen")
         return MoveSession.SelectionRotate(isPen, pointerId, wx, wy, sel, strokes, sel.rect.centerX(), sel.rect.centerY())
@@ -3117,14 +3118,19 @@ class BoardInteractionController(
             if (sel.cardIds.isEmpty()) worldRectToPx(sel.rect, RectF()) else null,
             cardRects, inkPath, PEN_WIDTH_DP * BoardEngine.scale * density,
         )
+        hideFromTiles(sel.cardIds, sel.strokeIds)
         presentation.acquire(BoardPresentation.Reason.TRANSFORM)
         val liftZ = if (isSingleCardSelection(sel)) BoardGeometry.nextZIndex(BoardEngine.cards.values) else null
         Log.i(TAG_LASSO, "move begin cards=${cards.size} strokes=${strokes.size} pen=$isPen singleCard=${liftZ != null}")
         return MoveSession.Selection(isPen, pointerId, wx, wy, sel, cards, strokes, liftZ)
     }
 
+    private fun presentationReason(m: MoveSession): BoardPresentation.Reason =
+        if (m is MoveSession.CardResize || m is MoveSession.SelectionResize) BoardPresentation.Reason.RESIZE
+        else BoardPresentation.Reason.TRANSFORM
+
     private fun updateMoveSession(m: MoveSession, wx: Float, wy: Float) {
-        presentation.moved(BoardPresentation.Reason.TRANSFORM)
+        presentation.moved(presentationReason(m))
         val dx = wx - m.startWorldX
         val dy = wy - m.startWorldY
         when (m) {
@@ -3158,7 +3164,7 @@ class BoardInteractionController(
             is MoveSession.CardResize -> {
                 overlay.hideCardPreview()
                 computeResizePreview(m, wx, wy)
-                unhideCardFromTiles()
+                unhideFromTiles()
                 val start = m.startRect
                 val changed = abs(m.preview.left - start.left) > 0.01f || abs(m.preview.top - start.top) > 0.01f ||
                     abs(m.preview.width() - start.width()) > 0.01f || abs(m.preview.height() - start.height()) > 0.01f ||
@@ -3173,6 +3179,7 @@ class BoardInteractionController(
             }
             is MoveSession.Selection -> {
                 overlay.endMovePreview()
+                unhideFromTiles()
                 host.setDrawPathSuspended(false, "lasso-selection-move-end")
                 val single = m.liftZ?.let { z -> m.cards.singleOrNull()?.let { it to z } }
                 if (single != null && (abs(dx) > 0.01f || abs(dy) > 0.01f)) {
@@ -3219,6 +3226,7 @@ class BoardInteractionController(
             }
             is MoveSession.SelectionResize -> {
                 overlay.endMovePreview()
+                unhideFromTiles()
                 host.setDrawPathSuspended(false, "lasso-selection-resize-end")
                 computeSelectionResizePreview(m, wx, wy)
                 val start = m.startRect
@@ -3256,6 +3264,7 @@ class BoardInteractionController(
             }
             is MoveSession.SelectionRotate -> {
                 overlay.endMovePreview()
+                unhideFromTiles()
                 host.setDrawPathSuspended(false, "lasso-selection-rotate-end")
                 m.angle = rotateAngle(m, wx, wy)
                 if (abs(m.angle) > 0.001f) {
@@ -3274,34 +3283,44 @@ class BoardInteractionController(
                 Log.i(TAG, "[LassoPerf] kind=selection-rotate input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed deg=${Math.toDegrees(m.angle.toDouble())}")
             }
         }
-        presentation.release(BoardPresentation.Reason.TRANSFORM)
+        presentation.release(presentationReason(m))
     }
 
     private fun cancelMoveSession(m: MoveSession) {
         when (m) {
             is MoveSession.CardResize -> {
                 overlay.hideCardPreview()
-                unhideCardFromTiles()
+                unhideFromTiles()
             }
-            is MoveSession.Selection -> { overlay.endMovePreview(); host.setDrawPathSuspended(false, "lasso-selection-move-cancel"); updateLassoOverlay() }
-            is MoveSession.SelectionResize -> { overlay.endMovePreview(); host.setDrawPathSuspended(false, "lasso-selection-resize-cancel"); updateLassoOverlay() }
-            is MoveSession.SelectionRotate -> { overlay.endMovePreview(); host.setDrawPathSuspended(false, "lasso-selection-rotate-cancel"); updateLassoOverlay() }
+            is MoveSession.Selection -> { overlay.endMovePreview(); unhideFromTiles(); host.setDrawPathSuspended(false, "lasso-selection-move-cancel"); updateLassoOverlay() }
+            is MoveSession.SelectionResize -> { overlay.endMovePreview(); unhideFromTiles(); host.setDrawPathSuspended(false, "lasso-selection-resize-cancel"); updateLassoOverlay() }
+            is MoveSession.SelectionRotate -> { overlay.endMovePreview(); unhideFromTiles(); host.setDrawPathSuspended(false, "lasso-selection-rotate-cancel"); updateLassoOverlay() }
         }
-        presentation.release(BoardPresentation.Reason.TRANSFORM)
+        presentation.release(presentationReason(m))
     }
 
     
-    private fun hideCardFromTiles(cardId: String) {
-        BoardEngine.hiddenCardId = cardId
-        val card = BoardEngine.cards[cardId] ?: return
-        content.onSceneChanged(BoardEngine.cardAndNecksDirtyBounds(card), true)
+    // 拖动时原位置不留东西：卡片连同桥和线、选中的笔迹都从内容层拿掉，只看叠加层的预览。
+    private fun hideFromTiles(cardIds: Collection<String>, strokeIds: Collection<String> = emptyList()) {
+        unhideFromTiles()
+        BoardEngine.hiddenCardIds = cardIds.toHashSet()
+        BoardEngine.hiddenStrokeIds = strokeIds.toHashSet()
+        content.markWorldDirty(hiddenDirtyBounds())
     }
 
-    private fun unhideCardFromTiles() {
-        val id = BoardEngine.hiddenCardId ?: return
-        BoardEngine.hiddenCardId = null
-        val card = BoardEngine.cards[id] ?: return
-        content.onSceneChanged(BoardEngine.cardAndNecksDirtyBounds(card), true)
+    private fun unhideFromTiles() {
+        if (BoardEngine.hiddenCardIds.isEmpty() && BoardEngine.hiddenStrokeIds.isEmpty()) return
+        val dirty = hiddenDirtyBounds()
+        BoardEngine.hiddenCardIds = emptySet()
+        BoardEngine.hiddenStrokeIds = emptySet()
+        content.markWorldDirty(dirty)
+    }
+
+    private fun hiddenDirtyBounds(): List<RectF> = synchronized(BoardEngine.lock) {
+        val out = ArrayList<RectF>()
+        for (id in BoardEngine.hiddenCardIds) BoardEngine.cards[id]?.let { out.add(BoardEngine.cardAndNecksDirtyBounds(it)) }
+        for (id in BoardEngine.hiddenStrokeIds) BoardEngine.strokes[id]?.let { out.add(BoardEngine.strokeWorldBounds(it)) }
+        out
     }
 
     
@@ -3714,8 +3733,8 @@ class BoardInteractionController(
         var finished = false
         
         
-        val tempDark = presentation.state.darkCards
-        val darkText = !note && (card.colored || tempDark)
+        val tempWhite = presentation.state.whiteCards
+        val darkText = !note && card.colored
         val editor = CardTextEditor(
             host.context,
             if (note) BoardContentView.noteHeaderText(card) else original,
@@ -3723,7 +3742,7 @@ class BoardInteractionController(
             
             fill = when {
                 card.colored -> Color.BLACK
-                note && tempDark -> Color.WHITE
+                tempWhite -> Color.WHITE
                 else -> BoardContentView.CARD_FILL_COLOR
             },
             contentScale = if (note) card.width / ScrollingDocument.WIDTH else card.fontScale,

@@ -908,8 +908,9 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     @Volatile
     private var outlineEmphasis = false
     
+    // A2 手势期间灰卡画成白底，内容不反色，和笔记卡一样；黑卡照旧。
     @Volatile
-    private var darkCards = false
+    private var whiteCards = false
     
     @Volatile
     private var gestureTemplateHidden = false
@@ -965,10 +966,10 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         canvas.restoreToCount(save)
     }
 
-    fun setGesturePresentation(flatCards: Boolean, darkCards: Boolean, hideTemplate: Boolean) {
-        if (outlineEmphasis == flatCards && this.darkCards == darkCards && gestureTemplateHidden == hideTemplate) return
+    fun setGesturePresentation(flatCards: Boolean, whiteCards: Boolean, hideTemplate: Boolean) {
+        if (outlineEmphasis == flatCards && this.whiteCards == whiteCards && gestureTemplateHidden == hideTemplate) return
         outlineEmphasis = flatCards
-        this.darkCards = darkCards
+        this.whiteCards = whiteCards
         gestureTemplateHidden = hideTemplate
         removeCallbacks(lookTimeoutTask)
         lookPanX = BoardEngine.panX
@@ -1048,10 +1049,10 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private fun drawSelection(canvas: Canvas, panXPx: Float, panYPx: Float, scalePx: Float) {
         val selected = BoardEngine.selectedCardIds
         if (selected.isEmpty()) return
-        val hidden = BoardEngine.hiddenCardId
+        val hidden = BoardEngine.hiddenCardIds
         synchronized(BoardEngine.lock) {
             for (id in selected) {
-                if (id == hidden) continue
+                if (id in hidden) continue
                 val card = BoardEngine.cards[id] ?: continue
                 val left = panXPx + card.x * scalePx
                 val top = panYPx + card.y * scalePx
@@ -1322,7 +1323,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         scene: BoardEngine.RenderSnapshot,
         cardDarkOverride: Boolean? = null,
     ): (BoardEngine.StrokeRec) -> Int {
-        if (!darkCards) return { it.color }
+        if (!whiteCards) return { it.color }
         val markers = scene.markers[space] ?: emptyList()
         if (markers.all { MarkerInk.fromArgb(it.color).darkBackdrop }) return { it.color }
         return { stroke -> InkBackdrop.resolve(stroke, cardDarkOverride = cardDarkOverride, markers = markers) }
@@ -1353,7 +1354,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     }
 
     
-    private fun drawSilhouetteShadow(canvas: Canvas, world: RectF, hidden: String?, scene: BoardEngine.RenderSnapshot) {
+    private fun drawSilhouetteShadow(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot) {
         val cardRect = RectF()
         shadowFarUnion.rewind()
         var any = false
@@ -1368,7 +1369,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             any = true
         }
         for (card in scene.cardsByZ) {
-            if (card.id == hidden) continue
             card.rect(cardRect)
             if (!shadowedIntersects(cardRect, world)) continue
             shadowCopiesOf(cardRect, null)
@@ -1389,7 +1389,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         }
         val off = CARD_SHADOW_OFFSET
         for (card in scene.cardsByZ) {
-            if (card.id == hidden) continue
             card.rect(cardRect)
             if (!shadowedIntersects(cardRect, world)) continue
             canvas.drawRect(cardRect.left + off, cardRect.top + off, cardRect.right + off, cardRect.bottom + off, shadowPaint)
@@ -1398,48 +1397,49 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     }
 
     private fun drawLiquidAndCards(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot) {
-        val hidden = scene.hiddenCardId
         val emphasis = outlineEmphasis
-        val dark = darkCards
+        val white = whiteCards
         val cardRect = RectF()
         
         
         if (emphasis) {
-            drawFlatShadow(canvas, world, hidden, scene)
+            drawFlatShadow(canvas, world, scene)
         } else {
-            drawSilhouetteShadow(canvas, world, hidden, scene)
+            drawSilhouetteShadow(canvas, world, scene)
         }
         drawThreads(canvas, world, scene, emphasis)
         for (neck in scene.necks) {
             if (!RectF.intersects(neck.bounds, world)) continue
-            neckFillPaint.color = if (neck.dark) CARD_COLORED_FILL_COLOR else CARD_FILL_COLOR
+            neckFillPaint.color = when {
+                neck.dark -> CARD_COLORED_FILL_COLOR
+                white -> Color.WHITE
+                else -> CARD_FILL_COLOR
+            }
             canvas.drawPath(neck.path, neckFillPaint)
             if (emphasis) {
-                emphasisStrokePaint.color = if (dark) Color.WHITE else CARD_OUTLINE_EMPHASIS_COLOR
+                emphasisStrokePaint.color = CARD_OUTLINE_EMPHASIS_COLOR
                 canvas.drawPath(neck.path, emphasisStrokePaint)
             }
         }
         for (card in scene.cardsByZ) {
-            if (card.id == hidden) continue
             card.rect(cardRect)
             if (!RectF.intersects(cardRect, world)) continue
             
             
             cardFillPaint.color = when {
-                dark && !flatDark(card) -> Color.WHITE
                 showsAccent(card) -> CARD_COLORED_FILL_COLOR
+                white -> Color.WHITE
                 else -> CARD_FILL_COLOR
             }
             canvas.drawRoundRect(cardRect, CARD_RADIUS, CARD_RADIUS, cardFillPaint)
         }
         
-        if (emphasis) drawCardOutlines(canvas, world, hidden, scene)
+        if (emphasis) drawCardOutlines(canvas, world, scene)
         
         for (card in scene.cardsByZ) {
-            if (card.id == hidden) continue
             card.rect(cardRect)
             if (!RectF.intersects(cardRect, world)) continue
-            drawCardContent(canvas, card, cardRect, dark, scene)
+            drawCardContent(canvas, card, cardRect, scene)
         }
     }
 
@@ -1453,7 +1453,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     }
 
     
-    private fun drawFlatShadow(canvas: Canvas, world: RectF, hidden: String?, scene: BoardEngine.RenderSnapshot) {
+    private fun drawFlatShadow(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot) {
         val cardRect = RectF()
         val off = CARD_SHADOW_OFFSET
         val far = CARD_SHADOW_EXTENT
@@ -1464,7 +1464,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             canvas.drawPath(shadowPathFar, flatShadowPaint)
         }
         for (card in scene.cardsByZ) {
-            if (card.id == hidden) continue
             card.rect(cardRect)
             if (!shadowedIntersects(cardRect, world)) continue
             canvas.drawRect(cardRect.left + off, cardRect.top + off, cardRect.right + far, cardRect.bottom + far, flatShadowPaint)
@@ -1474,18 +1473,17 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private val outlineOccluders get() = rasterScratch.get().outlineOccluders
 
     
-    private fun drawCardOutlines(canvas: Canvas, world: RectF, hidden: String?, scene: BoardEngine.RenderSnapshot) {
+    private fun drawCardOutlines(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot) {
         outlineOccluders.rewind()
         val cardRect = RectF()
         val cards = scene.cardsByZ
         for (index in cards.indices.reversed()) {
             val card = cards[index]
-            if (card.id == hidden) continue
             card.rect(cardRect)
             if (!RectF.intersects(cardRect, world)) continue
             val save = canvas.save()
             if (!outlineOccluders.isEmpty) canvas.clipOutPath(outlineOccluders)
-            emphasisStrokePaint.color = if (darkCards && flatDark(card)) Color.WHITE else CARD_OUTLINE_EMPHASIS_COLOR
+            emphasisStrokePaint.color = CARD_OUTLINE_EMPHASIS_COLOR
             canvas.drawRoundRect(cardRect, CARD_RADIUS, CARD_RADIUS, emphasisStrokePaint)
             canvas.restoreToCount(save)
             outlineOccluders.addRect(cardRect, Path.Direction.CW)
@@ -1493,10 +1491,9 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     }
 
     
-    private fun flatDark(card: BoardEngine.CardRec): Boolean = card.kind != "image" && card.kind != "note"
 
     
-    private fun drawCardContent(canvas: Canvas, card: BoardEngine.CardRec, rect: RectF, dark: Boolean, scene: BoardEngine.RenderSnapshot) {
+    private fun drawCardContent(canvas: Canvas, card: BoardEngine.CardRec, rect: RectF, scene: BoardEngine.RenderSnapshot) {
         val save = canvas.save()
         canvas.clipRect(rect)
         canvas.translate(card.x, card.y)
@@ -1533,7 +1530,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             canvas.translate(0f, -headerH)
         } else if (card.content.isNotBlank()) {
             
-            val darkBase = showsAccent(card) || (dark && flatDark(card))
+            val darkBase = showsAccent(card)
             cardTextPaint.color = if (darkBase) Color.WHITE else CARD_TEXT_COLOR
             drawTextBlock(canvas, card.content, rect.width(), darkBase, CardTextFormat.metricsFor(card))
         }
@@ -1542,11 +1539,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val attached = scene.cardStrokes[card.id]
         if (attached != null) {
             
-            val darkened = dark && flatDark(card) && !showsAccent(card)
             val a2Color = a2InkColor("card:${card.id}", scene, cardDarkOverride = card.colored)
-            TchRaster.drawLayer(canvas, attached, strokePaint) { stroke ->
-                if (darkened) InkBackdrop.resolve(stroke, cardDarkOverride = true) else a2Color(stroke)
-            }
+            TchRaster.drawLayer(canvas, attached, strokePaint) { stroke -> a2Color(stroke) }
         }
         canvas.restoreToCount(save)
     }
