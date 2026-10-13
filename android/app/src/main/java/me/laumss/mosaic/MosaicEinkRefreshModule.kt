@@ -24,6 +24,22 @@ class MosaicEinkRefreshModule(
 
         @Volatile private var instance: WeakReference<MosaicEinkRefreshModule>? = null
 
+        // 只给一个视图设刷新模式，不动插件容器；用于只该按某模式刷新的局部（如卡片改尺寸的预览层）。
+        @JvmStatic
+        fun applyToView(view: View, mode: Int?, owner: String): Boolean = try {
+            if (mode != null) {
+                View::class.java.getMethod("setEinkUpdateMode", Int::class.javaPrimitiveType).invoke(view, mode)
+            } else {
+                View::class.java.getMethod("resetEinkUpdateMode").invoke(view)
+                view.postInvalidateOnAnimation()
+            }
+            Log.i(TAG, "viewRefreshMode=${mode ?: "reset"} owner=$owner view=${view.javaClass.simpleName}")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "view eink call failed mode=${mode ?: "reset"} owner=$owner: ${e.message}")
+            false
+        }
+
         @JvmStatic
         fun priority(mode: Int): Int = when (mode) {
             MODE_A2 -> 2
@@ -36,6 +52,13 @@ class MosaicEinkRefreshModule(
         fun applyNative(mode: Int, owner: String) {
             val module = instance?.get() ?: return
             runOnUiImmediate { module.applyOwned(mode, owner) }
+        }
+
+        // 有屏蔽方时整屏不用 auto：笔、套索工具、刚结束的拖动申请的 auto 都先不生效，屏蔽撤掉后恢复。
+        @JvmStatic
+        fun blockAuto(owner: String, block: Boolean) {
+            val module = instance?.get() ?: return
+            runOnUiImmediate { module.setAutoBlocked(owner, block) }
         }
 
         @JvmStatic
@@ -74,6 +97,7 @@ class MosaicEinkRefreshModule(
     private var modeView: WeakReference<View>? = null
     
     private val requests = LinkedHashMap<String, Int>()
+    private val autoBlockers = LinkedHashSet<String>()
 
     init {
         instance = WeakReference(this)
@@ -82,8 +106,19 @@ class MosaicEinkRefreshModule(
     // A2 > DTH > 其余；同级取最近的请求。笔按下时申请的 auto 不能盖过改卡片尺寸的 DTH。
     private fun effectiveMode(): Int? {
         var best: Int? = null
-        for (m in requests.values) if (best == null || priority(m) >= priority(best)) best = m
+        for (m in requests.values) {
+            if (m == MODE_DEFAULT && autoBlockers.isNotEmpty()) continue
+            if (best == null || priority(m) >= priority(best)) best = m
+        }
         return best
+    }
+
+    private fun setAutoBlocked(owner: String, block: Boolean) {
+        val changed = if (block) autoBlockers.add(owner) else autoBlockers.remove(owner)
+        if (!changed) return
+        val next = effectiveMode()
+        Log.i(TAG, "auto ${if (block) "blocked" else "unblocked"} owner=$owner requests=$requests -> ${next ?: "reset"}")
+        if (next != activeMode) applyRefreshMode(next)
     }
 
     private fun applyOwned(mode: Int, owner: String) {
@@ -197,6 +232,7 @@ class MosaicEinkRefreshModule(
         if (instance?.get() === this) instance = null
         UiThreadUtil.runOnUiThread {
             requests.clear()
+            autoBlockers.clear()
             applyRefreshMode(null)
             EinkRegal.restore(reactApplicationContext, "module-invalidate")
         }

@@ -50,7 +50,7 @@ JS 依赖的 `React/src/` 不在仓库里，JS 部分现在无法编译。项目
 
 ## 刷新模式
 
-刷新模式在 `BoardPresentation.kt` 里按原因叠加，`MosaicEinkRefreshModule` 再和笔、滑条等其他来源合并，优先级 A2 > DTH > 其余，同级取最近的。选中后拉手柄或四边任意位置都算改尺寸，角优先（`ResizeHandles.hit`）。双指平移缩放和 Notipal 浮窗拖动用 A2，期间灰卡和桥临时画成白底，文字和手写不反色，和笔记卡一样，黑卡照旧（`whiteCards`）；拖动、旋转选中内容（含长按拖卡片）和只有笔迹的选中改尺寸用 auto（模式 7），卡片改尺寸（单卡或含卡片的选中）用 DTH（模式 5，`RESIZE`），都不换样，底纹和阴影照常；原位置的卡片（连同桥和线）和选中的笔迹从内容层拿掉（`BoardEngine.hiddenCardIds`、`hiddenStrokeIds`），只看叠加层的预览。橡皮和套索工具下也用 auto。选中后静止时不占 auto。
+刷新模式在 `BoardPresentation.kt` 里按原因叠加，`MosaicEinkRefreshModule` 再和笔、滑条等其他来源合并，优先级 A2 > DTH > 其余，同级取最近的。选中后拉手柄或四边任意位置都算改尺寸，角优先（`ResizeHandles.hit`）。双指平移缩放和 Notipal 浮窗拖动用 A2，期间灰卡和桥临时画成白底，文字和手写不反色，和笔记卡一样，黑卡照旧（`whiteCards`）；拖动、旋转选中内容（含长按拖卡片）和只有笔迹的选中改尺寸用 auto（模式 7），卡片改尺寸（单卡或含卡片的选中）用 DTH（模式 5），但只设在叠加层 `InteractionOverlayView` 上，不动插件容器，白板其余部分照旧按宿主刷新，期间整屏屏蔽 auto（`MosaicEinkRefreshModule.blockAuto`，笔、套索工具、刚结束的拖动申请的 auto 都不生效），松手 0.2 秒后一起撤掉（`acquireTransform`、`releaseTransform`）；都不换样，底纹和阴影照常；原位置的卡片（连同桥和线）和选中的笔迹从内容层拿掉（`BoardEngine.hiddenCardIds`、`hiddenStrokeIds`），只看叠加层的预览。橡皮和套索工具下也用 auto。选中后静止时不占 auto。
 
 换样的图块没画完之前，内容层停在按下时的视口，不跟着手指出帧，否则灰卡以灰色在 A2 下移动，滑动开头留下残影。逻辑在 `BoardContentView` 的 `lookPending`。
 

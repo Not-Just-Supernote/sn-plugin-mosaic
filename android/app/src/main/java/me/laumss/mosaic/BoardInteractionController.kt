@@ -126,6 +126,9 @@ class BoardInteractionController(
         private const val INKLING_DRAG_MAX_MS = 15_000L
         
         const val GESTURE_SETTLE_MS = 600L
+        // 卡片改尺寸松手后，预览层的 DTH 再留一会儿，让预览消失的那一帧也按 DTH 刷。
+        private const val RESIZE_EINK_RELEASE_MS = 200L
+        private const val RESIZE_EINK_OWNER = "card-resize"
 
         
         const val NOTE_SHOT_DIR = "/sdcard/EXPORT/mosaic/shots"
@@ -846,6 +849,8 @@ class BoardInteractionController(
         fingerMoveSession = null
         BoardEngine.hiddenCardIds = emptySet()
         BoardEngine.hiddenStrokeIds = emptySet()
+        handler.removeCallbacks(resizeEinkReset)
+        resizeEinkReset.run()
         fingers.clear()
         fingerGesture = FingerGesture.Idle
         sliderTwoDown = false
@@ -2851,7 +2856,7 @@ class BoardInteractionController(
         session.inkBounds = attachedInkWorldBounds(card.id)
         hideFromTiles(listOf(card.id))
         overlay.showCardPreview(worldRectToPx(session.preview, RectF()), card.kind)
-        presentation.acquire(BoardPresentation.Reason.RESIZE)
+        acquireTransform(BoardPresentation.Reason.RESIZE)
         Log.i(TAG, "[CardAdjust] resize begin card=${card.id} handle=$handle corner=${handle.isCorner} pen=$isPen")
         return session
     }
@@ -2972,7 +2977,7 @@ class BoardInteractionController(
         collectSelectionPreview(sel, ArrayList(), ArrayList(), cardRects, inkPath)
         overlay.beginMovePreview(worldRectToPx(sel.rect, RectF()), cardRects, inkPath, PEN_WIDTH_DP * BoardEngine.scale * density)
         hideFromTiles(sel.cardIds, sel.strokeIds)
-        presentation.acquire(presentationReason(session))
+        acquireTransform(presentationReason(session))
         Log.i(TAG_LASSO, "resize begin cards=${cards.size} strokes=${strokes.size} handle=$handle pen=$isPen")
         return session
     }
@@ -3132,6 +3137,38 @@ class BoardInteractionController(
         else -> BoardPresentation.Reason.TRANSFORM
     }
 
+    // 卡片改尺寸的 DTH 只设在叠加层（预览和手柄所在的视图）上，白板其余部分照旧按宿主刷新。
+    private var resizeEinkActive = false
+    private var resizeEinkOnView = false
+    private val resizeEinkReset = Runnable {
+        if (!resizeEinkActive) return@Runnable
+        resizeEinkActive = false
+        if (resizeEinkOnView) MosaicEinkRefreshModule.applyToView(overlay, null, RESIZE_EINK_OWNER)
+        resizeEinkOnView = false
+        MosaicEinkRefreshModule.blockAuto(RESIZE_EINK_OWNER, false)
+    }
+
+    private fun acquireTransform(reason: BoardPresentation.Reason) {
+        if (reason == BoardPresentation.Reason.RESIZE) {
+            handler.removeCallbacks(resizeEinkReset)
+            // 改卡片尺寸期间整屏不用 auto，只有预览层是 DTH。
+            resizeEinkActive = true
+            MosaicEinkRefreshModule.blockAuto(RESIZE_EINK_OWNER, true)
+            if (!resizeEinkOnView) {
+                resizeEinkOnView = MosaicEinkRefreshModule.applyToView(overlay, MosaicEinkRefreshModule.MODE_DTH, RESIZE_EINK_OWNER)
+            }
+        }
+        presentation.acquire(reason)
+    }
+
+    private fun releaseTransform(reason: BoardPresentation.Reason) {
+        if (reason == BoardPresentation.Reason.RESIZE) {
+            handler.removeCallbacks(resizeEinkReset)
+            handler.postDelayed(resizeEinkReset, RESIZE_EINK_RELEASE_MS)
+        }
+        presentation.release(reason)
+    }
+
     private fun updateMoveSession(m: MoveSession, wx: Float, wy: Float) {
         presentation.moved(presentationReason(m))
         val dx = wx - m.startWorldX
@@ -3286,7 +3323,7 @@ class BoardInteractionController(
                 Log.i(TAG, "[LassoPerf] kind=selection-rotate input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed deg=${Math.toDegrees(m.angle.toDouble())}")
             }
         }
-        presentation.release(presentationReason(m))
+        releaseTransform(presentationReason(m))
     }
 
     private fun cancelMoveSession(m: MoveSession) {
@@ -3299,7 +3336,7 @@ class BoardInteractionController(
             is MoveSession.SelectionResize -> { overlay.endMovePreview(); unhideFromTiles(); host.setDrawPathSuspended(false, "lasso-selection-resize-cancel"); updateLassoOverlay() }
             is MoveSession.SelectionRotate -> { overlay.endMovePreview(); unhideFromTiles(); host.setDrawPathSuspended(false, "lasso-selection-rotate-cancel"); updateLassoOverlay() }
         }
-        presentation.release(presentationReason(m))
+        releaseTransform(presentationReason(m))
     }
 
     
