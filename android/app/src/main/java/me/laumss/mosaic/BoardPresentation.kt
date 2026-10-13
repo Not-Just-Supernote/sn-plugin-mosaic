@@ -14,16 +14,23 @@ class BoardPresentation(
 ) {
     
     // motion：画面跟着手移动的手势，按系统 Note 的做法开关 regal（见 EinkRegal）。
-    enum class Reason(val einkMode: Int?, val flat: Boolean, val suspendFog: Boolean, val motion: Boolean = false) {
+    // whiteCards：A2 期间灰卡临时画成白底；只切 A2、不改样子的原因不设。
+    enum class Reason(
+        val einkMode: Int?, val flat: Boolean, val suspendFog: Boolean,
+        val motion: Boolean = false, val whiteCards: Boolean = false,
+    ) {
         
         
-        PAN_ZOOM(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true, motion = true),
+        PAN_ZOOM(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true, motion = true, whiteCards = true),
 
         // Notipal 浮窗在白板上被拖动：与双指平移相同的显示，被浮窗让出的区域按 A2 快刷。
-        INKLING_DRAG(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true),
+        INKLING_DRAG(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true, whiteCards = true),
         
         // 拖动、改尺寸、旋转不换样，原位置由控制器从内容层拿掉，只看叠加层的预览。
         TRANSFORM(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false, motion = true),
+
+        // 卡片改尺寸（单卡，或含卡片的选中）：只切 A2，不改任何卡片的样子；只有笔迹的选中改尺寸走 TRANSFORM。
+        CARD_RESIZE(MosaicEinkRefreshModule.MODE_A2, flat = false, suspendFog = false, motion = true),
         
         TOOL(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false),
         
@@ -118,13 +125,14 @@ class BoardPresentation(
         var flat = false
         var fog = false
         var eink: Int? = null
+        var white = false
         for (r in active + lingering) {
+            white = white || r.whiteCards
             flat = flat || r.flat
             fog = fog || r.suspendFog
             val m = r.einkMode ?: continue
             if (eink == null || MosaicEinkRefreshModule.priority(m) > MosaicEinkRefreshModule.priority(eink)) eink = m
         }
-        val white = eink == MosaicEinkRefreshModule.MODE_A2
         return State(flat, white, flat && isBoardSurface(), fog, eink)
     }
 

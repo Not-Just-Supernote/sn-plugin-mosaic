@@ -2845,13 +2845,15 @@ class BoardInteractionController(
     
 
     private fun beginResize(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, card: BoardEngine.CardRec, handle: BoardGeometry.Handle): MoveSession.CardResize {
+        // 与套索拖动笔迹相同：拖动期间停掉系统笔迹服务，只由 Mosaic 画预览。
+        host.setDrawPathSuspended(true, "card-resize")
         val session = MoveSession.CardResize(isPen, pointerId, wx, wy, card, handle)
         card.rect(session.preview)
         card.rect(session.startRect)
         session.inkBounds = attachedInkWorldBounds(card.id)
         hideFromTiles(listOf(card.id))
         overlay.showCardPreview(worldRectToPx(session.preview, RectF()), card.kind)
-        presentation.acquire(BoardPresentation.Reason.TRANSFORM)
+        presentation.acquire(BoardPresentation.Reason.CARD_RESIZE)
         Log.i(TAG, "[CardAdjust] resize begin card=${card.id} handle=$handle corner=${handle.isCorner} pen=$isPen")
         return session
     }
@@ -2972,7 +2974,7 @@ class BoardInteractionController(
         collectSelectionPreview(sel, ArrayList(), ArrayList(), cardRects, inkPath)
         overlay.beginMovePreview(worldRectToPx(sel.rect, RectF()), cardRects, inkPath, PEN_WIDTH_DP * BoardEngine.scale * density)
         hideFromTiles(sel.cardIds, sel.strokeIds)
-        presentation.acquire(BoardPresentation.Reason.TRANSFORM)
+        presentation.acquire(transformReason(session))
         Log.i(TAG_LASSO, "resize begin cards=${cards.size} strokes=${strokes.size} handle=$handle pen=$isPen")
         return session
     }
@@ -3125,8 +3127,15 @@ class BoardInteractionController(
         return MoveSession.Selection(isPen, pointerId, wx, wy, sel, cards, strokes, liftZ)
     }
 
+    // 卡片改尺寸用 A2（CARD_RESIZE）；只有笔迹的选中改尺寸和拖动、旋转一样用 auto（TRANSFORM）。
+    private fun transformReason(m: MoveSession): BoardPresentation.Reason = when {
+        m is MoveSession.CardResize -> BoardPresentation.Reason.CARD_RESIZE
+        m is MoveSession.SelectionResize && m.selection.cardIds.isNotEmpty() -> BoardPresentation.Reason.CARD_RESIZE
+        else -> BoardPresentation.Reason.TRANSFORM
+    }
+
     private fun updateMoveSession(m: MoveSession, wx: Float, wy: Float) {
-        presentation.moved(BoardPresentation.Reason.TRANSFORM)
+        presentation.moved(transformReason(m))
         val dx = wx - m.startWorldX
         val dy = wy - m.startWorldY
         when (m) {
@@ -3159,6 +3168,7 @@ class BoardInteractionController(
         when (m) {
             is MoveSession.CardResize -> {
                 overlay.hideCardPreview()
+                host.setDrawPathSuspended(false, "card-resize-end")
                 computeResizePreview(m, wx, wy)
                 unhideFromTiles()
                 val start = m.startRect
@@ -3279,7 +3289,7 @@ class BoardInteractionController(
                 Log.i(TAG, "[LassoPerf] kind=selection-rotate input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed deg=${Math.toDegrees(m.angle.toDouble())}")
             }
         }
-        presentation.release(BoardPresentation.Reason.TRANSFORM)
+        presentation.release(transformReason(m))
     }
 
     private fun cancelMoveSession(m: MoveSession) {
@@ -3287,12 +3297,13 @@ class BoardInteractionController(
             is MoveSession.CardResize -> {
                 overlay.hideCardPreview()
                 unhideFromTiles()
+                host.setDrawPathSuspended(false, "card-resize-cancel")
             }
             is MoveSession.Selection -> { overlay.endMovePreview(); unhideFromTiles(); host.setDrawPathSuspended(false, "lasso-selection-move-cancel"); updateLassoOverlay() }
             is MoveSession.SelectionResize -> { overlay.endMovePreview(); unhideFromTiles(); host.setDrawPathSuspended(false, "lasso-selection-resize-cancel"); updateLassoOverlay() }
             is MoveSession.SelectionRotate -> { overlay.endMovePreview(); unhideFromTiles(); host.setDrawPathSuspended(false, "lasso-selection-rotate-cancel"); updateLassoOverlay() }
         }
-        presentation.release(BoardPresentation.Reason.TRANSFORM)
+        presentation.release(transformReason(m))
     }
 
     
