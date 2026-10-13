@@ -4,9 +4,6 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.Rect
-import android.graphics.RectF
 import android.view.View
 
 
@@ -18,23 +15,7 @@ class TransientInkView(context: Context) : View(context) {
         private const val LASSO_DOT_SPACING_DP = 6f
         
         private const val LASSO_DOT_HALO_DP = 0.8f
-        // 重画的轨迹一直没画出来时，最多等这么久就擦掉。
-        private const val TRAIL_FLASH_DRAW_WAIT_MS = 600L
     }
-
-    private class TrailFlash(
-        val path: Path,
-        val paint: Paint,
-        val bounds: Rect,
-        val holdMs: Long,
-        val onShown: () -> Unit,
-        val onErased: () -> Unit,
-    ) {
-        var shown = false
-        var ended = false
-    }
-
-    private val trailFlashes = ArrayList<TrailFlash>()
 
     private var lastX = 0f
     private var lastY = 0f
@@ -115,42 +96,8 @@ class TransientInkView(context: Context) : View(context) {
         if (dirty) clearNow()
     }
 
-    /** 在系统笔迹上用同色重画一遍，画出来后停 [holdMs] 再擦掉，让面板把这些像素刷回去。 */
-    fun flashTrail(path: Path, widthPx: Float, color: Int, holdMs: Long, onShown: () -> Unit, onErased: () -> Unit) {
-        val paint = Paint().apply {
-            this.color = color
-            style = Paint.Style.STROKE
-            strokeWidth = widthPx
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-        }
-        val b = RectF()
-        path.computeBounds(b, true)
-        val pad = widthPx / 2f + 2f
-        val bounds = Rect(
-            kotlin.math.floor(b.left - pad).toInt(),
-            kotlin.math.floor(b.top - pad).toInt(),
-            kotlin.math.ceil(b.right + pad).toInt(),
-            kotlin.math.ceil(b.bottom + pad).toInt(),
-        )
-        val flash = TrailFlash(path, paint, bounds, holdMs, onShown, onErased)
-        trailFlashes.add(flash)
-        postDelayed({ endTrailFlash(flash) }, holdMs + TRAIL_FLASH_DRAW_WAIT_MS)
-        invalidate(bounds)
-    }
-
-    private fun endTrailFlash(flash: TrailFlash) {
-        if (flash.ended) return
-        flash.ended = true
-        trailFlashes.remove(flash)
-        invalidate(flash.bounds)
-        flash.onErased()
-    }
-
     fun release() {
         cancelPendingClear()
-        trailFlashes.forEach { it.ended = true }
-        trailFlashes.clear()
         lassoDots.clear()
         hasLast = false
         distanceSinceDot = 0f
@@ -227,14 +174,6 @@ class TransientInkView(context: Context) : View(context) {
             for (dot in lassoDots) {
                 canvas.drawCircle(dot[0], dot[1], halo, lassoDotHaloPaint)
                 canvas.drawCircle(dot[0], dot[1], r, lassoDotPaint)
-            }
-        }
-        for (flash in trailFlashes) {
-            canvas.drawPath(flash.path, flash.paint)
-            if (!flash.shown) {
-                flash.shown = true
-                flash.onShown()
-                postDelayed({ endTrailFlash(flash) }, flash.holdMs)
             }
         }
     }

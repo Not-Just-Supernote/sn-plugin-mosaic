@@ -78,10 +78,6 @@ class BoardInteractionController(
         const val CARD_FRAME_HOLD_MOVE_SLOP_DP = 3f
         const val CARD_FRAME_PREVIEW_CANCEL_MOVE_DP = 8f
         const val CARD_FRAME_CAPTURE_INK_RATIO = 0.70f
-        // 重画系统笔迹时比 Mosaic 的笔画宽一些，盖住轨迹的偏差。
-        private const val TRAIL_FLASH_WIDTH_RATIO = 1.5f
-        private const val TRAIL_FLASH_MARGIN_PX = 6f
-        private const val TRAIL_FLASH_MIN_PX = 10f
         // 方括号扩卡时离挡路卡片留的空隙。
         private const val CARD_EXTEND_GAP = 12f
 
@@ -1212,34 +1208,7 @@ class BoardInteractionController(
     
     private fun discardWriteTrail(s: PenSession.Write, reason: String) {
         if (s.points.size < 4) return
-        host.onPenTrailDiscarded(reason, if (reason.startsWith("card-")) discardedTrail(s) else null)
-    }
-
-    // 系统笔迹在屏幕上的位置、粗细和颜色，供清除实验在原处重画。
-    private fun discardedTrail(s: PenSession.Write): DiscardedTrail {
-        val path = Path()
-        val p = s.points
-        var i = 0
-        while (i + 1 < p.size) {
-            val x = screenX(p[i] + s.cardX)
-            val y = screenY(p[i + 1] + s.cardY)
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            i += 2
-        }
-        val bounds = RectF()
-        path.computeBounds(bounds, true)
-        var widest = 0f
-        if (s.pressures.size == p.size / 2) {
-            for (run in draftStroke(s).runs) widest = max(widest, run.maxWidth)
-        }
-        val inkPx = if (widest > 0f) widest * density * BoardEngine.scale else penWidth * density
-        val widthPx = max(TRAIL_FLASH_MIN_PX, inkPx * TRAIL_FLASH_WIDTH_RATIO + TRAIL_FLASH_MARGIN_PX)
-        val color = when {
-            penStyle == PenStyle.MARKER -> markerInk.argb
-            trailWhite -> Color.WHITE
-            else -> Color.BLACK
-        }
-        return DiscardedTrail(path, widthPx, color, bounds, p.size / 2)
+        host.onPenTrailDiscarded(reason)
     }
 
     private fun syncToolMirrors(state: ToolArbiter.State, source: String) {
@@ -1723,25 +1692,23 @@ class BoardInteractionController(
         )
     }
 
-    private fun draftStroke(s: PenSession.Write): BoardEngine.StrokeRec = BoardEngine.StrokeRec(
-        s.id,
-        s.space,
-        penWidth,
-        if (penStyle == PenStyle.MARKER) markerInk.argb else INK_BLACK,
-        s.points.toArray(),
-        s.pressures.toArray(),
-        penStyle.objType,
-        density * BoardEngine.scale,
-        DrawPathClient.widthArgument(penStyle, penWidth),
-        s.nibAngle,
-    )
-
     private fun commitStroke(s: PenSession.Write) {
         if (s.points.size < 2) return
         
         
         val marker = penStyle == PenStyle.MARKER
-        val draft = draftStroke(s)
+        val draft = BoardEngine.StrokeRec(
+            s.id,
+            s.space,
+            penWidth,
+            if (marker) markerInk.argb else INK_BLACK,
+            s.points.toArray(),
+            s.pressures.toArray(),
+            penStyle.objType,
+            density * BoardEngine.scale,
+            DrawPathClient.widthArgument(penStyle, penWidth),
+            s.nibAngle,
+        )
         val ink = synchronized(BoardEngine.lock) { InkBackdrop.resolve(draft) }
         val rec = draft.withColor(ink)
         val change = (if (s.continuousWrite) growCardForStroke(rec) else null)

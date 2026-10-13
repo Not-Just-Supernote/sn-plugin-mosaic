@@ -42,7 +42,7 @@ JS 依赖的 `React/src/` 不在仓库里，JS 部分现在无法编译。项目
 
 笔尖下的笔迹由系统服务实时绘制，代码在 `DrawPathClient.kt`。抬笔后笔迹立即存入，但停笔 3 秒后才由 Mosaic 重绘替换。这 3 秒里内容层不能重画，否则系统笔迹会消失。逻辑在 `MosaicBoardView` 的 `holdInkHandoff` 附近。
 
-画框、拉出新卡片、连线、方括号扩卡这些手势不留笔迹，要把系统笔迹清掉。笔改用原生书法笔（drawPath 类型 15）以后，抬笔后 65 到 131ms 的整屏刷新（插件根视图 `forceEinkFullUpdate`）都清不掉，只有一次 144ms、紧跟在关掉再打开系统笔迹服务之后的清掉了；只同步背景、只关掉再打开服务都清不掉。现在在做第二轮实验：每次手势按顺序换一种办法，打开白板后从第 1 种开始，日志前缀 `[TrailProbe]`，办法列在 `TrailClearProbe.kt`。背景同步一律等清除做完后再发（`syncHoldUntil`）。确定哪种有效后，只保留那一种。
+画框、拉出新卡片、连线、方括号扩卡这些手势不留笔迹。抬笔时先关掉再打开系统笔迹服务（`resetDrawPathForTrailClear`），新卡片画好后整屏刷新（插件根视图 `forceEinkFullUpdate`），系统笔迹就清掉了；背景同步（`syncBackground`）等刷新后 1.2 秒再发（`syncHoldUntil`）。书法笔（drawPath 类型 15）下设备实测：抬笔后 150ms 内只整屏刷新清不掉，晚 0.3 秒以上刷新也能清掉；只同步背景、只重开服务、在原处重画再擦掉都清不掉。逻辑在 `MosaicBoardView` 的 `onPenTrailDiscarded` 和 `runPendingFullRefresh`。
 
 套索和图形不走系统服务，轨迹由 Mosaic 自己画。
 
