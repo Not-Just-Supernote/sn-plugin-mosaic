@@ -54,6 +54,8 @@ class MosaicBoardView(
         // 卡片手势后，背景同步等整屏刷新做完再过这么久；刷新迟迟不来时最多等到 MAX。
         private const val SYNC_AFTER_FULL_REFRESH_MS = 1200L
         private const val SYNC_HOLD_FOR_REFRESH_MAX_MS = 10_000L
+        // 卡片手势抬笔后多久整屏刷新，清掉系统笔迹。
+        private const val TRAIL_CLEAR_REFRESH_DELAY_MS = 600L
         
         private const val CLOSE_WATCHDOG_MS = 3000L
         
@@ -865,25 +867,12 @@ class MosaicBoardView(
         if (!contentView.isDeferringRefresh) contentView.postInvalidateOnAnimation()
         val fullRefresh = reason.startsWith("card-")
         if (fullRefresh) {
-            // 书法笔的轨迹要先关掉再打开系统笔迹服务，再整屏刷新才清得掉；只刷新或只重开都不行（设备实测）。
+            // 书法笔的轨迹抬笔后系统服务还会再画，整屏刷新太早（150ms 内）会清不掉；设备实测 0.6 秒后刷新每次都清掉。
             // 背景同步等刷新做完再发，由 runPendingFullRefresh 安排。
             syncHoldUntil = SystemClock.uptimeMillis() + SYNC_HOLD_FOR_REFRESH_MAX_MS
-            if (!stylusContact) resetDrawPathForTrailClear(reason)
-            requestFullRefreshWhenSettled(reason)
+            handler.postDelayed({ if (attached) requestFullRefreshWhenSettled(reason) }, TRAIL_CLEAR_REFRESH_DELAY_MS)
         }
         Log.i(TAG, "pen trail discarded: reason=$reason sync=${if (stylusContact) "now" else "deferred"} fullRefresh=$fullRefresh stylus=$stylusContact active=$drawPathActive")
-    }
-
-    
-    private fun resetDrawPathForTrailClear(reason: String) {
-        val binder = drawPathBinder ?: return
-        if (!configured) return
-        try {
-            synchronized(DrawPathGate.writeLock) { DrawPathClient.disableAll(binder, drawPathAppName) }
-        } catch (error: Throwable) {
-            Log.w(TAG, "drawPath reset before trail clear failed reason=$reason", error)
-        }
-        rearmDrawPath("trail-clear:$reason")
     }
 
     
