@@ -211,7 +211,7 @@ object NoteShotExport {
                     .append(card.width).append(',').append(card.height).append(',')
                     .append(card.zIndex).append(',').append(card.kind).append(',')
                     .append(card.content.hashCode()).append(',').append(card.bgColor).append(',')
-                    .append(card.textColor).append(',').append(card.title.hashCode())
+                    .append(card.textColor).append(',').append(card.title.hashCode()).append(',').append(card.fontScale)
                 if (card.imagePath.isNotEmpty()) images.add(card.imagePath)
                 BoardEngine.cardStrokes[card.id]?.forEach { appendStroke(sb, it) }
             }

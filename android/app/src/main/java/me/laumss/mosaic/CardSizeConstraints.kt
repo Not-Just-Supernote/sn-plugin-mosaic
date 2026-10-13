@@ -26,7 +26,7 @@ object CardSizeConstraints {
 
     private fun measureText(card: BoardEngine.CardRec, width: Float): PointF {
         val size = BoardContentView.measureTextCardSize(card.content, width,
-            CardTextFormat.metricsFor(card.id), limitHeight = false)
+            CardTextFormat.metricsFor(card), limitHeight = false)
         // Round outward so a line at its measured width still fits after a float round trip.
         return PointF(ceil(size.x), ceil(size.y))
     }

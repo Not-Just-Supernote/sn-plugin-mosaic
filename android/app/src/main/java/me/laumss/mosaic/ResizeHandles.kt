@@ -11,8 +11,9 @@ object ResizeHandles {
         BoardGeometry.Handle.BOTTOM, BoardGeometry.Handle.LEFT)
     private val horizontal = listOf(BoardGeometry.Handle.RIGHT, BoardGeometry.Handle.LEFT)
 
+    // Text cards get corners too: a corner drag scales the card and its text size together.
     fun forCard(kind: String?): List<BoardGeometry.Handle> =
-        forSelection(kind == "image", true, kind == "note")
+        forSelection(kind != "note", true, kind == "note")
 
     fun forSelection(cornerHandles: Boolean, edgeHandles: Boolean, horizontalOnly: Boolean): List<BoardGeometry.Handle> =
         (if (cornerHandles) corners else emptyList()) +

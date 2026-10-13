@@ -29,7 +29,7 @@ export type BoardCommand =
       pointOffsets: number[]; pointCounts: number[]; points: string;
     }
   | { type: 'strokesRemove'; ids: string[] }
-  | { type: 'cardUpsert'; id: string; x: number; y: number; width: number; height: number; zIndex: number; kind: string; content?: string; noteRef?: string; imageRef?: string; bgColor?: string; textColor?: string; title?: string }
+  | { type: 'cardUpsert'; id: string; x: number; y: number; width: number; height: number; zIndex: number; kind: string; content?: string; noteRef?: string; imageRef?: string; bgColor?: string; textColor?: string; title?: string; fontScale?: number }
   | { type: 'cardsRemove'; ids: string[] }
   | { type: 'connectionAdd'; id: string; from: string; to: string; locked?: boolean }
   | { type: 'connectionsRemove'; ids: string[] }
@@ -218,6 +218,7 @@ export function cardFromCommand(
       noteRef: op.noteRef || undefined,
       imageRef: op.imageRef ?? existing.imageRef,
       title: op.title || undefined,
+      ext: withFontScale(existing.ext, op.fontScale),
     }
   }
   const card: Card = {
@@ -234,7 +235,26 @@ export function cardFromCommand(
   if (op.noteRef) card.noteRef = op.noteRef;
   if (op.imageRef) card.imageRef = op.imageRef;
   if (op.title) card.title = op.title;
+  const ext = withFontScale(undefined, op.fontScale);
+  if (ext) card.ext = ext;
   return card;
+}
+
+// A text card's text size multiplier lives in card.ext.fontScale; 1 is the default and is not stored.
+export function cardFontScale(card: Card): number {
+  const value = Number(card.ext?.fontScale);
+  return Number.isFinite(value) && value > 0 ? value : 1;
+}
+
+function withFontScale(
+  ext: Record<string, unknown> | undefined,
+  fontScale: number | undefined,
+): Record<string, unknown> | undefined {
+  if (fontScale === undefined || !Number.isFinite(fontScale)) return ext;
+  const next: Record<string, unknown> = { ...(ext ?? {}) };
+  if (Math.abs(fontScale - 1) < 1e-3) delete next.fontScale;
+  else next.fontScale = fontScale;
+  return Object.keys(next).length > 0 ? next : undefined;
 }
 
 export function connectionFromCommand(op: Extract<BoardCommand, { type: 'connectionAdd' }>): Connection {

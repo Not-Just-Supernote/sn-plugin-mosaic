@@ -7,10 +7,15 @@ object CardTextFormat {
         val body: Float, val lineMul: Float, val padX: Float, val padTop: Float, val padBottom: Float,
         val h1: Float, val h2: Float, val h3: Float,
         val headingLineMul: Float = 1.2f, val headingGapEm: Float = 0.4f, val paraGapEm: Float = 0.5f,
-    )
+    ) {
+        // Same layout at k times the size; line multipliers and em gaps are relative and stay.
+        fun scaled(k: Float): Metrics = if (k == 1f) this else
+            Metrics(body * k, lineMul, padX * k, padTop * k, padBottom * k, h1 * k, h2 * k, h3 * k, headingLineMul, headingGapEm, paraGapEm)
+    }
     val WEB = Metrics(18f, 1.45f, 14f, 8f, 12f, 28.8f, 24.3f, 20.7f)
     val DEMO = Metrics(16f, 1.28f, 16f, 12f, 10f, 25.6f, 21.6f, 18.4f)
     fun metricsFor(cardId: String?): Metrics = if (cardId != null && cardId.startsWith("demo-")) DEMO else WEB
+    fun metricsFor(card: BoardEngine.CardRec): Metrics = metricsFor(card.id).scaled(card.fontScale)
 
     const val BODY_SIZE = 18f
     fun textSize(heading: Int, m: Metrics = WEB): Float = when (heading) { 1 -> m.h1; 2 -> m.h2; 3, 4, 5, 6 -> m.h3; else -> m.body }

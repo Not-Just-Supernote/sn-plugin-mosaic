@@ -1492,7 +1492,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             
             val darkBase = showsAccent(card) || (dark && flatDark(card))
             cardTextPaint.color = if (darkBase) Color.WHITE else CARD_TEXT_COLOR
-            drawTextBlock(canvas, card.content, rect.width(), darkBase, CardTextFormat.metricsFor(card.id))
+            drawTextBlock(canvas, card.content, rect.width(), darkBase, CardTextFormat.metricsFor(card))
         }
 
         

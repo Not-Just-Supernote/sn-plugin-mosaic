@@ -20,7 +20,7 @@ object SelectionCopy {
             val imagePath = if (card.kind == "note") File(notesDirectory, noteRef).absolutePath else card.imagePath
             val copy = BoardEngine.CardRec(newId("card-"), card.x + offset, card.y + offset,
                 card.width, card.height, z++, card.kind, card.content, imagePath, noteRef,
-                card.bgColor, card.textColor, card.title)
+                card.bgColor, card.textColor, card.title, card.fontScale)
             copiedCards[card.id] = copy
             change.card(null, copy)
         }

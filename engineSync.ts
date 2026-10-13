@@ -9,10 +9,11 @@ import { resolveCardSize } from './React/src/cardGeometry';
 import type { Card, Connection, Viewport } from './React/src/types';
 import { imagePathFor } from './imageStore';
 import { notePathFor } from './noteStore';
+import { cardFontScale } from './boardCommands';
 
 
 
-const PROTOCOL_VERSION = 7;
+const PROTOCOL_VERSION = 8;
 
 const OP_ADD_STROKE = 1;
 const OP_REMOVE_STROKES = 2;
@@ -218,6 +219,7 @@ function writeCard(writer: OpsWriter, card: Card) {
   writer.str(card.textColor ?? '');
   
   writer.str(card.title ?? '');
+  writer.f32(cardFontScale(card));
 }
 
 function writeIdList(writer: OpsWriter, op: number, ids: string[]) {

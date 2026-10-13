@@ -210,6 +210,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 putString("bgColor", rec.bgColor)
                 putString("textColor", rec.textColor)
                 putString("title", rec.title)
+                putDouble("fontScale", rec.fontScale.toDouble())
             },
         )
     }

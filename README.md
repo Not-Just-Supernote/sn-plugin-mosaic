@@ -76,7 +76,7 @@ Inside a Note Card, the close button goes back to the whiteboard, and pulling do
 
 Text cards can use either a white or black style. Dark cards use white text and handwriting automatically. Connections are made between cards using the same color, and a card pulled from another card keeps that style.
 
-Drag the corner or edge handles to resize a card. If the text needs more space, the card grows and moves the cards below it down.
+Drag the corner or edge handles to resize a card. If the text needs more space, the card grows and moves the cards below it down. On a text card, the edge handles change only the card size, while the corner handles scale the card and its text size together. Handwriting recognized into a text card keeps roughly the size it was written at.
 
 Connected cards can also be resized together and matched to the size of a neighboring card.
 

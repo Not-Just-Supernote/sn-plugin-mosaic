@@ -140,6 +140,8 @@ class BoardInteractionController(
         private const val EDGE_SWIPE_ZONE_DP = 72f
         
         private const val RECOGNIZE_CARD_MIN_DP = 120f
+        // Share of the font size a written glyph's ink usually fills.
+        private const val HANDWRITING_GLYPH_EM = 0.9f
 
         
         const val NOTE_CARD_BOARD_WIDTH = 450f
@@ -705,6 +707,8 @@ class BoardInteractionController(
             val startRect = RectF()
             
             var inkBounds: RectF? = null
+            // A corner drag on a text card scales its text with the card; this is the scale it would get.
+            var fontScale = card.fontScale
         }
         
         class Selection(isPen: Boolean, pointerId: Int, sx: Float, sy: Float, val selection: LassoSelection, val cards: List<BoardEngine.CardRec>, val strokes: List<BoardEngine.StrokeRec>, val liftZ: Int?) : MoveSession(isPen, pointerId, sx, sy) {
@@ -2162,7 +2166,7 @@ class BoardInteractionController(
             (BoardEngine.cards[current.cardIds[0]]?.colored == true)
         overlay.topInsetPx = chrome.toolbarHeightPx().toFloat()
         overlay.setLassoFrame(framePx, lassoActionRects(framePx, types),
-            cornerHandles = !singleCard || kind == "image",
+            cornerHandles = !singleCard || kind != "note",
             edgeHandles = singleCard || shapeKind != null, onDark = onDark,
             rotateHandle = selectionRotatable(current),
             horizontalEdgesOnly = kind == "note")
@@ -2806,6 +2810,7 @@ class BoardInteractionController(
 
     
     private fun computeResizePreview(m: MoveSession.CardResize, wx: Float, wy: Float) {
+        if (m.handle.isCorner && isTextCard(m.card)) { computeTextScalePreview(m, wx, wy); return }
         when {
             m.card.kind == "note" ->
                 BoardGeometry.resizeWidthKeepAspect(m.handle, m.startWorldX, m.startWorldY, m.startRect, wx, wy, m.card.kind, m.preview)
@@ -2822,6 +2827,34 @@ class BoardInteractionController(
         }
         CardSizeConstraints.constrainRect(m.card, m.preview, m.handle,
             proportional = m.card.kind == "image" && m.handle.isCorner)
+    }
+
+    private fun isTextCard(card: BoardEngine.CardRec): Boolean = card.kind != "image" && card.kind != "note"
+
+    // Corner drag on a text card: the card keeps its shape and its text grows or shrinks with it, so the lines
+    // break where they did. The card still covers its handwriting.
+    private fun computeTextScalePreview(m: MoveSession.CardResize, wx: Float, wy: Float) {
+        val start = m.startRect
+        val sw = max(start.width(), 1f)
+        val sh = max(start.height(), 1f)
+        BoardGeometry.resizeProportional(m.handle, m.startWorldX, m.startWorldY, start, wx, wy, m.card.kind, m.preview)
+        var f = m.preview.width() / sw
+        val ax = if (m.handle.movesLeft) start.right else start.left
+        val ay = if (m.handle.movesTop) start.bottom else start.top
+        m.inkBounds?.let { ib ->
+            val fx = if (m.handle.movesLeft) (ax - ib.left) / sw else (ib.right - ax) / sw
+            val fy = if (m.handle.movesTop) (ay - ib.top) / sh else (ib.bottom - ay) / sh
+            f = max(f, max(fx, fy))
+        }
+        val base = m.card.fontScale
+        f = f.coerceIn(BoardEngine.MIN_FONT_SCALE / base, BoardEngine.MAX_FONT_SCALE / base)
+        val w = sw * f
+        val h = sh * f
+        val left = if (m.handle.movesLeft) ax - w else ax
+        val top = if (m.handle.movesTop) ay - h else ay
+        m.preview.set(left, top, left + w, top + h)
+        m.fontScale = BoardEngine.clampFontScale(base * f)
+        CardSizeConstraints.constrainRect(m.card.withFontScale(m.fontScale), m.preview, m.handle, proportional = true)
     }
 
     
@@ -3059,9 +3092,10 @@ class BoardInteractionController(
                 unhideCardFromTiles()
                 val start = m.startRect
                 val changed = abs(m.preview.left - start.left) > 0.01f || abs(m.preview.top - start.top) > 0.01f ||
-                    abs(m.preview.width() - start.width()) > 0.01f || abs(m.preview.height() - start.height()) > 0.01f
+                    abs(m.preview.width() - start.width()) > 0.01f || abs(m.preview.height() - start.height()) > 0.01f ||
+                    m.fontScale != m.card.fontScale
                 if (changed) {
-                    val moved = m.card.withRect(m.preview)
+                    val moved = m.card.withRect(m.preview).withFontScale(m.fontScale)
                     val change = BoardHistory.Change("resize").card(m.card, moved)
                     apply(change, record = true)
                 }
@@ -3623,7 +3657,7 @@ class BoardInteractionController(
                 note && tempDark -> Color.WHITE
                 else -> BoardContentView.CARD_FILL_COLOR
             },
-            contentScale = if (note) card.width / ScrollingDocument.WIDTH else 1f,
+            contentScale = if (note) card.width / ScrollingDocument.WIDTH else card.fontScale,
             headerMode = note,
             onKeyboard = { obscuredTop -> avoidKeyboard(editRegionWorld(card.id), obscuredTop) },
             cardFrame = { availableBottom ->
@@ -3683,7 +3717,7 @@ class BoardInteractionController(
 
     
     private fun grownToFit(card: BoardEngine.CardRec, minHeight: Float): BoardEngine.CardRec {
-        val needed = BoardContentView.measureTextCardSize(card.content, card.width).y
+        val needed = BoardContentView.measureTextCardSize(card.content, card.width, CardTextFormat.metricsFor(card)).y
         val height = max(minHeight, needed)
         return if (height == card.height) card else card.withRect(RectF(card.x, card.y, card.x + card.width, card.y + height))
     }
@@ -4617,14 +4651,22 @@ class BoardInteractionController(
             Log.i(TAG_LASSO, "recognize note header strokes=${pending.strokeIds.size} chars=${trimmed.length}")
             return
         }
-        val r = pending.rect
-        val left = r.left
-        val top = r.top
-        val width = r.width().coerceAtLeast(RECOGNIZE_CARD_MIN_DP)
-        val height = r.height().coerceAtLeast(RECOGNIZE_CARD_MIN_DP)
+        val ink = synchronized(BoardEngine.lock) {
+            pending.strokeIds.mapNotNull { id -> BoardEngine.strokes[id]?.let { BoardEngine.strokeWorldBounds(it) } }
+        }
+        val fontScale = handwritingFontScale(ink)
+        val m = CardTextFormat.WEB.scaled(fontScale)
+        // The text sits where the handwriting was: the card's padding goes around the ink.
+        val r = ink.fold(null as RectF?) { acc, b -> acc?.apply { union(b) } ?: RectF(b) } ?: RectF(pending.rect)
+        val left = r.left - m.padX
+        val top = r.top - m.padTop
+        val probe = BoardEngine.CardRec("probe", left, top, 1f, 1f, 0, "text", trimmed, fontScale = fontScale)
+        val size = CardSizeConstraints.fit(probe,
+            (r.width() + m.padX * 2f).coerceAtLeast(RECOGNIZE_CARD_MIN_DP),
+            (r.height() + m.padTop + m.padBottom).coerceAtLeast(RECOGNIZE_CARD_MIN_DP))
         val created = BoardEngine.CardRec(
-            newId("card-"), left, top, width, height,
-            BoardGeometry.nextZIndex(BoardEngine.cards.values), "text", trimmed,
+            newId("card-"), left, top, size.x, size.y,
+            BoardGeometry.nextZIndex(BoardEngine.cards.values), "text", trimmed, fontScale = fontScale,
         )
         val change = BoardHistory.Change("recognize-card").card(null, created)
         synchronized(BoardEngine.lock) {
@@ -4633,7 +4675,23 @@ class BoardInteractionController(
         setLasso(null)
         apply(change, record = true)
         scheduleChromeUpdate()
-        Log.i(TAG_LASSO, "recognize card=${created.id} replaced strokes=${pending.strokeIds.size} chars=${trimmed.length}")
+        Log.i(TAG_LASSO, "recognize card=${created.id} replaced strokes=${pending.strokeIds.size} chars=${trimmed.length} fontScale=$fontScale")
+    }
+
+    // Text scale that makes recognized text about as large as the handwriting: strokes are grouped into rows by
+    // vertical overlap, and the typical row height is taken as the glyph height.
+    private fun handwritingFontScale(ink: List<RectF>): Float {
+        val rows = ArrayList<RectF>()
+        for (b in ink.sortedBy { it.top }) {
+            val row = rows.lastOrNull()
+            if (row != null && b.centerY() in row.top..row.bottom) row.union(b) else rows.add(RectF(b))
+        }
+        val heights = rows.map { it.height() }.filter { it > 0f }.sorted()
+        if (heights.isEmpty()) return 1f
+        val rowHeight = heights[heights.size / 2]
+        val scale = rowHeight / HANDWRITING_GLYPH_EM / CardTextFormat.WEB.body
+        // Round to tenths so nearby recognitions share a size.
+        return BoardEngine.clampFontScale(Math.round(scale * 10f) / 10f)
     }
 
     override fun onClose() {

@@ -11,7 +11,11 @@ import java.nio.ByteOrder
 object BoardEngine {
 
     private const val TAG = "MosaicBoardEngine"
-    const val PROTOCOL_VERSION = 7
+    const val PROTOCOL_VERSION = 8
+
+    const val MIN_FONT_SCALE = 0.5f
+    const val MAX_FONT_SCALE = 6f
+    fun clampFontScale(value: Float): Float = if (value.isFinite()) value.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE) else 1f
 
     private const val OP_ADD_STROKE = 1
     private const val OP_REMOVE_STROKES = 2
@@ -244,6 +248,8 @@ object BoardEngine {
         val textColor: String = "",
         
         val title: String = "",
+        // Text size multiplier of a text card: headings, body and padding scale together.
+        val fontScale: Float = 1f,
     ) {
         
         val colored: Boolean
@@ -257,17 +263,21 @@ object BoardEngine {
         fun sameGeometry(other: CardRec): Boolean =
             x == other.x && y == other.y && width == other.width && height == other.height &&
                 zIndex == other.zIndex && kind == other.kind && content == other.content && imagePath == other.imagePath &&
-                bgColor == other.bgColor && textColor == other.textColor && noteRef == other.noteRef && title == other.title
+                bgColor == other.bgColor && textColor == other.textColor && noteRef == other.noteRef && title == other.title &&
+                fontScale == other.fontScale
 
-        fun moved(nx: Float, ny: Float): CardRec = CardRec(id, nx, ny, width, height, zIndex, kind, content, imagePath, noteRef, bgColor, textColor, title)
+        fun moved(nx: Float, ny: Float): CardRec = CardRec(id, nx, ny, width, height, zIndex, kind, content, imagePath, noteRef, bgColor, textColor, title, fontScale)
 
-        fun withRect(r: RectF): CardRec = CardRec(id, r.left, r.top, r.width(), r.height(), zIndex, kind, content, imagePath, noteRef, bgColor, textColor, title)
+        fun withRect(r: RectF): CardRec = CardRec(id, r.left, r.top, r.width(), r.height(), zIndex, kind, content, imagePath, noteRef, bgColor, textColor, title, fontScale)
 
-        fun withZ(z: Int): CardRec = CardRec(id, x, y, width, height, z, kind, content, imagePath, noteRef, bgColor, textColor, title)
+        fun withZ(z: Int): CardRec = CardRec(id, x, y, width, height, z, kind, content, imagePath, noteRef, bgColor, textColor, title, fontScale)
 
-        fun withColors(bg: String, text: String): CardRec = CardRec(id, x, y, width, height, zIndex, kind, content, imagePath, noteRef, bg, text, title)
+        fun withColors(bg: String, text: String): CardRec = CardRec(id, x, y, width, height, zIndex, kind, content, imagePath, noteRef, bg, text, title, fontScale)
 
-        fun withContent(value: String): CardRec = CardRec(id, x, y, width, height, zIndex, kind, value, imagePath, noteRef, bgColor, textColor, title)
+        fun withContent(value: String): CardRec = CardRec(id, x, y, width, height, zIndex, kind, value, imagePath, noteRef, bgColor, textColor, title, fontScale)
+
+        fun withFontScale(value: Float): CardRec =
+            CardRec(id, x, y, width, height, zIndex, kind, content, imagePath, noteRef, bgColor, textColor, title, clampFontScale(value))
 
         
         fun sameNeckGeometry(other: CardRec): Boolean =
@@ -797,7 +807,7 @@ object BoardEngine {
         var applied = false
         try {
             val version = buf.short.toInt()
-            if (version != PROTOCOL_VERSION && version != 6 && version != 5 && version != 4 && version != 3) {
+            if (version != PROTOCOL_VERSION && version != 7 && version != 6 && version != 5 && version != 4 && version != 3) {
                 Log.w(TAG, "applyOps: unsupported protocol version=$version")
                 return 0
             }
@@ -818,7 +828,7 @@ object BoardEngine {
                         decoded.add { ids.forEach { m.removeStroke(it) } }
                     }
                     OP_UPSERT_CARD -> {
-                        val card = readCard(buf)
+                        val card = readCard(buf, version)
                         decoded.add { m.upsertCard(card) }
                     }
                     OP_REMOVE_CARDS -> {
@@ -1118,7 +1128,7 @@ object BoardEngine {
             w.byte(OP_UPSERT_CARD)
             w.str(c.id); w.float(c.x); w.float(c.y); w.float(c.width); w.float(c.height); w.int(c.zIndex)
             w.str(c.kind); w.str(c.content); w.str(c.imagePath); w.str(c.noteRef)
-            w.str(c.bgColor); w.str(c.textColor); w.str(c.title)
+            w.str(c.bgColor); w.str(c.textColor); w.str(c.title); w.float(c.fontScale)
         }
         w.byte(OP_SET_CONNECTIONS)
         w.int(scene.connections.size)
@@ -1193,7 +1203,7 @@ object BoardEngine {
         return StrokeRec(id, space, width, color, points, pressures, drawPathType, sampleScale, drawPathWidth, nibAngle, angles)
     }
 
-    private fun readCard(buf: ByteBuffer): CardRec {
+    private fun readCard(buf: ByteBuffer, version: Int): CardRec {
         val id = readString(buf)
         val x = buf.float
         val y = buf.float
@@ -1207,7 +1217,8 @@ object BoardEngine {
         val bgColor = readString(buf)
         val textColor = readString(buf)
         val title = readString(buf)
-        return CardRec(id, x, y, width, height, zIndex, kind, content, imagePath, noteRef, bgColor, textColor, title)
+        val fontScale = if (version >= 8) clampFontScale(buf.float) else 1f
+        return CardRec(id, x, y, width, height, zIndex, kind, content, imagePath, noteRef, bgColor, textColor, title, fontScale)
     }
 
     fun computePointBounds(points: FloatArray): RectF {
