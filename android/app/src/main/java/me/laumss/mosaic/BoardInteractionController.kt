@@ -1630,6 +1630,10 @@ class BoardInteractionController(
                         Log.i(TAG_PEN, "UP consumed as card frame")
                         return
                     }
+                    if (extendCardFromBracket(s)) {
+                        Log.i(TAG_PEN, "UP consumed as card edge extend")
+                        return
+                    }
                     if (completeCardStroke(s)) {
                         Log.i(TAG_PEN, "UP consumed as card connection")
                         return
@@ -1818,6 +1822,54 @@ class BoardInteractionController(
         }
         apply(change, record = true)
         Log.i(TAG_PEN, "[CardFrame] created card=${created.id} rect=$rect capturedInk=$captured")
+    }
+
+    // 在卡片边上画方括号，卡片朝那一侧变宽或变高。框进新区域的画布笔迹收进卡片。
+    private fun extendCardFromBracket(s: PenSession.Write): Boolean {
+        if (!surface.allowsCardFrame || s.points.size < 8) return false
+        val world = s.points.toArray()
+        var i = 0
+        while (i < world.size) {
+            world[i] += s.cardX
+            world[i + 1] += s.cardY
+            i += 2
+        }
+        val match = CardEdgeExtend.recognize(world, BoardEngine.cardsByZ.asReversed(), BoardEngine.scale) ?: return false
+        val card = match.card
+        // 和写字撑大卡片一样，会撞上别的卡片时不扩，笔迹照常留下。
+        val old = card.rect(RectF())
+        val r = RectF()
+        val blocker = synchronized(BoardEngine.lock) {
+            BoardEngine.cards.values.firstOrNull { it.id != card.id && RectF.intersects(match.rect, it.rect(r)) && !RectF.intersects(old, r) }
+        }
+        if (blocker != null) {
+            Log.i(TAG_PEN, "[CardExtend] skipped card=${card.id} blocked-by=${blocker.id}")
+            return false
+        }
+        val grown = card.withRect(match.rect)
+        val change = BoardHistory.Change("card-extend").card(card, grown)
+        // 卡片上的笔迹存的是相对卡片左上角的坐标，向左或向上扩时要补回偏移。
+        if (grown.x != card.x || grown.y != card.y) synchronized(BoardEngine.lock) {
+            BoardEngine.cardStrokes[card.id]?.forEach { change.stroke(it, it.translated(0f, 0f, card, grown)) }
+        }
+        val added = when (match.side) {
+            CardEdgeExtend.Side.LEFT -> RectF(grown.x, grown.y, card.x, grown.y + grown.height)
+            CardEdgeExtend.Side.RIGHT -> RectF(card.x + card.width, grown.y, grown.x + grown.width, grown.y + grown.height)
+            CardEdgeExtend.Side.TOP -> RectF(grown.x, grown.y, grown.x + grown.width, card.y)
+            CardEdgeExtend.Side.BOTTOM -> RectF(grown.x, card.y + card.height, grown.x + grown.width, grown.y + grown.height)
+        }
+        val candidates = ArrayList<BoardEngine.StrokeRec>()
+        synchronized(BoardEngine.lock) { BoardEngine.queryCanvasStrokes(added, candidates) }
+        var captured = 0
+        for (stroke in candidates) {
+            if (stroke.space != "canvas" || strokeCoverage(stroke, added) < CARD_FRAME_CAPTURE_INK_RATIO) continue
+            change.stroke(stroke, stroke.translated(0f, 0f, null, grown))
+            captured++
+        }
+        discardWriteTrail(s, "card-extend")
+        apply(change, record = true)
+        Log.i(TAG_PEN, "[CardExtend] card=${card.id} side=${match.side} depth=${match.depth} rect=${match.rect} capturedInk=$captured")
+        return true
     }
 
     
