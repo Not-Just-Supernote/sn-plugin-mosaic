@@ -24,10 +24,6 @@ class BoardPresentation(
         
         // 拖动、改尺寸、旋转不换样，原位置由控制器从内容层拿掉，只看叠加层的预览。
         TRANSFORM(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false, motion = true),
-
-        // 卡片改尺寸（拉手柄或四边，单卡和含卡片的选中）：不动整屏的刷新模式，控制器只给预览所在的叠加层设 DTH。
-        // 只有笔迹的选中改尺寸走 TRANSFORM。
-        RESIZE(null, flat = false, suspendFog = false, motion = true),
         
         TOOL(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false),
         
