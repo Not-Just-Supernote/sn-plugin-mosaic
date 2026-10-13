@@ -82,6 +82,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 putDouble("sampleScale", rec.sampleScale.toDouble())
                 if (rec.nibAngle.isFinite()) putDouble("nibAngle", rec.nibAngle.toDouble())
                 if (rec.angles.isNotEmpty()) putString("angles", packAngles(rec.angles))
+                if (rec.contourOffsets.isNotEmpty()) putArray("contourOffsets", Arguments.createArray().apply { rec.contourOffsets.forEach(::pushInt) })
                 putString("points", packPoints(rec.points, rec.pressures))
                 
                 
@@ -113,6 +114,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
         val sampleScales = Arguments.createArray()
         val nibAngles = Arguments.createArray()
         val angles = Arguments.createArray()
+        val contourOffsets = Arguments.createArray()
         val bounds = Arguments.createArray()
         val pointOffsets = Arguments.createArray()
         val pointCounts = Arguments.createArray()
@@ -127,6 +129,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
             sampleScales.pushDouble(rec.sampleScale.toDouble())
             if (rec.nibAngle.isFinite()) nibAngles.pushDouble(rec.nibAngle.toDouble()) else nibAngles.pushNull()
             angles.pushString(packAngles(rec.angles))
+            contourOffsets.pushArray(Arguments.createArray().apply { rec.contourOffsets.forEach(::pushInt) })
             bounds.pushDouble(rec.bounds.left.toDouble())
             bounds.pushDouble(rec.bounds.top.toDouble())
             bounds.pushDouble(rec.bounds.right.toDouble())
@@ -155,6 +158,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 putArray("sampleScales", sampleScales)
                 putArray("nibAngles", nibAngles)
                 putArray("angles", angles)
+                putArray("contourOffsets", contourOffsets)
                 putArray("bounds", bounds)
                 putArray("pointOffsets", pointOffsets)
                 putArray("pointCounts", pointCounts)

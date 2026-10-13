@@ -48,6 +48,7 @@ class ClipboardStrokeIo {
         val noteWhite: Boolean = false,
         val nibAngle: Float = Float.NaN,
         val angles: IntArray = IntArray(0),
+        val contourOffsets: IntArray = IntArray(0),
     )
 
     data class PasteBatch(
@@ -73,6 +74,7 @@ class ClipboardStrokeIo {
         val sampleScale: Float = 1f,
         val nibAngle: Float = Float.NaN,
         val angles: IntArray = IntArray(0),
+        val contourOffsets: IntArray = IntArray(0),
     )
 
     
@@ -231,6 +233,7 @@ class ClipboardStrokeIo {
                 source.noteWhite,
                 source.nibAngle,
                 source.angles,
+                source.contourOffsets,
             )
         }
         return PasteBatch(strokes, minX, minY, maxX, maxY, pageScale)
@@ -245,7 +248,23 @@ class ClipboardStrokeIo {
         val pageStrokes = ArrayList<TripleStroke>(array.length())
         for (index in 0 until array.length()) {
             val obj = array.optJSONObject(index) ?: continue
-            val pts = obj.optJSONArray("pts") ?: continue
+            val contours = obj.optJSONArray("contours")
+            val ends = ArrayList<Int>()
+            val pts = if (contours != null) (obj.optJSONArray("pts") ?: JSONArray()).apply {
+                require(length() % 3 == 0) { "Invalid source samples" }
+                var vertices = length() / 3
+                ends.add(vertices)
+                for (ringIndex in 0 until contours.length()) {
+                    val ring = contours.getJSONArray(ringIndex)
+                    require(ring.length() >= 2 && ring.length() % 2 == 0) { "Invalid note contour" }
+                    for (at in 0 until ring.length() step 2) {
+                        val x = ring.getDouble(at); val y = ring.getDouble(at + 1)
+                        require(x.isFinite() && y.isFinite()) { "Invalid contour coordinate" }
+                        put(x); put(y); put(1.0); vertices++
+                    }
+                    ends.add(vertices)
+                }
+            } else obj.optJSONArray("pts") ?: continue
             val count = pts.length() / 3
             if (count < 1) continue
             val pagePoints = FloatArray(count * 2)
@@ -260,8 +279,10 @@ class ClipboardStrokeIo {
                 pagePoints[valid * 2 + 1] = y
                 val rawPressure = pts.optDouble(at + 2, 1.0).toFloat()
                 pressures[valid] = if (rawPressure.isFinite()) rawPressure.coerceIn(0f, 1f) else 1f
-                minX = minOf(minX, x); minY = minOf(minY, y)
-                maxX = maxOf(maxX, x); maxY = maxOf(maxY, y)
+                if (contours == null || point >= ends.first()) {
+                    minX = minOf(minX, x); minY = minOf(minY, y)
+                    maxX = maxOf(maxX, x); maxY = maxOf(maxY, y)
+                }
                 valid++
             }
             if (valid == 0) continue
@@ -299,6 +320,7 @@ class ClipboardStrokeIo {
                         .takeIf { it.isFinite() && it > 0f } ?: 1f,
                     pasteNibAngle(obj, angles),
                     angles,
+                    ends.toIntArray(),
                 ),
             )
         }
@@ -327,6 +349,7 @@ class ClipboardStrokeIo {
             val sources = page.optJSONArray("strokes")
                 ?.let { parsePageStrokes(it, floatArrayOf(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY), noteSource = true) }
                 .orEmpty()
+            if (page.has("strokeCount")) require(sources.size == page.getInt("strokeCount")) { "Incomplete note import page $index" }
             for (source in sources) {
                 val points = FloatArray(source.points.size)
                 for (point in source.pressures.indices) {
@@ -338,6 +361,7 @@ class ClipboardStrokeIo {
                     points, source.pressures, source.penStyle, source.sampleScale / scale, source.drawPathWidth,
                     source.nibAngle,
                     source.angles,
+                    source.contourOffsets,
                 ))
             }
             top += pageHeight * scale
@@ -377,11 +401,16 @@ class ClipboardStrokeIo {
         val sampleScale: Float,
         val nibAngle: Float,
         val angles: IntArray,
+        val contourOffsets: IntArray,
     )
 
     
     private fun noteInkColor(obj: JSONObject, penStyle: Int): Int {
         val noteColor = obj.optInt("penColor", 0)
+        if (obj.has("contours")) {
+            val gray = if ((noteColor and 0xFF) == NOTE_COLOR_WHITE) 255 else noteColor and 0xFF
+            return 0xFF000000.toInt() or (gray * 0x010101)
+        }
         if (penStyle == PenStyle.MARKER.objType) {
             return MarkerInk.fromNoteColor(noteColor).argb
         }
@@ -430,6 +459,21 @@ class ClipboardStrokeIo {
                 .put("sampleScale", (stroke.sampleScale / density).toDouble())
                 .put("pts", pts)
             if (stroke.nibAngle.isFinite()) json.put("nibAngle", stroke.nibAngle.toDouble())
+            if (stroke.contourOffsets.isNotEmpty()) {
+                ContourGeometry.validate(stroke.contourOffsets, stroke.points.size / 2)
+                val contours = JSONArray()
+                var start = stroke.contourOffsets.first()
+                json.put("pts", JSONArray().apply { for (i in 0 until start * 3) put(pts.get(i)) })
+                for (end in stroke.contourOffsets.drop(1)) {
+                    val ring = JSONArray()
+                    for (index in start until end) {
+                        ring.put((stroke.points[index * 2] + stroke.offsetX) * density)
+                        ring.put((stroke.points[index * 2 + 1] + stroke.offsetY) * density)
+                    }
+                    contours.put(ring); start = end
+                }
+                json.put("geometry", "contours").put("contours", contours)
+            }
             if (stroke.angles.isNotEmpty()) {
                 json.put("angles", JSONArray().apply { for (angle in stroke.angles) put(angle) })
                 if (stroke.angles.size >= 2) {
@@ -438,7 +482,10 @@ class ClipboardStrokeIo {
             }
             
             
-            if (stroke.penStyle == PenStyle.MARKER.objType) {
+            if (stroke.contourOffsets.isNotEmpty()) {
+                val gray = stroke.color and 0xFF
+                json.put("penColor", if (gray == 255) NOTE_COLOR_WHITE else gray)
+            } else if (stroke.penStyle == PenStyle.MARKER.objType) {
                 json.put("penColor", MarkerInk.fromArgb(stroke.color).noteColor)
             } else if (stroke.color != BoardEngine.StrokeRec.INK_BLACK) {
                 json.put("penColor", NOTE_COLOR_WHITE)

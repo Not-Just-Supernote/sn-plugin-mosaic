@@ -41,6 +41,6 @@ internal object PaletteStrokeStyle {
             BoardEngine.StrokeRec.INK_BLACK
         } else before.color
         return BoardEngine.StrokeRec(before.id, before.space, raw / 100f, color,
-            before.points, before.pressures, style.objType, before.sampleScale, raw, before.nibAngle, before.angles)
+            before.points, before.pressures, style.objType, before.sampleScale, raw, before.nibAngle, before.angles, before.contourOffsets)
     }
 }

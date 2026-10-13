@@ -31,6 +31,8 @@ export interface InkStroke {
   nibAngle?: number
   /** Original SDK tilt samples as interleaved X/Y integers, in source units. */
   angles?: number[]
+  /** First offset skips original samples; subsequent offsets delimit closed contours. */
+  contourOffsets?: number[]
   width: number
   color: number       // ARGB u32
   encoding?: number
@@ -408,6 +410,20 @@ function decodeConnection(obj: Record<string, unknown>): Connection {
   }
 }
 
+export function readContourOffsets(value: unknown, pointCount: number): number[] | undefined {
+  if (value === undefined || value === null) return undefined
+  if (!Array.isArray(value)) throw new Error('Invalid contour boundaries')
+  if (!value.length) return undefined
+  if (value.length < 2 || !Number.isInteger(value[0]) || value[0] < 0 || value[0] >= pointCount) throw new Error('Invalid contour start')
+  let previous = value[0]
+  for (const end of value.slice(1)) {
+    if (!Number.isInteger(end) || end <= previous || end > pointCount) throw new Error('Invalid contour boundary')
+    previous = end
+  }
+  if (value.length && previous !== pointCount) throw new Error('Incomplete contour geometry')
+  return value.length ? value.slice() : undefined
+}
+
 export function readStrokeAngles(value: unknown): number[] | undefined {
   if (value === undefined || value === null) return undefined
   if (!Array.isArray(value) || value.length % 2 !== 0
@@ -434,6 +450,7 @@ function encodeStroke(stroke: InkStroke): Record<string, unknown> {
   obj.sampleScale = stroke.sampleScale
   if (typeof stroke.nibAngle === 'number' && Number.isFinite(stroke.nibAngle)) obj.nibAngle = stroke.nibAngle
   if (stroke.angles?.length) obj.angles = readStrokeAngles(stroke.angles)
+  if (stroke.contourOffsets?.length) obj.contourOffsets = readContourOffsets(stroke.contourOffsets, unpackStrokePoints(stroke.points).length)
   if (stroke.createdAt !== undefined) obj.createdAt = stroke.createdAt
   return obj
 }
@@ -453,6 +470,7 @@ function decodeStroke(obj: Record<string, unknown>): InkStroke {
     sampleScale: obj.sampleScale as number,
     nibAngle: typeof obj.nibAngle === 'number' && Number.isFinite(obj.nibAngle) ? obj.nibAngle : undefined,
     angles: readStrokeAngles(obj.angles),
+    contourOffsets: readContourOffsets(obj.contourOffsets, unpackStrokePoints(obj.points as Uint8Array).length),
     width: obj.width as number,
     color: obj.color as number,
     encoding: obj.encoding as number | undefined,

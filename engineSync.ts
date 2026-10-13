@@ -2,6 +2,7 @@ import { NativeModules } from 'react-native';
 import {
   STROKE_ENCODING_F32X3,
   readStrokeAngles,
+  readContourOffsets,
   type InkStroke,
 } from './React/src/boardFormat';
 import { bytesToBase64 } from './React/src/base64';
@@ -13,7 +14,7 @@ import { cardFontScale } from './boardCommands';
 
 
 
-const PROTOCOL_VERSION = 8;
+const PROTOCOL_VERSION = 9;
 
 const OP_ADD_STROKE = 1;
 const OP_REMOVE_STROKES = 2;
@@ -176,6 +177,9 @@ function writeStroke(writer: OpsWriter, stroke: InkStroke) {
   const angles = readStrokeAngles(stroke.angles) ?? [];
   writer.u32(angles.length);
   for (const angle of angles) writer.i32(angle);
+  const contourOffsets = readContourOffsets(stroke.contourOffsets, stroke.points.byteLength / 12) ?? [];
+  writer.u32(contourOffsets.length);
+  for (const end of contourOffsets) writer.u32(end);
   const points = stroke.points;
   
   

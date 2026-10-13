@@ -2700,6 +2700,7 @@ class BoardInteractionController(
                     rec.sampleScale,
                     rec.nibAngle,
                     rec.angles.copyOf(),
+                    rec.contourOffsets.copyOf(),
                 )
             }
             for (cardId in sel.cardIds) {
@@ -2717,6 +2718,7 @@ class BoardInteractionController(
                         rec.sampleScale,
                         rec.nibAngle,
                         rec.angles.copyOf(),
+                    rec.contourOffsets.copyOf(),
                     )
                 }
             }
@@ -2773,6 +2775,7 @@ class BoardInteractionController(
                         stroke.points, stroke.pressures, stroke.penStyle, stroke.sampleScale, stroke.drawPathWidth,
                         stroke.nibAngle,
                         stroke.angles,
+                        stroke.contourOffsets,
                     )
                 }
                 

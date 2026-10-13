@@ -6,6 +6,7 @@ import {
   CONNECTION_DEFAULT_COLOR,
   STROKE_ENCODING_F32X3,
   canonicalDrawPathWidth,
+  readContourOffsets,
   type InkStroke,
 } from './React/src/boardFormat';
 import { base64ToBytes } from './React/src/base64';
@@ -19,13 +20,13 @@ export type BoardCommand =
   | {
       type: 'strokeUpsert'; id: string; space: string; width: number; color: number;
       
-      pen: number; drawPathWidth?: number; sampleScale: number; nibAngle?: number; angles?: string; points: string;
+      pen: number; drawPathWidth?: number; sampleScale: number; nibAngle?: number; angles?: string; contourOffsets?: number[]; points: string;
       bounds?: { left: number; top: number; right: number; bottom: number };
     }
   | {
       
       type: 'strokeBatch'; ids: string[]; spaces: string[]; widths: number[]; colors: number[];
-      pens: number[]; drawPathWidths: number[]; sampleScales: number[]; nibAngles?: (number | null)[]; angles?: string[]; bounds: number[];
+      pens: number[]; drawPathWidths: number[]; sampleScales: number[]; nibAngles?: (number | null)[]; angles?: string[]; contourOffsets?: number[][]; bounds: number[];
       pointOffsets: number[]; pointCounts: number[]; points: string;
     }
   | { type: 'strokesRemove'; ids: string[] }
@@ -109,6 +110,7 @@ export function strokeFromCommand(op: Extract<BoardCommand, { type: 'strokeUpser
     sampleScale: op.sampleScale,
     nibAngle: typeof op.nibAngle === 'number' && Number.isFinite(op.nibAngle) ? op.nibAngle : undefined,
     angles: unpackAngles(op.angles),
+    contourOffsets: readContourOffsets(op.contourOffsets, points.byteLength / 12),
     encoding: STROKE_ENCODING_F32X3,
     points,
     
@@ -164,6 +166,7 @@ export function strokesFromBatch(op: Extract<BoardCommand, { type: 'strokeBatch'
       nibAngle: typeof op.nibAngles?.[index] === 'number' && Number.isFinite(op.nibAngles[index])
         ? op.nibAngles[index] as number : undefined,
       angles: unpackAngles(op.angles?.[index]),
+      contourOffsets: readContourOffsets(op.contourOffsets?.[index], pointCount),
       encoding: STROKE_ENCODING_F32X3,
       points: packed.subarray(offset, offset + byteLength),
       bounds: bounds && bounds.every(Number.isFinite) ? bounds : computeStrokeBounds(unpackStrokePoints(packed.subarray(offset, offset + byteLength))),

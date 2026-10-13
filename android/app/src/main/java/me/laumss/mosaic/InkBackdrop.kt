@@ -82,6 +82,7 @@ object InkBackdrop {
 
     
     private fun nearMarker(m: BoardEngine.StrokeRec, x: Float, y: Float, pad: Float): Boolean {
+        if (m.isOutline) return ContourGeometry.containsOrNear(m.points, m.contourOffsets, x, y, pad)
         val reach = markerHalfWidth(m) + pad
         val p = m.points
         if (p.size < 2) return false
@@ -106,7 +107,7 @@ object InkBackdrop {
     private inline fun forEachSample(s: BoardEngine.StrokeRec, block: (Float, Float) -> Unit) {
         val p = s.points
         if (!s.isShape) {
-            var i = 0
+            var i = if (s.isOutline) s.contourOffsets[0] * 2 else 0
             while (i + 1 < p.size) { block(p[i], p[i + 1]); i += 2 }
             return
         }

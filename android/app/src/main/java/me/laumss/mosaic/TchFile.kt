@@ -9,11 +9,12 @@ import java.io.File
 
 
 object TchFile {
-    private val MAGIC = byteArrayOf(77, 79, 83, 78, 79, 84, 69, 2)
+    private val MAGIC = byteArrayOf(77, 79, 83, 78, 79, 84, 69, 3)
     private const val IO_BUFFER = 64 * 1024
     fun read(file: File, ref: String): ScrollingDocument = DataInputStream(BufferedInputStream(AtomicFile(file).openRead(), IO_BUFFER)).use { input ->
         val header = ByteArray(MAGIC.size); input.readFully(header)
-        require(header.contentEquals(MAGIC)) { "Unsupported note format" }
+        val version = header.last().toInt()
+        require(header.take(7) == MAGIC.take(7) && version in 2..3) { "Unsupported note format" }
         val scroll = input.readFloat(); require(scroll.isFinite() && scroll >= 0f)
         val count = input.readInt(); require(count >= 0)
         val strokes = ArrayList<BoardEngine.StrokeRec>()
@@ -23,6 +24,15 @@ object TchFile {
             val scale = input.readFloat()
             val drawPathWidth = input.readInt()
             val originY = input.readFloat()
+            val nibAngle = if (version >= 3) input.readFloat() else Float.NaN
+            val angles = if (version >= 3) {
+                val size = input.readInt(); require(size in 0..2_000_000 && size % 2 == 0)
+                IntArray(size) { input.readInt() }
+            } else IntArray(0)
+            val contourOffsets = if (version >= 3) {
+                val size = input.readInt(); require(size in 0..1_000_000)
+                IntArray(size) { input.readInt() }
+            } else IntArray(0)
             require(width.isFinite() && width > 0 && scale.isFinite() && scale > 0 && originY.isFinite())
             val n = input.readInt(); require(n > 0 && n <= 1_000_000)
             val points = FloatArray(n*2); val pressure = FloatArray(n)
@@ -30,7 +40,7 @@ object TchFile {
                 points[2*i] = input.readFloat(); points[2*i+1] = originY + input.readFloat(); pressure[i] = input.readFloat()
                 require(points[2*i].isFinite() && points[2*i+1].isFinite() && pressure[i].isFinite())
             }
-            strokes.add(BoardEngine.StrokeRec(id, "canvas", width, color, points, pressure, pen, scale, drawPathWidth))
+            strokes.add(BoardEngine.StrokeRec(id, "canvas", width, color, points, pressure, pen, scale, drawPathWidth, nibAngle, angles, contourOffsets))
         }
         require(input.read() == -1) { "Trailing note bytes" }
         ScrollingDocument(ref, strokes, scroll)
@@ -44,6 +54,9 @@ object TchFile {
             for (s in doc.strokes) {
                 data.writeUTF(s.id); data.writeFloat(s.width); data.writeInt(s.color)
                 data.writeShort(s.penStyle); data.writeFloat(s.sampleScale); data.writeInt(s.drawPathWidth); data.writeFloat(s.bounds.top)
+                data.writeFloat(s.nibAngle)
+                data.writeInt(s.angles.size); for (angle in s.angles) data.writeInt(angle)
+                data.writeInt(s.contourOffsets.size); for (end in s.contourOffsets) data.writeInt(end)
                 data.writeInt(s.points.size/2)
                 for (i in s.pressures.indices) {
                     data.writeFloat(s.points[2*i]); data.writeFloat(s.points[2*i+1]-s.bounds.top); data.writeFloat(s.pressures[i])

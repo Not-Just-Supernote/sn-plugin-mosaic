@@ -3,6 +3,8 @@ import { I18nManager } from 'react-native';
 export type Locale = 'zh' | 'en';
 
 const STRINGS = {
+  noteImportFailed: { zh: '笔记导入失败，请重试', en: 'Note import failed. Please try again.' },
+  noteImportComplete: { zh: '笔记已导入 Mosaic', en: 'Note imported into Mosaic.' },
   lasso: { zh: '套索', en: 'Lasso' },
   eraser: { zh: '橡皮', en: 'Eraser' },
   touch: { zh: '手触', en: 'Touch' },

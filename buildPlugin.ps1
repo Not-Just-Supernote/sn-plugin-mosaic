@@ -151,7 +151,7 @@ function Get-PackageInfo {
 
     if (Test-Path $packageJsonPath) {
         try {
-            $packageJson = Get-Content $packageJsonPath -Raw | ConvertFrom-Json
+            $packageJson = Get-Content $packageJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
 
             $name = $packageJson.name
             $description = if ($packageJson.description) { $packageJson.description } else { '' }
@@ -235,7 +235,7 @@ function Update-PluginConfigPackages {
             }
         }
 
-        $config = Get-Content $configFile -Raw | ConvertFrom-Json
+        $config = Get-Content $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
 
         $configHash = @{}
         $config.PSObject.Properties | ForEach-Object { $configHash[$_.Name] = $_.Value }
@@ -649,7 +649,7 @@ function Build-AndroidApk {
 
     if ($RequireReactPackagesCheck) {
         try {
-            $config = Get-Content $BuildGeneratedConfigFile -Raw | ConvertFrom-Json
+            $config = Get-Content $BuildGeneratedConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
             if (-not $config.reactPackages) {
                 Write-ColorOutput 'No reactPackages field in build/generated folder''s PluginConfig.json, skipping APK build' 'Yellow'
                 return $false
@@ -795,7 +795,7 @@ function Copy-ApkAndUpdateConfig {
             }
         }
 
-        $config = Get-Content $BuildGeneratedConfigFile -Raw | ConvertFrom-Json
+        $config = Get-Content $BuildGeneratedConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
 
         $configHash = @{}
         $config.PSObject.Properties | ForEach-Object { $configHash[$_.Name] = $_.Value }
@@ -940,7 +940,7 @@ function Copy-IconAndUpdatePath {
 
     try {
         $rootConfigFile = Join-Path $ProjectRoot 'PluginConfig.json'
-        $rootConfig = Get-Content $rootConfigFile -Raw | ConvertFrom-Json
+        $rootConfig = Get-Content $rootConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
 
         if ($rootConfig.iconPath -and $rootConfig.iconPath -ne '') {
             $iconPath = $rootConfig.iconPath
@@ -959,7 +959,7 @@ function Copy-IconAndUpdatePath {
                 Copy-Item $sourceIconPath $targetIconPath -Force
                 Write-ColorOutput "Icon file copied to: $targetIconPath" 'Green'
 
-                $config = Get-Content $BuildGeneratedConfigFile -Raw | ConvertFrom-Json
+                $config = Get-Content $BuildGeneratedConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
 
                 $configHash = @{}
                 $config.PSObject.Properties | ForEach-Object { $configHash[$_.Name] = $_.Value }

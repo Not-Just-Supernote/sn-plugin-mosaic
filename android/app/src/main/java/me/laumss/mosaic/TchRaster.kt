@@ -4,6 +4,8 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 
 
 object TchRaster {
@@ -115,16 +117,19 @@ object TchRaster {
         val oldAlpha = paint.alpha
         val oldDither = paint.isDither
         val oldFilter = paint.isFilterBitmap
-        val marker = stroke.penStyle == PenStyle.MARKER.objType
+        val oldXfermode = paint.xfermode
+        val marker = stroke.penStyle == PenStyle.MARKER.objType && !stroke.isOutline
         val filledShape = stroke.penStyle == PenStyle.FILLED_SHAPE.objType && stroke.isShape
         val oldStyle = paint.style
         paint.color = if (marker && !forceColor) MarkerInk.fromArgb(stroke.color).argb else color
+        if (stroke.isOutline && stroke.penStyle == PenStyle.MARKER.objType && !forceColor)
+            paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.MULTIPLY)
         if (filledShape) paint.style = Paint.Style.FILL
         if (marker) {
             paint.alpha = 255
         }
         paint.shader = null
-        val runs = if (widthScale != 1f && stroke.penStyle == PenStyle.PEN.objType && !stroke.isShape) {
+        val runs = if (widthScale != 1f && stroke.penStyle == PenStyle.PEN.objType && !stroke.isShape && !stroke.isOutline) {
             CalligraphyRaster.runs(stroke.points, stroke.pressures, stroke.sampleScale,
                 stroke.drawPathWidth, stroke.nibAngle, widthScale)
         } else stroke.runs
@@ -137,6 +142,7 @@ object TchRaster {
         paint.alpha = oldAlpha
         paint.isDither = oldDither
         paint.isFilterBitmap = oldFilter
+        paint.xfermode = oldXfermode
         paint.style = oldStyle
     }
 }

@@ -52,7 +52,7 @@ object SelectionCopy {
             }
             val copy = BoardEngine.StrokeRec(newId("stroke-"), space, stroke.width, stroke.color,
                 translated.points.copyOf(), stroke.pressures.copyOf(), stroke.penStyle, stroke.sampleScale,
-                stroke.drawPathWidth, stroke.nibAngle, stroke.angles.copyOf())
+                stroke.drawPathWidth, stroke.nibAngle, stroke.angles.copyOf(), stroke.contourOffsets.copyOf())
             change.stroke(null, copy)
             if (!copy.isThread) copiedStrokeIds.add(copy.id)
         }

@@ -872,6 +872,7 @@ export default function App(): React.JSX.Element {
           committed = true;
           await completePendingMosaicImageCard(claim);
           console.log(`[MosaicImport] note import dropped request=${claim.request.id}: ${String(error)}`);
+          ToastAndroid.show(t('noteImportFailed'), ToastAndroid.LONG);
           return;
         }
         if (!accepted) {
@@ -883,6 +884,7 @@ export default function App(): React.JSX.Element {
         committed = true;
         await completePendingMosaicImageCard(claim);
         console.log(`[MosaicImport] inserted note card request=${claim.request.id}`);
+        ToastAndroid.show(t('noteImportComplete'), ToastAndroid.SHORT);
         return;
       }
       if (!imageAvailable()) throw new Error('MosaicImage native module unavailable');
