@@ -78,6 +78,12 @@ class BoardInteractionController(
         const val CARD_FRAME_HOLD_MOVE_SLOP_DP = 3f
         const val CARD_FRAME_PREVIEW_CANCEL_MOVE_DP = 8f
         const val CARD_FRAME_CAPTURE_INK_RATIO = 0.70f
+        // 重画系统笔迹时比 Mosaic 的笔画宽一些，盖住轨迹的偏差。
+        private const val TRAIL_FLASH_WIDTH_RATIO = 1.5f
+        private const val TRAIL_FLASH_MARGIN_PX = 6f
+        private const val TRAIL_FLASH_MIN_PX = 10f
+        // 方括号扩卡时离挡路卡片留的空隙。
+        private const val CARD_EXTEND_GAP = 12f
 
         // A card stroke that starts this soon after the previous stroke on the same card is handwriting, not a card gesture.
         const val CARD_CONTINUOUS_WRITE_MS = 1500L
@@ -1206,7 +1212,34 @@ class BoardInteractionController(
     
     private fun discardWriteTrail(s: PenSession.Write, reason: String) {
         if (s.points.size < 4) return
-        host.onPenTrailDiscarded(reason)
+        host.onPenTrailDiscarded(reason, if (reason.startsWith("card-")) discardedTrail(s) else null)
+    }
+
+    // 系统笔迹在屏幕上的位置、粗细和颜色，供清除实验在原处重画。
+    private fun discardedTrail(s: PenSession.Write): DiscardedTrail {
+        val path = Path()
+        val p = s.points
+        var i = 0
+        while (i + 1 < p.size) {
+            val x = screenX(p[i] + s.cardX)
+            val y = screenY(p[i + 1] + s.cardY)
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            i += 2
+        }
+        val bounds = RectF()
+        path.computeBounds(bounds, true)
+        var widest = 0f
+        if (s.pressures.size == p.size / 2) {
+            for (run in draftStroke(s).runs) widest = max(widest, run.maxWidth)
+        }
+        val inkPx = if (widest > 0f) widest * density * BoardEngine.scale else penWidth * density
+        val widthPx = max(TRAIL_FLASH_MIN_PX, inkPx * TRAIL_FLASH_WIDTH_RATIO + TRAIL_FLASH_MARGIN_PX)
+        val color = when {
+            penStyle == PenStyle.MARKER -> markerInk.argb
+            trailWhite -> Color.WHITE
+            else -> Color.BLACK
+        }
+        return DiscardedTrail(path, widthPx, color, bounds, p.size / 2)
     }
 
     private fun syncToolMirrors(state: ToolArbiter.State, source: String) {
@@ -1690,23 +1723,25 @@ class BoardInteractionController(
         )
     }
 
+    private fun draftStroke(s: PenSession.Write): BoardEngine.StrokeRec = BoardEngine.StrokeRec(
+        s.id,
+        s.space,
+        penWidth,
+        if (penStyle == PenStyle.MARKER) markerInk.argb else INK_BLACK,
+        s.points.toArray(),
+        s.pressures.toArray(),
+        penStyle.objType,
+        density * BoardEngine.scale,
+        DrawPathClient.widthArgument(penStyle, penWidth),
+        s.nibAngle,
+    )
+
     private fun commitStroke(s: PenSession.Write) {
         if (s.points.size < 2) return
         
         
         val marker = penStyle == PenStyle.MARKER
-        val draft = BoardEngine.StrokeRec(
-            s.id,
-            s.space,
-            penWidth,
-            if (marker) markerInk.argb else INK_BLACK,
-            s.points.toArray(),
-            s.pressures.toArray(),
-            penStyle.objType,
-            density * BoardEngine.scale,
-            DrawPathClient.widthArgument(penStyle, penWidth),
-            s.nibAngle,
-        )
+        val draft = draftStroke(s)
         val ink = synchronized(BoardEngine.lock) { InkBackdrop.resolve(draft) }
         val rec = draft.withColor(ink)
         val change = (if (s.continuousWrite) growCardForStroke(rec) else null)
@@ -1824,7 +1859,7 @@ class BoardInteractionController(
         Log.i(TAG_PEN, "[CardFrame] created card=${created.id} rect=$rect capturedInk=$captured")
     }
 
-    // 在卡片边上画方括号，卡片朝那一侧变宽或变高。框进新区域的画布笔迹收进卡片。
+    // 在卡片边上画方括号，卡片朝那一侧变宽或变高，最多长到挡路的卡片前。框进新区域的画布笔迹收进卡片。
     private fun extendCardFromBracket(s: PenSession.Write): Boolean {
         if (!surface.allowsCardFrame || s.points.size < 8) return false
         val world = s.points.toArray()
@@ -1834,19 +1869,23 @@ class BoardInteractionController(
             world[i + 1] += s.cardY
             i += 2
         }
-        val match = CardEdgeExtend.recognize(world, BoardEngine.cardsByZ.asReversed(), BoardEngine.scale) ?: return false
-        val card = match.card
-        // 和写字撑大卡片一样，会撞上别的卡片时不扩，笔迹照常留下。
-        val old = card.rect(RectF())
-        val r = RectF()
-        val blocker = synchronized(BoardEngine.lock) {
-            BoardEngine.cards.values.firstOrNull { it.id != card.id && RectF.intersects(match.rect, it.rect(r)) && !RectF.intersects(old, r) }
-        }
-        if (blocker != null) {
-            Log.i(TAG_PEN, "[CardExtend] skipped card=${card.id} blocked-by=${blocker.id}")
+        val result = CardEdgeExtend.recognize(world, BoardEngine.cardsByZ.asReversed(), BoardEngine.scale)
+        val match = result.match
+        if (match == null) {
+            result.note?.let { Log.i(TAG_PEN, "[CardExtend] rejected $it") }
             return false
         }
-        val grown = card.withRect(match.rect)
+        val card = match.card
+        val target = synchronized(BoardEngine.lock) {
+            CardEdgeExtend.clampToBlockers(card, match.side, match.rect, BoardEngine.cards.values, CARD_EXTEND_GAP)
+        }
+        // 认出是方括号就吃掉这一笔，挡死了也不留下笔迹。
+        discardWriteTrail(s, "card-extend")
+        if (target.width() - card.width < 1f && target.height() - card.height < 1f) {
+            Log.i(TAG_PEN, "[CardExtend] blocked card=${card.id} side=${match.side} ${match.metrics}")
+            return true
+        }
+        val grown = card.withRect(target)
         val change = BoardHistory.Change("card-extend").card(card, grown)
         // 卡片上的笔迹存的是相对卡片左上角的坐标，向左或向上扩时要补回偏移。
         if (grown.x != card.x || grown.y != card.y) synchronized(BoardEngine.lock) {
@@ -1866,9 +1905,9 @@ class BoardInteractionController(
             change.stroke(stroke, stroke.translated(0f, 0f, null, grown))
             captured++
         }
-        discardWriteTrail(s, "card-extend")
         apply(change, record = true)
-        Log.i(TAG_PEN, "[CardExtend] card=${card.id} side=${match.side} depth=${match.depth} rect=${match.rect} capturedInk=$captured")
+        val clamped = target != match.rect
+        Log.i(TAG_PEN, "[CardExtend] card=${card.id} side=${match.side} rect=$target clamped=$clamped capturedInk=$captured ${match.metrics}")
         return true
     }
 
