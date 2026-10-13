@@ -2972,7 +2972,7 @@ class BoardInteractionController(
         collectSelectionPreview(sel, ArrayList(), ArrayList(), cardRects, inkPath)
         overlay.beginMovePreview(worldRectToPx(sel.rect, RectF()), cardRects, inkPath, PEN_WIDTH_DP * BoardEngine.scale * density)
         hideFromTiles(sel.cardIds, sel.strokeIds)
-        presentation.acquire(BoardPresentation.Reason.RESIZE)
+        presentation.acquire(presentationReason(session))
         Log.i(TAG_LASSO, "resize begin cards=${cards.size} strokes=${strokes.size} handle=$handle pen=$isPen")
         return session
     }
@@ -3125,9 +3125,12 @@ class BoardInteractionController(
         return MoveSession.Selection(isPen, pointerId, wx, wy, sel, cards, strokes, liftZ)
     }
 
-    private fun presentationReason(m: MoveSession): BoardPresentation.Reason =
-        if (m is MoveSession.CardResize || m is MoveSession.SelectionResize) BoardPresentation.Reason.RESIZE
-        else BoardPresentation.Reason.TRANSFORM
+    // 卡片改尺寸用 DTH（RESIZE）；只有笔迹的选中改尺寸和拖动、旋转一样用 auto（TRANSFORM）。
+    private fun presentationReason(m: MoveSession): BoardPresentation.Reason = when {
+        m is MoveSession.CardResize -> BoardPresentation.Reason.RESIZE
+        m is MoveSession.SelectionResize && m.selection.cardIds.isNotEmpty() -> BoardPresentation.Reason.RESIZE
+        else -> BoardPresentation.Reason.TRANSFORM
+    }
 
     private fun updateMoveSession(m: MoveSession, wx: Float, wy: Float) {
         presentation.moved(presentationReason(m))

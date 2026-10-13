@@ -25,7 +25,7 @@ class BoardPresentation(
         // 拖动、改尺寸、旋转不换样，原位置由控制器从内容层拿掉，只看叠加层的预览。
         TRANSFORM(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false, motion = true),
 
-        // 拖边或拖角改尺寸（单卡和套索选中）：DTH，其余同 TRANSFORM。
+        // 卡片改尺寸（拉手柄或四边，单卡和含卡片的选中）：DTH，其余同 TRANSFORM。只有笔迹的选中改尺寸走 TRANSFORM。
         RESIZE(MosaicEinkRefreshModule.MODE_DTH, flat = false, suspendFog = false, motion = true),
         
         TOOL(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false),
@@ -125,7 +125,7 @@ class BoardPresentation(
             flat = flat || r.flat
             fog = fog || r.suspendFog
             val m = r.einkMode ?: continue
-            if (eink == null || m == MosaicEinkRefreshModule.MODE_A2) eink = m
+            if (eink == null || MosaicEinkRefreshModule.priority(m) > MosaicEinkRefreshModule.priority(eink)) eink = m
         }
         val white = eink == MosaicEinkRefreshModule.MODE_A2
         return State(flat, white, flat && isBoardSurface(), fog, eink)

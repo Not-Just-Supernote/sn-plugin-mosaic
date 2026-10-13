@@ -31,16 +31,30 @@ object ResizeHandles {
         else -> rect.centerY()
     }
 
-    fun hit(handles: List<BoardGeometry.Handle>, rect: RectF, px: Float, py: Float, radius: Float): BoardGeometry.Handle? =
-        handles.minByOrNull { handle ->
-            val dx = px - x(handle, rect)
-            val dy = py - y(handle, rect)
-            dx * dx + dy * dy
-        }?.takeIf { handle ->
-            val dx = px - x(handle, rect)
-            val dy = py - y(handle, rect)
-            dx * dx + dy * dy <= radius * radius
-        }
+    // 角按角点命中且优先；边按整条边命中，拉四边任意位置都算改尺寸，不会落到移动上。
+    fun hit(handles: List<BoardGeometry.Handle>, rect: RectF, px: Float, py: Float, radius: Float): BoardGeometry.Handle? {
+        val r2 = radius * radius
+        handles.filter { it.isCorner }.minByOrNull { pointDist2(it, rect, px, py) }
+            ?.takeIf { pointDist2(it, rect, px, py) <= r2 }
+            ?.let { return it }
+        return handles.filter { !it.isCorner }.minByOrNull { edgeDist2(it, rect, px, py) }
+            ?.takeIf { edgeDist2(it, rect, px, py) <= r2 }
+    }
+
+    private fun pointHit(handles: List<BoardGeometry.Handle>, rect: RectF, px: Float, py: Float, radius: Float): Boolean =
+        handles.any { pointDist2(it, rect, px, py) <= radius * radius }
+
+    private fun pointDist2(handle: BoardGeometry.Handle, rect: RectF, px: Float, py: Float): Float {
+        val dx = px - x(handle, rect)
+        val dy = py - y(handle, rect)
+        return dx * dx + dy * dy
+    }
+
+    private fun edgeDist2(handle: BoardGeometry.Handle, rect: RectF, px: Float, py: Float): Float {
+        val dx = if (handle.movesLeft || handle.movesRight) px - x(handle, rect) else maxOf(0f, rect.left - px, px - rect.right)
+        val dy = if (handle.movesTop || handle.movesBottom) py - y(handle, rect) else maxOf(0f, rect.top - py, py - rect.bottom)
+        return dx * dx + dy * dy
+    }
 
     fun moveCenter(rect: RectF, density: Float, topInset: Float, viewWidth: Float, viewHeight: Float,
                    avoid: List<RectF> = emptyList()): PointF {
@@ -59,7 +73,7 @@ object ResizeHandles {
         )
         return candidates.firstOrNull { p ->
             p.x in left..right && p.y in top..bottom &&
-                hit(corners + edges, rect, p.x, p.y, 52f * density) == null &&
+                !pointHit(corners + edges, rect, p.x, p.y, 52f * density) &&
                 avoid.none { p.x >= it.left - radius && p.x <= it.right + radius &&
                     p.y >= it.top - radius && p.y <= it.bottom + radius }
         } ?: PointF((rect.left + offset).coerceIn(left, right), (rect.top + offset).coerceIn(top, bottom))

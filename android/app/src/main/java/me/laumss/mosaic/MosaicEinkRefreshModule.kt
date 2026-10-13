@@ -24,6 +24,13 @@ class MosaicEinkRefreshModule(
 
         @Volatile private var instance: WeakReference<MosaicEinkRefreshModule>? = null
 
+        @JvmStatic
+        fun priority(mode: Int): Int = when (mode) {
+            MODE_A2 -> 2
+            MODE_DTH -> 1
+            else -> 0
+        }
+
         
         @JvmStatic
         fun applyNative(mode: Int, owner: String) {
@@ -72,9 +79,11 @@ class MosaicEinkRefreshModule(
         instance = WeakReference(this)
     }
 
-    private fun effectiveMode(): Int? = when {
-        requests.containsValue(MODE_A2) -> MODE_A2
-        else -> requests.values.lastOrNull()
+    // A2 > DTH > 其余；同级取最近的请求。笔按下时申请的 auto 不能盖过改卡片尺寸的 DTH。
+    private fun effectiveMode(): Int? {
+        var best: Int? = null
+        for (m in requests.values) if (best == null || priority(m) >= priority(best)) best = m
+        return best
     }
 
     private fun applyOwned(mode: Int, owner: String) {
