@@ -140,8 +140,7 @@ class BoardInteractionController(
         private const val EDGE_SWIPE_ZONE_DP = 72f
         
         private const val RECOGNIZE_CARD_MIN_DP = 120f
-        // Share of the font size a written glyph's ink usually fills.
-        private const val HANDWRITING_GLYPH_EM = 0.9f
+        private val FONT_LEVELS = floatArrayOf(0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1f, 1.15f, 1.3f, 1.5f, 1.75f, 2f, 2.5f, 3f, 4f, 5f, 6f)
 
         
         const val NOTE_CARD_BOARD_WIDTH = 450f
@@ -2829,6 +2828,13 @@ class BoardInteractionController(
             proportional = m.card.kind == "image" && m.handle.isCorner)
     }
 
+    // Steps of the text editor's smaller and larger buttons.
+    private fun nextFontLevel(current: Float, step: Int): Float {
+        val levels = FONT_LEVELS
+        return if (step > 0) levels.firstOrNull { it > current + 0.01f } ?: levels.last()
+        else levels.lastOrNull { it < current - 0.01f } ?: levels.first()
+    }
+
     private fun isTextCard(card: BoardEngine.CardRec): Boolean = card.kind != "image" && card.kind != "note"
 
     // Corner drag on a text card: the card keeps its shape and its text grows or shrinks with it, so the lines
@@ -3659,6 +3665,17 @@ class BoardInteractionController(
             },
             contentScale = if (note) card.width / ScrollingDocument.WIDTH else card.fontScale,
             headerMode = note,
+            onFontStep = if (note) null else { step ->
+                val current = BoardEngine.cards[card.id]
+                if (current == null) null else {
+                    val next = grownToFit(current.withFontScale(nextFontLevel(current.fontScale, step)), current.height)
+                    val change = BoardHistory.Change("card-font-live")
+                    if (!next.sameGeometry(current)) change.card(current, next)
+                    pushCardsBelow(change, below, next.height - card.height)
+                    apply(change, record = false)
+                    next.fontScale
+                }
+            },
             onKeyboard = { obscuredTop -> avoidKeyboard(editRegionWorld(card.id), obscuredTop) },
             cardFrame = { availableBottom ->
                 val r = editRegionWorld(card.id) ?: card.rect(RectF())
@@ -3681,7 +3698,7 @@ class BoardInteractionController(
                     finished = true
                     val current = BoardEngine.cards[card.id]
                     closeCardEditor()
-                    if (current != null && current.content != original) {
+                    if (current != null && (current.content != original || current.fontScale != card.fontScale)) {
                         
                         val change = BoardHistory.Change("card-text-edit").card(card, current)
                         for (b in below) {
@@ -4654,7 +4671,7 @@ class BoardInteractionController(
         val ink = synchronized(BoardEngine.lock) {
             pending.strokeIds.mapNotNull { id -> BoardEngine.strokes[id]?.let { BoardEngine.strokeWorldBounds(it) } }
         }
-        val fontScale = handwritingFontScale(ink)
+        val fontScale = handwritingFontScale(ink, trimmed)
         val m = CardTextFormat.WEB.scaled(fontScale)
         // The text sits where the handwriting was: the card's padding goes around the ink.
         val r = ink.fold(null as RectF?) { acc, b -> acc?.apply { union(b) } ?: RectF(b) } ?: RectF(pending.rect)
@@ -4678,9 +4695,10 @@ class BoardInteractionController(
         Log.i(TAG_LASSO, "recognize card=${created.id} replaced strokes=${pending.strokeIds.size} chars=${trimmed.length} fontScale=$fontScale")
     }
 
-    // Text scale that makes recognized text about as large as the handwriting: strokes are grouped into rows by
-    // vertical overlap, and the typical row height is taken as the glyph height.
-    private fun handwritingFontScale(ink: List<RectF>): Float {
+    // Text scale that makes recognized text about as large as the handwriting. Strokes are grouped into rows; the
+    // rows' total length against the same text set on one line at the base size gives the scale. The typical row
+    // height only caps it, since rows of handwriting that touch merge into one tall row.
+    private fun handwritingFontScale(ink: List<RectF>, text: String): Float {
         val rows = ArrayList<RectF>()
         for (b in ink.sortedBy { it.top }) {
             val row = rows.lastOrNull()
@@ -4688,8 +4706,12 @@ class BoardInteractionController(
         }
         val heights = rows.map { it.height() }.filter { it > 0f }.sorted()
         if (heights.isEmpty()) return 1f
-        val rowHeight = heights[heights.size / 2]
-        val scale = rowHeight / HANDWRITING_GLYPH_EM / CardTextFormat.WEB.body
+        val m = CardTextFormat.WEB
+        val byHeight = heights[heights.size / 2] / m.body
+        val oneLine = text.replace(Regex("\\s*\\n\\s*"), " ")
+        val typeset = BoardContentView.measureTextCardSize(oneLine, 1_000_000f, m, limitHeight = false).x - m.padX * 2f
+        val inkLength = rows.fold(0f) { sum, row -> sum + row.width() }
+        val scale = if (typeset > 1f) min(inkLength / typeset, byHeight) else byHeight
         // Round to tenths so nearby recognitions share a size.
         return BoardEngine.clampFontScale(Math.round(scale * 10f) / 10f)
     }

@@ -41,9 +41,11 @@ class CardTextEditor(
     
     private val fill: Int = if (dark) Color.BLACK else BoardContentView.CARD_FILL_COLOR,
     
-    private val contentScale: Float = 1f,
+    private var contentScale: Float = 1f,
     
     private val headerMode: Boolean = false,
+    // Smaller (-1) or larger (+1) text; returns the card's new font scale, or null when nothing changed.
+    private val onFontStep: ((Int) -> Float?)? = null,
     private val cardFrame: (availableBottom: Int) -> RectF,
     
     private val onKeyboard: (obscuredTop: Int?) -> Unit,
@@ -167,6 +169,30 @@ class CardTextEditor(
             LinearLayout.LayoutParams(dp(1f), dp(24f)).apply { leftMargin = dp(6f); rightMargin = dp(6f) })
         tool("outdent", "减少缩进")
         tool("indent", "增加缩进")
+        if (onFontStep != null) {
+            dock.addView(View(context).apply { setBackgroundColor(0xffcccccc.toInt()) },
+                LinearLayout.LayoutParams(dp(1f), dp(24f)).apply { leftMargin = dp(6f); rightMargin = dp(6f) })
+            fun sizeTool(kind: String, label: String, step: Int) {
+                val icon = FormatIcon(context, kind).apply {
+                    contentDescription = label
+                    isClickable = true
+                    isFocusable = true
+                    isFocusableInTouchMode = false
+                    setOnClickListener {
+                        flushCommit()
+                        val next = onFontStep.invoke(step) ?: return@setOnClickListener
+                        if (next == contentScale) return@setOnClickListener
+                        contentScale = next
+                        positionOnCanvas()
+                    }
+                }
+                dock.addView(icon, LinearLayout.LayoutParams(dp(40f), dp(40f)).apply {
+                    leftMargin = dp(2f); rightMargin = dp(2f)
+                })
+            }
+            sizeTool("smaller", "缩小字号", -1)
+            sizeTool("larger", "放大字号", 1)
+        }
         addView(dock, LayoutParams(LayoutParams.WRAP_CONTENT, dp(58f), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
             bottomMargin = dp(24f)
         })
@@ -446,6 +472,15 @@ class CardTextEditor(
                 pen.strokeCap = Paint.Cap.ROUND; pen.strokeJoin = Paint.Join.ROUND
                 path.reset()
                 when (kind) {
+                    "smaller", "larger" -> {
+                        // A with a minus or plus beside it.
+                        val big = kind == "larger"
+                        val top = if (big) 2f else 6f
+                        path.moveTo(1f, 20f); path.lineTo(7f, top); path.lineTo(13f, 20f)
+                        path.moveTo(3.5f, 14f); path.lineTo(10.5f, 14f)
+                        path.moveTo(15f, 8f); path.lineTo(22f, 8f)
+                        if (big) { path.moveTo(18.5f, 4.5f); path.lineTo(18.5f, 11.5f) }
+                    }
                     "bold" -> {
                         path.moveTo(5f, 3f); path.lineTo(12f, 3f)
                         path.cubicTo(19f, 3f, 19f, 11f, 12f, 11f)
