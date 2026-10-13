@@ -51,11 +51,9 @@ class MosaicBoardView(
         private const val INK_HANDOFF_RETRY_MS = 500L
         private const val INK_CONTACT_STALE_MS = 1500L
         private const val BACKGROUND_SYNC_IDLE_DELAY_MS = 2000L
-        // 清除实验（TrailClearStrategy）：手势后多久内不同步背景，重画停多久，晚刷新等多久。
-        private const val TRAIL_PROBE_SYNC_HOLD_MS = 1500L
-        private const val TRAIL_PROBE_SYNC_AFTER_MS = 600L
-        private const val TRAIL_PROBE_OVERDRAW_MS = 400L
-        private const val TRAIL_PROBE_LATE_MS = 600L
+        // 卡片手势后，背景同步等整屏刷新做完再过这么久；刷新迟迟不来时最多等到 MAX。
+        private const val SYNC_AFTER_FULL_REFRESH_MS = 1200L
+        private const val SYNC_HOLD_FOR_REFRESH_MAX_MS = 10_000L
         
         private const val CLOSE_WATCHDOG_MS = 3000L
         
@@ -243,10 +241,7 @@ class MosaicBoardView(
     private var backgroundSyncTask: Runnable? = null
     
     private var discardSyncPending = false
-
-    // 清除实验：第几次卡片手势、正在观察的那一次、背景同步推迟到何时。
-    private var trailProbeCount = 0
-    private var trailProbe: TrailProbeRun? = null
+    // 在这之前不同步背景，见 onPenTrailDiscarded。
     private var syncHoldUntil = 0L
     
     
@@ -372,9 +367,6 @@ class MosaicBoardView(
         super.onAttachedToWindow()
         Log.i(TAG, "onAttachedToWindow nativeBuild=$NATIVE_BUILD_TAG")
         attached = true
-        trailProbeCount = 0
-        trailProbe = null
-        syncHoldUntil = 0L
         
         
         InputReader.ensureBoardReader(context)
@@ -443,7 +435,6 @@ class MosaicBoardView(
         stylusContact = false
         awaitingStrokeCommit = false
         fullRefreshPending = false
-        trailProbe = null
         syncHoldUntil = 0L
         clearInkHandoff()
         plainStrokeCommit = false
@@ -780,12 +771,6 @@ class MosaicBoardView(
     }
 
     private fun onContentSettled() {
-        trailProbe?.let {
-            if (!it.settledLogged && it.recent()) {
-                it.settledLogged = true
-                logTrailProbe(it, "content-settled")
-            }
-        }
         if (holdPenRefreshUntilSettle && !stylusContact) {
             holdPenRefreshUntilSettle = false
             if (penModeApplied) {
@@ -825,18 +810,22 @@ class MosaicBoardView(
         backgroundSyncTask = null
     }
 
-    private fun sendBackgroundSync(force: Boolean = false, bypassHold: Boolean = false) {
+    private fun scheduleBackgroundSync(delay: Long) {
+        cancelBackgroundSync()
+        val task = Runnable {
+            backgroundSyncTask = null
+            sendBackgroundSync()
+        }
+        backgroundSyncTask = task
+        handler.postDelayed(task, delay)
+    }
+
+    private fun sendBackgroundSync(force: Boolean = false) {
         if (!attached || !configured || (!force && stylusContact && drawPathActive)) return
         val held = syncHoldUntil - SystemClock.uptimeMillis()
-        if (!bypassHold && held > 0) {
+        if (held > 0) {
             if (backgroundSyncUrgency == SyncUrgency.NONE) backgroundSyncUrgency = SyncUrgency.PROMPT
-            cancelBackgroundSync()
-            val task = Runnable {
-                backgroundSyncTask = null
-                sendBackgroundSync()
-            }
-            backgroundSyncTask = task
-            handler.postDelayed(task, held)
+            scheduleBackgroundSync(held)
             return
         }
         val binder = drawPathBinder ?: return
@@ -851,7 +840,6 @@ class MosaicBoardView(
             backgroundSyncUrgency = SyncUrgency.NONE
             discardSyncPending = false
             Log.i(TAG, "drawPath background sync: urgency=$urgency discard=$discard")
-            trailProbe?.let { if (it.recent()) logTrailProbe(it, "background-sync") }
         } catch (error: Throwable) {
             Log.w(TAG, "drawPath background sync failed: urgency=$urgency", error)
             drawPathBinder = null
@@ -859,7 +847,7 @@ class MosaicBoardView(
     }
 
     
-    fun onPenTrailDiscarded(reason: String, trail: DiscardedTrail? = null) {
+    fun onPenTrailDiscarded(reason: String) {
         if (stylusContact) trailDiscardedDuringContact = true
         if (backgroundSyncUrgency.ordinal < SyncUrgency.PROMPT.ordinal) backgroundSyncUrgency = SyncUrgency.PROMPT
         discardSyncPending = true
@@ -875,70 +863,14 @@ class MosaicBoardView(
         
         contentView.markSettleRequested()
         if (!contentView.isDeferringRefresh) contentView.postInvalidateOnAnimation()
-        val probe = if (!stylusContact && trail != null) startTrailProbe(reason, trail) else null
-        val fullRefresh = probe == null && reason.startsWith("card-")
-        if (fullRefresh) requestFullRefreshWhenSettled(reason)
-        Log.i(TAG, "pen trail discarded: reason=$reason sync=${if (stylusContact) "now" else "deferred"} fullRefresh=$fullRefresh probe=${probe?.number ?: "none"} stylus=$stylusContact active=$drawPathActive")
-    }
-
-    // 清除实验：每次卡片手势按顺序试下一种清除办法，打开白板后从第 1 种开始。
-    private fun startTrailProbe(reason: String, trail: DiscardedTrail): TrailProbeRun {
-        val number = ++trailProbeCount
-        val strategies = TrailClearStrategy.values()
-        val run = TrailProbeRun(number, strategies[(number - 1) % strategies.size], reason)
-        trailProbe = run
-        val b = trail.bounds
-        Log.i(
-            TAG,
-            "[TrailProbe] ${run.describe()} gesture=$reason pen=${penStyle.name} drawPathType=${drawPathPenType()} " +
-                "drawPathWidth=${drawPathPenWidth()} trailPx=[${b.left.toInt()},${b.top.toInt()}-${b.right.toInt()},${b.bottom.toInt()}] " +
-                "points=${trail.pointCount} flashWidthPx=${trail.widthPx.toInt()} handoff=$inkHandoffPending " +
-                "awaiting=$awaitingStrokeCommit active=$drawPathActive",
-        )
-        if (run.strategy != TrailClearStrategy.SYNC_NOW) {
-            syncHoldUntil = SystemClock.uptimeMillis() + TRAIL_PROBE_SYNC_HOLD_MS
+        val fullRefresh = reason.startsWith("card-")
+        if (fullRefresh) {
+            // 书法笔的轨迹要靠整屏刷新清掉，而且刷新前不能同步背景：先同步的话刷新也清不掉。
+            // 刷新完成后由 runPendingFullRefresh 安排同步。
+            syncHoldUntil = SystemClock.uptimeMillis() + SYNC_HOLD_FOR_REFRESH_MAX_MS
+            requestFullRefreshWhenSettled(reason)
         }
-        when (run.strategy) {
-            TrailClearStrategy.OVERDRAW -> inkView.flashTrail(
-                trail.path, trail.widthPx, trail.color, TRAIL_PROBE_OVERDRAW_MS,
-                onShown = { logTrailProbe(run, "overdraw-shown") },
-                onErased = {
-                    logTrailProbe(run, "overdraw-erased")
-                    syncHoldUntil = maxOf(syncHoldUntil, SystemClock.uptimeMillis() + TRAIL_PROBE_SYNC_AFTER_MS)
-                },
-            )
-            TrailClearStrategy.FULL_LATE -> handler.postDelayed({
-                if (!attached) return@postDelayed
-                logTrailProbe(run, "full-refresh-requested")
-                requestFullRefreshWhenSettled("trail-probe-$number")
-            }, TRAIL_PROBE_LATE_MS)
-            TrailClearStrategy.SYNC_NOW -> {
-                cancelBackgroundSync()
-                sendBackgroundSync(force = true, bypassHold = true)
-                syncHoldUntil = SystemClock.uptimeMillis() + TRAIL_PROBE_SYNC_HOLD_MS
-            }
-            TrailClearStrategy.REARM_NOW -> {
-                val binder = drawPathBinder
-                if (binder == null || !configured) {
-                    logTrailProbe(run, "rearm-skipped configured=$configured binder=${binder != null}")
-                } else {
-                    try {
-                        synchronized(DrawPathGate.writeLock) { DrawPathClient.disableAll(binder, drawPathAppName) }
-                    } catch (error: Throwable) {
-                        Log.w(TAG, "[TrailProbe] disable failed", error)
-                    }
-                    rearmDrawPath("trail-probe-$number")
-                    logTrailProbe(run, "rearm-done active=$drawPathActive")
-                }
-            }
-            TrailClearStrategy.FULL_SETTLE -> requestFullRefreshWhenSettled("trail-probe-$number")
-            TrailClearStrategy.REDRAW_ONLY -> {}
-        }
-        return run
-    }
-
-    private fun logTrailProbe(run: TrailProbeRun, step: String) {
-        Log.i(TAG, "[TrailProbe] ${run.describe()} step=$step at=+${run.elapsedMs()}ms")
+        Log.i(TAG, "pen trail discarded: reason=$reason sync=${if (stylusContact) "now" else "deferred"} fullRefresh=$fullRefresh stylus=$stylusContact active=$drawPathActive")
     }
 
     
@@ -955,7 +887,8 @@ class MosaicBoardView(
         }
         fullRefreshPending = false
         MosaicEinkRefreshModule.requestFullRefresh(contentView, reason)
-        trailProbe?.let { if (it.recent()) logTrailProbe(it, "full-refresh reason=$reason") }
+        syncHoldUntil = SystemClock.uptimeMillis() + SYNC_AFTER_FULL_REFRESH_MS
+        if (backgroundSyncUrgency != SyncUrgency.NONE) scheduleBackgroundSync(SYNC_AFTER_FULL_REFRESH_MS)
     }
 
     
@@ -1468,12 +1401,6 @@ class MosaicBoardView(
         
         
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            trailProbe?.let {
-                if (!it.penDownLogged && it.recent()) {
-                    it.penDownLogged = true
-                    logTrailProbe(it, "next-pen-down")
-                }
-            }
             
             
             
@@ -1616,12 +1543,6 @@ class MosaicBoardView(
             val now = System.currentTimeMillis()
             when (event.actionMasked) {
                 MotionEvent.ACTION_HOVER_ENTER -> {
-                    trailProbe?.let {
-                        if (!it.hoverLogged && it.recent()) {
-                            it.hoverLogged = true
-                            logTrailProbe(it, "pen-hover-enter deferred=$awaitingStrokeCommit")
-                        }
-                    }
                     if (awaitingStrokeCommit) {
                         hoverRearmDeferred = true
                     } else {
