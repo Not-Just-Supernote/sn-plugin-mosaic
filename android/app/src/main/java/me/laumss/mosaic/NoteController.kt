@@ -57,13 +57,19 @@ class NoteController {
         }
     }
     
-    fun create(dir: String, doc: ScrollingDocument, done: (Result<ScrollingDocument>) -> Unit) {
+    fun create(dir: String, doc: ScrollingDocument, preparedPreview: File? = null, done: (Result<ScrollingDocument>) -> Unit) {
         require(doc.ref.matches(Regex("note-[a-zA-Z0-9-]+")))
         val target = File(dir)
         io.execute {
             val result = runCatching {
                 TchFile.write(File(target,"${doc.ref}.mnote"),doc)
-                NotePreview.write(File(target,doc.ref),doc,null)
+                if (preparedPreview == null) {
+                    NotePreview.write(File(target,doc.ref),doc,null)
+                } else {
+                    val preview = File(target, doc.ref)
+                    check(preview.mkdirs() || preview.isDirectory)
+                    repeat(doc.tileCount) { tile -> File(preparedPreview, "$tile.png").copyTo(File(preview, "$tile.png")) }
+                }
                 Log.i("MosaicNote","created ref=${doc.ref} strokes=${doc.strokes.size} height=${doc.contentHeight} tiles=${doc.tileCount}")
                 doc
             }

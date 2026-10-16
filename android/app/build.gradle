@@ -113,6 +113,12 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 11
         versionName "0.2.10"
+        externalNativeBuild {
+            cmake { abiFilters "arm64-v8a" }
+        }
+    }
+    externalNativeBuild {
+        cmake { path file("src/main/cpp/CMakeLists.txt") }
     }
     signingConfigs {
         debug {

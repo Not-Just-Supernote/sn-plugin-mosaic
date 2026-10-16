@@ -70,6 +70,8 @@ class InteractionOverlayView(context: Context) : View(context) {
     private val lassoActionRects = ArrayList<RectF>()
     
     private val lassoActionTypes = ArrayList<String>()
+
+    fun cleanupExclusionBounds(): List<RectF> = if (lassoVisible) lassoActionRects.map { RectF(it) } else emptyList()
     private var lassoVisible = true
     
     private var lassoCornerHandles = false
@@ -83,6 +85,12 @@ class InteractionOverlayView(context: Context) : View(context) {
     private var lassoRotateHandle = false
 
     
+    data class PreviewInk(val path: Path, val color: Int, val width: Float, val filled: Boolean)
+    private val moveInk = ArrayList<PreviewInk>()
+    private var moveStrokeWidth = 1f
+    private val blackCardFill = Paint().apply { style = Paint.Style.FILL; color = Color.BLACK }
+    private var shapeOnDark = false
+    private val shapePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private var moveActive = false
     private var moveDx = 0f
     private var moveDy = 0f
@@ -99,6 +107,11 @@ class InteractionOverlayView(context: Context) : View(context) {
     private val moveFrame = RectF()
     private var moveFrameVisible = false
     private val moveCards = ArrayList<RectF>()
+    private val moveGrayCards = ArrayList<Boolean>()
+    private val moveGrayBridges = ArrayList<Path>()
+    private val moveGrayBridgesScaled = ArrayList<Path>()
+    private var cardPreviewGray = true
+    private val movingCardFill = Paint().apply { style = Paint.Style.FILL }
     private val movePath = Path()
     private val moveMatrix = Matrix()
 
@@ -191,9 +204,10 @@ class InteractionOverlayView(context: Context) : View(context) {
 
     
 
-    fun showCardPreview(rectPx: RectF, kind: String) {
+    fun showCardPreview(rectPx: RectF, kind: String, colored: Boolean) {
         val r = cardPreview ?: RectF().also { cardPreview = it }
         r.set(rectPx)
+        cardPreviewGray = !colored
         cardPreviewHandles = ResizeHandles.forCard(kind)
         invalidate()
     }
@@ -221,7 +235,8 @@ class InteractionOverlayView(context: Context) : View(context) {
     
 
     
-    fun showShapePreview(pathPx: Path) {
+    fun showShapePreview(pathPx: Path, onDark: Boolean = false) {
+        shapeOnDark = onDark
         val old = RectF(shapePreviewBounds)
         shapePreview.set(pathPx)
         shapePreview.computeBounds(shapePreviewBounds, true)
@@ -310,7 +325,9 @@ class InteractionOverlayView(context: Context) : View(context) {
 
     
 
-    fun beginMovePreview(framePx: RectF?, cardsPx: List<RectF>, inkPx: Path, strokeWidthPx: Float) {
+    fun beginMovePreview(framePx: RectF?, cardsPx: List<RectF>, inkPx: Path, strokeWidthPx: Float, grayCards: List<Boolean> = emptyList(), grayBridges: List<Path> = emptyList(), ink: List<PreviewInk> = emptyList()) {
+        moveInk.clear()
+        moveInk.addAll(ink)
         moveActive = true
         moveDx = 0f
         moveDy = 0f
@@ -320,7 +337,13 @@ class InteractionOverlayView(context: Context) : View(context) {
         if (framePx != null) moveFrame.set(framePx)
         moveCards.clear()
         for (c in cardsPx) moveCards.add(RectF(c))
+        moveGrayCards.clear()
+        moveGrayCards.addAll(grayCards)
+        moveGrayBridges.clear()
+        moveGrayBridges.addAll(grayBridges.map { Path(it) })
+        moveGrayBridgesScaled.clear()
         movePath.set(inkPx)
+        moveStrokeWidth = strokeWidthPx
         inkPaint.strokeWidth = strokeWidthPx
         lassoVisible = false
         invalidate()
@@ -348,6 +371,8 @@ class InteractionOverlayView(context: Context) : View(context) {
         moveScaled = true
         moveScaleMatrix.setScale(sx, sy, pivotXPx, pivotYPx)
         movePath.transform(moveScaleMatrix, movePathScaled)
+        moveGrayBridgesScaled.clear()
+        moveGrayBridges.forEach { path -> moveGrayBridgesScaled.add(Path().also { path.transform(moveScaleMatrix, it) }) }
         moveCardsScaled.clear()
         for (c in moveCards) moveCardsScaled.add(RectF(c).also { moveScaleMatrix.mapRect(it) })
         moveFrameScaled.set(moveFrame)
@@ -362,6 +387,7 @@ class InteractionOverlayView(context: Context) : View(context) {
         moveScaled = false
         moveCards.clear()
         moveCardsScaled.clear()
+        moveInk.clear()
         movePath.reset()
         movePathScaled.reset()
         lassoVisible = true
@@ -468,6 +494,7 @@ class InteractionOverlayView(context: Context) : View(context) {
         moveAngleDeg = 0f
         moveActive = false
         moveCards.clear()
+        moveInk.clear()
         movePath.reset()
         eraserVisible = false
         eraserOnDark = false
@@ -483,9 +510,15 @@ class InteractionOverlayView(context: Context) : View(context) {
         val d = density
 
         framePreview?.let { canvas.drawRect(it, dashPaint) }
-        if (shapePreviewVisible) canvas.drawPath(shapePreview, dashPaint)
+        if (shapePreviewVisible) {
+            shapePaint.set(dashPaint)
+            shapePaint.color = if (shapeOnDark) Color.WHITE else INK
+            canvas.drawPath(shapePreview, shapePaint)
+        }
 
         cardPreview?.let { r ->
+            if (cardPreviewGray) drawMovingCardFill(canvas, r)
+            else canvas.drawRect(r, blackCardFill)
             canvas.drawRect(r, solidPaint)
             drawHandles(canvas, r, d, cardPreviewHandles)
         }
@@ -520,11 +553,31 @@ class InteractionOverlayView(context: Context) : View(context) {
             val frame = if (moveScaled) moveFrameScaled else moveFrame
             val cards = if (moveScaled) moveCardsScaled else moveCards
             val path = if (moveScaled) movePathScaled else movePath
+            movingCardFill.color = CardGrayRecipe.MOVING.low
+            movingCardFill.shader = CardGrayPattern.shader(canvas, CardGrayRecipe.MOVING)
+            for (bridge in if (moveScaled) moveGrayBridgesScaled else moveGrayBridges) canvas.drawPath(bridge, movingCardFill)
+            movingCardFill.shader = null
             if (moveFrameVisible) canvas.drawRect(frame, thinDashPaint)
             if (moveScaled && moveFrameVisible) drawHandles(canvas, frame, d,
                 ResizeHandles.forSelection(lassoCornerHandles, lassoEdgeHandles, lassoHorizontalEdgesOnly))
-            for (c in cards) canvas.drawRect(c, solidPaint)
+            for ((index, c) in cards.withIndex()) {
+                if (moveGrayCards.getOrNull(index) == true) drawMovingCardFill(canvas, c)
+                else canvas.drawRect(c, blackCardFill)
+                canvas.drawRect(c, solidPaint)
+            }
+            inkPaint.strokeWidth = moveStrokeWidth
             if (!path.isEmpty) canvas.drawPath(path, inkPaint)
+            val inkSave = canvas.save()
+            if (moveScaled) canvas.concat(moveScaleMatrix)
+            for (run in moveInk) {
+                inkPaint.color = run.color
+                inkPaint.style = if (run.filled) Paint.Style.FILL else Paint.Style.STROKE
+                inkPaint.strokeWidth = run.width
+                canvas.drawPath(run.path, inkPaint)
+            }
+            inkPaint.color = INK
+            inkPaint.style = Paint.Style.STROKE
+            canvas.restoreToCount(inkSave)
             canvas.restoreToCount(save)
         }
 
@@ -543,6 +596,13 @@ class InteractionOverlayView(context: Context) : View(context) {
     }
 
     
+    private fun drawMovingCardFill(canvas: Canvas, rect: RectF) {
+        movingCardFill.color = CardGrayRecipe.MOVING.low
+        movingCardFill.shader = CardGrayPattern.shader(canvas, CardGrayRecipe.MOVING)
+        canvas.drawRect(rect, movingCardFill)
+        movingCardFill.shader = null
+    }
+
     private fun setLassoInk(ink: Int, paper: Int) {
         thinDashPaint.color = ink
         solidPaint.color = ink

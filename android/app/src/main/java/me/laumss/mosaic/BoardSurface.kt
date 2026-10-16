@@ -104,8 +104,8 @@ class NoteSurface(
     companion object {
         
         private const val NOTE_OVERSCROLL_SCREENS = 6f
-        // Pinch zoom inside a note runs from 70% to 150% of fit-width (100%).
-        const val MIN_ZOOM = 0.7f
+        // Pinch zoom inside a note runs from 50% to 150% of fit-width (100%).
+        const val MIN_ZOOM = 0.5f
         const val MAX_ZOOM = 1.5f
         // Zoomed out, the page can be dragged past its top or bottom frame by this share of its on-screen
         // height (at most this share of the screen), onto white that cannot be written on.

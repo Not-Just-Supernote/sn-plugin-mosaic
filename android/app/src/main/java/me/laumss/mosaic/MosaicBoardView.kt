@@ -166,6 +166,10 @@ class MosaicBoardView(
         }
 
     private val contentView = BoardContentView(reactContext)
+    private val grayRestore = EinkGrayRestore(contentView, "board", eligible = {
+        !isEinkLabOpen && InklingLink.isBoardSurface() && !stylusContact &&
+            !contentView.isMovingCards && !contentView.isDeferringRefresh && !contentView.holdPaint
+    })
     private val inkView = TransientInkView(reactContext)
     private val overlayView = InteractionOverlayView(reactContext)
     private val chromeView = BoardChromeView(reactContext)
@@ -176,6 +180,53 @@ class MosaicBoardView(
         }
     }
     val controller = BoardInteractionController(this, contentView, inkView, overlayView, chromeView, commandEmitter)
+    private var einkLab: EinkLabView? = null
+    val isEinkLabOpen: Boolean get() = einkLab != null
+
+    private fun openEinkLab() {
+        if (einkLab != null) return
+        controller.setEinkLabActive(true)
+        flushInkHandoff("eink-lab")
+        setDrawPathSuspended(true, "eink-lab")
+        try {
+            val lab = EinkLabView(context, contentView, ::syncEinkLabBackground) { closeEinkLab() }
+            einkLab = lab
+            addView(lab, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        } catch (error: Exception) {
+            einkLab?.let { it.dispose(); removeView(it) }
+            einkLab = null
+            controller.setEinkLabActive(false)
+            setDrawPathSuspended(false, "eink-lab-open-failed")
+            android.widget.Toast.makeText(context, "实验室打开失败：${error.message}", android.widget.Toast.LENGTH_LONG).show()
+            Log.e(TAG, "eink lab open failed", error)
+        }
+    }
+
+    private fun closeEinkLab() {
+        val lab = einkLab ?: return
+        lab.dispose()
+        removeView(lab)
+        einkLab = null
+        controller.setEinkLabActive(false)
+        setDrawPathSuspended(false, "eink-lab-close")
+        contentView.postInvalidateOnAnimation()
+    }
+
+    fun refreshEinkLabAfterHostRefresh() { einkLab?.afterHostRefresh() }
+
+    private fun syncEinkLabBackground(): Boolean {
+        if (!attached || einkLab == null) return false
+        val binder = ensureBinder() ?: return false
+        return try {
+            DrawPathClient.syncBackground(binder, drawPathAppName, deviceType == DEVICE_TYPE_A6X2)
+            Log.i(TAG, "eink lab white-region background synced")
+            true
+        } catch (error: Exception) {
+            drawPathBinder = null
+            Log.w(TAG, "eink lab background sync failed", error)
+            false
+        }
+    }
     
     private var sceneChangeCounter = 0
     private var stylusContact = false
@@ -349,6 +400,8 @@ class MosaicBoardView(
             chromeView,
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
         )
+        chromeView.onCardGrayTrialColor = { color, brightPixels -> contentView.setCardGrayTrialColor(color, brightPixels) }
+        chromeView.onOpenEinkLab = { openEinkLab() }
         contentView.onContentChanged = { reason, moved ->
             if (Looper.myLooper() == Looper.getMainLooper()) {
                 sceneChangeCounter++
@@ -403,6 +456,8 @@ class MosaicBoardView(
 
     override fun onDetachedFromWindow() {
         attached = false
+        einkLab?.let { it.dispose(); removeView(it) }
+        einkLab = null
         InputReader.releaseBoardReader()
         publishBoardVisibility(false)
         InklingLink.detach(this)
@@ -466,13 +521,14 @@ class MosaicBoardView(
     fun redrawAfterHostRefresh() {
         if (!attached) return
         contentView.forceRedrawAfterHostRefresh()
-        handler.postDelayed({
-            if (attached) contentView.forceRedrawAfterHostRefresh()
-        }, 350L)
-        handler.postDelayed({
-            if (attached) contentView.postInvalidateOnAnimation()
-        }, 1000L)
+        if (InklingLink.isBoardSurface()) grayRestore.request("manual-key")
+        else {
+            handler.postDelayed({ if (attached) contentView.forceRedrawAfterHostRefresh() }, 350L)
+            handler.postDelayed({ if (attached) contentView.postInvalidateOnAnimation() }, 1000L)
+        }
     }
+
+    internal fun cancelGrayRestore(reason: String) = grayRestore.cancel(reason)
 
     private fun publishBoardVisibility(visible: Boolean) {
         if (visible) reloadNoteLinks()
@@ -493,6 +549,8 @@ class MosaicBoardView(
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (!attached || (w == oldw && h == oldh)) return
+        controller.cancelCardCleanup("size-change")
+        einkLab?.cancelAutomaticCleanup("size-change")
         Log.i(TAG, "onSizeChanged ${oldw}x$oldh -> ${w}x$h, reconfigure drawPath")
         contentView.requestInitialRaster()
         requestRotationReconfigure("sizeChanged")
@@ -509,8 +567,13 @@ class MosaicBoardView(
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
         Log.i(TAG, "window focus changed: hasFocus=$hasWindowFocus rotation=${display?.rotation}")
+        if (attached && !hasWindowFocus) {
+            controller.cancelCardCleanup("focus-lost")
+            einkLab?.cancelAutomaticCleanup("focus-lost")
+        }
         if (attached && !hasWindowFocus) restoreDrawPathPressureCurve()
         if (!attached || !hasWindowFocus) return
+        controller.resumeCardCleanup("focus-gained")
         handler.postDelayed({
             if (attached && hasWindowFocus) {
                 requestRotationReconfigure("windowFocusGained")
@@ -521,6 +584,8 @@ class MosaicBoardView(
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
         if (!attached) return
+        if (visibility != VISIBLE) controller.cancelCardCleanup("hidden")
+        else controller.resumeCardCleanup("visible")
         if (visibility != VISIBLE) restoreDrawPathPressureCurve()
         else if (hasWindowFocus()) scheduleConfigure("window-visible")
     }
@@ -572,6 +637,9 @@ class MosaicBoardView(
         
         
         chromeView.touchToggleBounds()?.let { r ->
+            areas.add(DrawPathClient.DisableArea(loc[0] + r.left, loc[1] + r.top, r.width(), r.height()))
+        }
+        chromeView.grayTrialBounds()?.let { r ->
             areas.add(DrawPathClient.DisableArea(loc[0] + r.left, loc[1] + r.top, r.width(), r.height()))
         }
         InklingLink.toolbarDisableArea()?.let(areas::add)
@@ -664,6 +732,7 @@ class MosaicBoardView(
         if (!attached) return
         handler.post {
             if (!attached) return@post
+            controller.preparePendingNoteImport()
             if (!InklingLink.isBoardSurface()) {
                 Log.i(TAG, "inkling inbox notification deferred surface=${InklingLink.currentSurface()}")
                 return@post
@@ -773,6 +842,7 @@ class MosaicBoardView(
     }
 
     private fun onContentSettled() {
+        controller.resumeCardCleanup("content-settled")
         if (holdPenRefreshUntilSettle && !stylusContact) {
             holdPenRefreshUntilSettle = false
             if (penModeApplied) {
@@ -1385,7 +1455,16 @@ class MosaicBoardView(
 
     
 
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+            controller.cancelCardCleanup("view-input")
+            einkLab?.cancelAutomaticCleanup("view-input")
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (isEinkLabOpen) return true
         val toolType = if (event.pointerCount > 0) event.getToolType(0) else MotionEvent.TOOL_TYPE_UNKNOWN
         val isPenTool = toolType == MotionEvent.TOOL_TYPE_STYLUS
             || toolType == MotionEvent.TOOL_TYPE_ERASER
@@ -1530,6 +1609,7 @@ class MosaicBoardView(
     }
 
     override fun onHoverEvent(event: MotionEvent): Boolean {
+        if (isEinkLabOpen) return true
         
         val toolType = if (event.pointerCount > 0) event.getToolType(0) else MotionEvent.TOOL_TYPE_UNKNOWN
         if (toolType == MotionEvent.TOOL_TYPE_STYLUS

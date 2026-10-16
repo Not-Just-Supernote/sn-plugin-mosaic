@@ -44,7 +44,7 @@ object BoardGeometry {
     val ZOOM_LEVELS: FloatArray = FloatArray(UI_ZOOM_LEVELS.size) { scaleForZoomPercent(UI_ZOOM_LEVELS[it].toFloat()) }
     val DEFAULT_ZOOM: Float = scaleForZoomPercent(75f)
     val RESET_ZOOM: Float = scaleForZoomPercent(100f)
-    val GESTURE_MIN_ZOOM: Float = scaleForZoomPercent(75f)
+    val GESTURE_MIN_ZOOM: Float = scaleForZoomPercent(50f)
     val GESTURE_MAX_ZOOM: Float = scaleForZoomPercent(200f)
 
     enum class Handle(val movesLeft: Boolean, val movesRight: Boolean, val movesTop: Boolean, val movesBottom: Boolean) {
@@ -271,17 +271,18 @@ object BoardGeometry {
     
     fun cardFromStrokeRect(source: BoardEngine.CardRec, endX: Float, endY: Float): RectF {
         val w = source.width
-        val h = source.height
+        val h = if (source.kind == "note") w * 0.61803398875f else source.height
         val dx = endX - (source.x + w / 2f)
-        val dy = endY - (source.y + h / 2f)
+        val dy = endY - (source.y + source.height / 2f)
         val x: Float
         val y: Float
-        if (abs(dx) >= abs(dy)) {
+        val horizontal = if (source.kind == "note") abs(dx) / w >= abs(dy) / source.height else abs(dx) >= abs(dy)
+        if (horizontal) {
             x = if (dx >= 0f) source.x + w + CARD_STROKE_GAP else source.x - w - CARD_STROKE_GAP
-            val ov = min(CARD_STROKE_MIN_OVERLAP, h)
-            y = max(source.y + ov - h, min(source.y + h - ov, endY - h / 2f))
+            val ov = min(CARD_STROKE_MIN_OVERLAP, min(h, source.height))
+            y = max(source.y + ov - h, min(source.y + source.height - ov, endY - h / 2f))
         } else {
-            y = if (dy >= 0f) source.y + h + CARD_STROKE_GAP else source.y - h - CARD_STROKE_GAP
+            y = if (dy >= 0f) source.y + source.height + CARD_STROKE_GAP else source.y - h - CARD_STROKE_GAP
             val ov = min(CARD_STROKE_MIN_OVERLAP, w)
             x = max(source.x + ov - w, min(source.x + w - ov, endX - w / 2f))
         }

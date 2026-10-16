@@ -25,7 +25,7 @@ object NotePreview {
 
     // Writes the tiles in [dirty] plus any tile file that is missing; null rewrites every tile.
     // Tile files past the end of the note are removed. Returns the tiles written.
-    fun write(dir: File, doc: ScrollingDocument, dirty: Set<Int>?): List<Int> {
+    fun write(dir: File, doc: ScrollingDocument, dirty: Set<Int>?, progress: ((Int, Int) -> Unit)? = null): List<Int> {
         require(dir.isDirectory || dir.mkdirs())
         val count = doc.tileCount
         dir.listFiles()?.forEach { f ->
@@ -37,7 +37,8 @@ object NotePreview {
         val bitmap = Bitmap.createBitmap(TILE_W, TILE_H, Bitmap.Config.ARGB_8888)
         val paint = Paint().apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
         try {
-            for (tile in tiles) {
+            for ((index, tile) in tiles.withIndex()) {
+                progress?.invoke(index, tiles.size)
                 val top = tile * ScrollingDocument.TILE_HEIGHT
                 val bottom = top + ScrollingDocument.TILE_HEIGHT
                 val visible = doc.strokes.filter { s ->
@@ -53,6 +54,7 @@ object NotePreview {
                 writePng(file, bitmap)
                 CardImageCache.invalidate(file.absolutePath)
             }
+            progress?.invoke(tiles.size, tiles.size)
         } finally { bitmap.recycle() }
         return tiles
     }

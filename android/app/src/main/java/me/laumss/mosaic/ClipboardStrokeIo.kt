@@ -1,6 +1,8 @@
 package me.laumss.mosaic
 
 import android.util.Log
+import android.util.JsonReader
+import android.util.JsonToken
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -81,6 +83,7 @@ class ClipboardStrokeIo {
     class NoteImport(
         val strokes: List<BoardEngine.StrokeRec>,
         val pageCount: Int,
+        val preparedPreview: File? = null,
     )
 
     private val pasteExecutor: ExecutorService = Executors.newSingleThreadExecutor { task ->
@@ -111,7 +114,7 @@ class ClipboardStrokeIo {
 
     
     fun submitNoteImport(source: File, callback: (Result<NoteImport>) -> Unit): Future<*> = pasteExecutor.submit {
-        callback(runCatching { parseNotePages(source.readText(Charsets.UTF_8)) })
+        callback(runCatching { PreparedNoteImport.read(source) ?: parseNoteFile(source) })
     }
 
     
@@ -240,7 +243,7 @@ class ClipboardStrokeIo {
     }
 
     
-    private fun parsePageStrokes(array: JSONArray, bounds: FloatArray, noteSource: Boolean = false): List<TripleStroke> {
+    private fun parsePageStrokes(array: JSONArray, bounds: FloatArray, noteSource: Boolean = false, logFirst: Boolean = true): List<TripleStroke> {
         var minX = bounds[0]
         var minY = bounds[1]
         var maxX = bounds[2]
@@ -297,7 +300,7 @@ class ClipboardStrokeIo {
                 noteSource || obj.has("drawPathWidth") -> rawWidth
                 else -> DrawPathClient.widthArgument(PenStyle.fromObjType(penStyle), width)
             }
-            if (index == 0) {
+            if (index == 0 && logFirst) {
                 Log.i(TAG, "[CLIP-DBG] parsed first stroke sdkPenType=${obj.optInt("sdkPenType", -1)} " +
                     "penStyle=$penStyle width=$width sourceWidth=$rawWidth drawPathWidth=$drawPathWidth " +
                     "penColor=${obj.optInt("penColor", 0)} ink=${Integer.toHexString(noteInkColor(obj, penStyle))}")
@@ -333,7 +336,7 @@ class ClipboardStrokeIo {
 
     // Pages are scaled to the note width and stacked with NOTE_PAGE_GAP between them; blank runs are then
     // collapsed the same way a note is on close, so empty page areas do not make the card long.
-    private fun parseNotePages(text: String): NoteImport {
+    fun parseNotePages(text: String): NoteImport {
         val pages = JSONObject(text).optJSONArray("pages") ?: error("note import has no pages")
         val strokes = ArrayList<BoardEngine.StrokeRec>()
         var top = 0f
@@ -369,6 +372,131 @@ class ClipboardStrokeIo {
         }
         require(pageCount > 0) { "note import has no valid pages" }
         return NoteImport(ScrollingDocument.compact(strokes), pageCount)
+    }
+
+    /** Takes ownership of a copied SDK page; coordinates never pass through decimal JSON. */
+    internal fun appendNativePage(page: Map<String, Any>, top: Float, target: MutableList<BoardEngine.StrokeRec>): Float {
+        val width = (page.getValue("width") as Number).toFloat()
+        val height = (page.getValue("height") as Number).toFloat()
+        require(width.isFinite() && height.isFinite() && width > 0 && height > 0)
+        val scale = ScrollingDocument.WIDTH / width
+        @Suppress("UNCHECKED_CAST")
+        val sources = page.getValue("strokes") as List<Map<String, Any>>
+        for (source in sources) {
+            val points = source.getValue("points") as FloatArray
+            val pressures = source.getValue("pressures") as FloatArray
+            val angles = source.getValue("angles") as IntArray
+            val ends = source.getValue("contourOffsets") as IntArray
+            require(points.size == pressures.size * 2 && pressures.isNotEmpty() && angles.size % 2 == 0)
+            val metadata = JSONObject().apply {
+                for (key in listOf("sdkPenType", "drawPathWidth", "width", "penColor")) put(key, source.getValue(key))
+                if (ends.isNotEmpty()) put("contours", true)
+            }
+            val style = pastePenStyle(metadata)
+            val calligraphy = metadata.getInt("sdkPenType") == NOTE_PEN_TYPE_CALLIGRAPHY
+            val rawWidth = metadata.getInt("drawPathWidth")
+            val drawWidth = if (calligraphy) DrawPathClient.mosaicCalligraphyThickness(rawWidth) else rawWidth
+            val strokeWidth = if (calligraphy) drawWidth / 100f else metadata.getDouble("width").toFloat()
+            for (i in pressures.indices) {
+                require(points[i * 2].isFinite() && points[i * 2 + 1].isFinite() && pressures[i].isFinite())
+                points[i * 2] *= scale
+                points[i * 2 + 1] = top + points[i * 2 + 1] * scale
+            }
+            target.add(BoardEngine.StrokeRec(UUID.randomUUID().toString(), "canvas", strokeWidth * scale,
+                noteInkColor(metadata, style), points, pressures, style, 1f / scale, drawWidth,
+                pasteNibAngle(metadata, angles), angles, ends))
+        }
+        return top + height * scale + NOTE_PAGE_GAP
+    }
+
+    /** Stream one stroke at a time; the whole note JSON never becomes a String/JSONObject. */
+    fun parseNoteFile(source: File, progress: (Int) -> Unit = {}, cancelled: () -> Boolean = { false }): NoteImport {
+        val strokes = ArrayList<BoardEngine.StrokeRec>()
+        var pages = 0
+        var top = 0f
+        var bytes = 0L
+        var lastPercent = -1
+        val stream = source.inputStream()
+        val counted = object : java.io.InputStream() {
+            override fun read(): Int = stream.read().also { if (it >= 0) bytes++ }
+            override fun read(b: ByteArray, off: Int, len: Int): Int = stream.read(b, off, len).also { if (it > 0) bytes += it }
+            override fun close() = stream.close()
+        }
+        JsonReader(counted.bufferedReader()).use { reader ->
+            reader.beginObject()
+            while (reader.hasNext()) {
+                if (reader.nextName() != "pages") { reader.skipValue(); continue }
+                reader.beginArray()
+                while (reader.hasNext()) {
+                    if (cancelled()) throw java.io.InterruptedIOException("cancelled")
+                    var width = 0f; var height = 0f; var expected = -1
+                    val page = ArrayList<TripleStroke>()
+                    reader.beginObject()
+                    while (reader.hasNext()) when (reader.nextName()) {
+                        "pageSize" -> {
+                            val size = readJsonObject(reader)
+                            width = size.optDouble("width", 0.0).toFloat()
+                            height = size.optDouble("height", 0.0).toFloat()
+                        }
+                        "strokeCount" -> expected = reader.nextInt()
+                        "strokes" -> {
+                            reader.beginArray()
+                            while (reader.hasNext()) {
+                                if (cancelled()) throw java.io.InterruptedIOException("cancelled")
+                                val obj = readJsonObject(reader)
+                                page.addAll(parsePageStrokes(JSONArray().put(obj), floatArrayOf(Float.POSITIVE_INFINITY,
+                                    Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY), true, false))
+                                val percent = (bytes * 100 / source.length().coerceAtLeast(1)).toInt().coerceIn(0, 100)
+                                if (percent != lastPercent) { lastPercent = percent; progress(percent) }
+                            }
+                            reader.endArray()
+                        }
+                        else -> reader.skipValue()
+                    }
+                    reader.endObject()
+                    require(width.isFinite() && height.isFinite() && width > 0 && height > 0)
+                    require(expected < 0 || page.size == expected) { "Incomplete note import page $pages" }
+                    if (pages > 0) top += NOTE_PAGE_GAP
+                    val scale = ScrollingDocument.WIDTH / width
+                    for (stroke in page) {
+                        // Arrays belong exclusively to this import; transform in place to bound peak memory.
+                        for (i in stroke.pressures.indices) {
+                            stroke.points[2 * i] *= scale
+                            stroke.points[2 * i + 1] = top + stroke.points[2 * i + 1] * scale
+                        }
+                        strokes.add(BoardEngine.StrokeRec(UUID.randomUUID().toString(), "canvas", stroke.width * scale,
+                            stroke.color, stroke.points, stroke.pressures, stroke.penStyle, stroke.sampleScale / scale,
+                            stroke.drawPathWidth, stroke.nibAngle, stroke.angles, stroke.contourOffsets))
+                    }
+                    top += height * scale
+                    pages++
+                    Log.i(TAG, "[NOTE-STREAM] page=$pages strokes=${page.size} total=${strokes.size}")
+                }
+                reader.endArray()
+            }
+            reader.endObject()
+        }
+        require(pages > 0) { "note import has no valid pages" }
+        progress(100)
+        return NoteImport(ScrollingDocument.compact(strokes, owned = true), pages)
+    }
+
+    private fun readJsonObject(reader: JsonReader): JSONObject {
+        val obj = JSONObject(); reader.beginObject()
+        while (reader.hasNext()) obj.put(reader.nextName(), readJsonValue(reader))
+        reader.endObject(); return obj
+    }
+
+    private fun readJsonValue(reader: JsonReader): Any = when (reader.peek()) {
+        JsonToken.BEGIN_OBJECT -> readJsonObject(reader)
+        JsonToken.BEGIN_ARRAY -> JSONArray().also { array ->
+            reader.beginArray(); while (reader.hasNext()) array.put(readJsonValue(reader)); reader.endArray()
+        }
+        JsonToken.NUMBER -> reader.nextDouble()
+        JsonToken.STRING -> reader.nextString()
+        JsonToken.BOOLEAN -> reader.nextBoolean()
+        JsonToken.NULL -> { reader.nextNull(); JSONObject.NULL }
+        else -> error("Invalid note JSON token")
     }
 
     

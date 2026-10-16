@@ -1,6 +1,7 @@
 package me.laumss.mosaic
 
 import android.util.Log
+import android.graphics.Rect
 import android.view.View
 import android.view.ViewGroup
 import com.facebook.react.bridge.Promise
@@ -38,6 +39,23 @@ class MosaicEinkRefreshModule(
             runOnUiImmediate { module.applyOwned(mode, owner) }
         }
 
+        fun applyLabMode(mode: Int, owner: String, result: (Boolean, Int?) -> Unit) {
+            require(mode == MODE_DEFAULT || mode == MODE_A2)
+            runOnUiImmediate {
+                val module = instance?.get()
+                if (module == null) result(false, null)
+                else result(module.applyOwned(mode, owner), module.effectiveMode())
+            }
+        }
+
+        fun releaseLabMode(owner: String, result: (Boolean, Int?) -> Unit) {
+            runOnUiImmediate {
+                val module = instance?.get()
+                if (module == null) result(false, null)
+                else result(module.resetOwned(owner), module.effectiveMode())
+            }
+        }
+
         @JvmStatic
         fun resetNative(owner: String) {
             val module = instance?.get() ?: return
@@ -68,6 +86,50 @@ class MosaicEinkRefreshModule(
             Log.i(TAG, "full refresh requested reason=$reason via=root.forceEinkFullUpdate")
             return true
         }
+
+        fun requestRegionRefresh(view: View, region: Rect, reason: String): Boolean {
+            val rect = Rect(region)
+            if (!view.isAttachedToWindow || !rect.intersect(0, 0, view.width, view.height)) return false
+            return try {
+                // Verified on the device framework: invalidate(Rect, einkMode) forwards
+                // the rectangle and explicit waveform to the view's E-ink dirty-region path.
+                val gcMode = View::class.java.getField("EINK_SHOW_MODE_GC").getInt(null)
+                View::class.java.getMethod("invalidate", Rect::class.java, Int::class.javaPrimitiveType)
+                    .invoke(view, rect, gcMode)
+                Log.i(TAG, "region refresh requested reason=$reason rect=$rect mode=$gcMode")
+                true
+            } catch (error: Exception) {
+                Log.w(TAG, "region refresh failed reason=$reason rect=$rect", error)
+                false
+            }
+        }
+
+        /** One submission with explicit gray conversion, leaving gesture ownership intact. */
+        fun requestGrayFrame(view: View, reason: String): Boolean {
+            if (!view.isAttachedToWindow || !view.isShown) return false
+            return try {
+                val root = View::class.java.getMethod("getViewRootImpl").invoke(view) ?: return false
+                val rect = Rect()
+                if (!view.getGlobalVisibleRect(rect)) return false
+                // addViewDirtyRectX consumes surface coordinates. Global visible rect is
+                // rooted in rootView; convert its origin to this window's coordinates.
+                val origin = IntArray(2)
+                view.rootView.getLocationInWindow(origin)
+                rect.offset(origin[0], origin[1])
+                root.javaClass.getMethod(
+                    "addViewDirtyRectX", View::class.java, Rect::class.java,
+                    Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+                    Boolean::class.javaPrimitiveType,
+                ).invoke(root, view, rect, MODE_DEFAULT, 3, true)
+                // The firmware entry queues explicit metadata; invalidate schedules its frame.
+                view.invalidate()
+                Log.i(TAG, "gray frame queued reason=$reason rect=$rect disp=7 data=3")
+                true
+            } catch (error: Exception) {
+                Log.w(TAG, "gray frame request failed reason=$reason", error)
+                false
+            }
+        }
     }
 
     private var activeMode: Int? = null
@@ -86,21 +148,22 @@ class MosaicEinkRefreshModule(
         return best
     }
 
-    private fun applyOwned(mode: Int, owner: String) {
+    private fun applyOwned(mode: Int, owner: String): Boolean {
         requests.remove(owner)
         requests[owner] = mode
         
-        applyRefreshMode(effectiveMode())
+        return applyRefreshMode(effectiveMode())
     }
 
-    private fun resetOwned(owner: String) {
+    private fun resetOwned(owner: String): Boolean {
         if (requests.remove(owner) == null) {
             Log.i(TAG, "reset skipped owner=$owner (no request) others=${requests.keys}")
-            return
+            return true
         }
         val next = effectiveMode()
-        if (next != activeMode) applyRefreshMode(next)
-        else Log.i(TAG, "reset owner=$owner kept mode=${next ?: "reset"} held by ${requests.keys}")
+        if (next != activeMode) return applyRefreshMode(next)
+        Log.i(TAG, "reset owner=$owner kept mode=${next ?: "reset"} held by ${requests.keys}")
+        return true
     }
 
     override fun getName(): String = "MosaicEinkRefresh"

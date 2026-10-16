@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Handler
@@ -40,7 +41,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
         
         
-        const val CARD_FILL_COLOR = 0xFFD0D0D0.toInt()
+        const val CARD_FILL_COLOR = CardGrayRecipe.IDLE_LOW
+        const val CARD_GRAY_BRIGHT_PIXELS = CardGrayRecipe.IDLE_BRIGHT_PIXELS
         
         private const val CARD_COLORED_FILL_COLOR = 0xFF000000.toInt()
         
@@ -413,12 +415,22 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val neckFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_FILL_COLOR }
         val threadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = THREAD_COLOR }
         val cardFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_FILL_COLOR }
+        val cardCutoutPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+        }
         val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_SHADOW_COLOR }
         val shadowEdgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = CARD_SHADOW_EDGE_COLOR }
         val shadowPathNear = Path()
         val shadowPathFar = Path()
         val shadowFarUnion = Path()
         val outlineOccluders = Path()
+        val outlineOpening = Path()
+        val connectedFillUnion = Path()
+        val connectedFillPart = Path()
+        val outlineOpeningPaint = Paint().apply {
+            style = Paint.Style.FILL_AND_STROKE
+            strokeWidth = CARD_OUTLINE_WIDTH + 2f
+        }
         val emphasisStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             color = CARD_OUTLINE_EMPHASIS_COLOR
@@ -513,6 +525,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             releaseFallbackLocked()
         }
         rasterScaleOverride = null
+        gestureFrameWaiters.clear()
         removeCallbacks(gestureFrameTask)
         gestureFramePosted = false
         super.onDetachedFromWindow()
@@ -546,6 +559,22 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     
     @Volatile
     private var translucentOverlay = false
+
+    @Volatile private var idleCardRecipe = CardGrayRecipe.DEFAULT
+    val cardFillColor: Int get() = idleCardRecipe.low
+    @Volatile private var movingCards = false
+    internal val isMovingCards: Boolean get() = movingCards
+    private val screenCardFill = Paint().apply { style = Paint.Style.FILL }
+    private val screenCardRect = RectF()
+
+    fun setCardGrayTrialColor(color: Int, brightPixels: Int = 0) {
+        val next = CardGrayRecipe.trial(color, brightPixels)
+        if (idleCardRecipe == next) return
+        idleCardRecipe = next
+        markAllCachedTilesDirtyLocked()
+        onContentChanged?.invoke("card-gray-trial", false)
+        postInvalidateOnAnimation()
+    }
 
     fun setTranslucentOverlay(enabled: Boolean) {
         if (translucentOverlay == enabled) return
@@ -670,6 +699,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         private set
 
     private val settleWaiters = ArrayList<Runnable>()
+    private val gestureFrameWaiters = ArrayList<Runnable>()
 
     @Volatile
     private var settleRequested = false
@@ -705,6 +735,12 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     fun clearSettleWaiters() {
         settleWaiters.clear()
+        gestureFrameWaiters.clear()
+    }
+
+    fun runWhenGestureFrameDrawn(callback: Runnable) {
+        gestureFrameWaiters.add(callback)
+        postInvalidateOnAnimation()
     }
 
     private fun showsAccent(card: BoardEngine.CardRec): Boolean = card.colored
@@ -841,6 +877,10 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val rasterTilePx = ceil(TILE_WORLD * rasterScale * densityValue).toLong().coerceAtLeast(1L)
         visibleTileBytes = rasterTilePx * rasterTilePx * 4L * ((maxIx - minIx + 1).toLong() * (maxIy - minIy + 1).toLong())
 
+        // Tiles keep card interiors transparent and retain their original ink.
+        // Both recipes are painted at screen resolution, so cached/zoomed tiles
+        // cannot resample their pixels or bring an older recipe back into view.
+        drawCardBacking(canvas, panXPx, panYPx, scalePx)
         var missing = 0
         var stale = 0
         val src = Rect()
@@ -848,7 +888,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         
         val freeze = gestureFreezeTiles
         synchronized(cacheLock) {
-            tilePaint.isFilterBitmap = previewing || fallbackTiles.isNotEmpty()
+            tilePaint.isFilterBitmap = !movingCards && (previewing || fallbackTiles.isNotEmpty())
             for (iy in minIy..maxIy) {
                 for (ix in minIx..maxIx) {
                     val key = TileKey(ix, iy, scaleBits)
@@ -883,6 +923,11 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
         drawPageBorder(canvas, panXPx, panYPx, scalePx, densityValue)
         drawSelection(canvas, panXPx, panYPx, scalePx)
+        if (!lookPending && gestureFrameWaiters.isNotEmpty()) {
+            val ready = ArrayList(gestureFrameWaiters)
+            gestureFrameWaiters.clear()
+            post { for (callback in ready) callback.run() }
+        }
 
         if (settleRequested && missing == 0 && stale == 0 && !deferRefresh) {
             settleRequested = false
@@ -908,7 +953,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     @Volatile
     private var outlineEmphasis = false
     
-    // A2 手势期间灰卡画成白底，内容不反色，和笔记卡一样；黑卡照旧。
+    // Retained for existing ink-color handling; motion uses a separate BW recipe.
     @Volatile
     private var whiteCards = false
     
@@ -966,11 +1011,15 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         canvas.restoreToCount(save)
     }
 
-    fun setGesturePresentation(flatCards: Boolean, whiteCards: Boolean, hideTemplate: Boolean) {
-        if (outlineEmphasis == flatCards && this.whiteCards == whiteCards && gestureTemplateHidden == hideTemplate) return
+    fun setGesturePresentation(flatCards: Boolean, whiteCards: Boolean, hideTemplate: Boolean, moving: Boolean) {
+        if (outlineEmphasis == flatCards && this.whiteCards == whiteCards && gestureTemplateHidden == hideTemplate && movingCards == moving) return
+        val geometryChanged = outlineEmphasis != flatCards || this.whiteCards != whiteCards || gestureTemplateHidden != hideTemplate
+        movingCards = moving
+        Log.i(TAG, "card-recipe build=20261016v moving=$moving recipe=${CardGrayRecipe.forMotion(moving, idleCardRecipe)}")
         outlineEmphasis = flatCards
         this.whiteCards = whiteCards
         gestureTemplateHidden = hideTemplate
+        if (!geometryChanged) { postInvalidateOnAnimation(); return }
         removeCallbacks(lookTimeoutTask)
         lookPanX = BoardEngine.panX
         lookPanY = BoardEngine.panY
@@ -1255,7 +1304,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         NoteLinks.draw(canvas, worldRect)
         drawPageNoteHeader(canvas, worldRect)
         drawCanvasStrokes(canvas, worldRect, scene)
-        drawLiquidAndCards(canvas, worldRect, scene)
+        drawLiquidAndCards(canvas, worldRect, scene, cutoutCardFill = true)
         drawConnectionStrokes(canvas, worldRect, scene)
         return bitmap
     }
@@ -1292,7 +1341,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             canvas.translate(-world.left, -world.top)
             val scene = BoardEngine.renderSnapshot(world)
             drawCanvasStrokes(canvas, world, scene)
-            drawLiquidAndCards(canvas, world, scene)
+            drawLiquidAndCards(canvas, world, scene, idleCardRecipe, emphasis = false, white = false)
             drawConnectionStrokes(canvas, world, scene)
             val stillActive = synchronized(cacheLock) { generation == rasterGeneration }
             if (stillActive) onDone(bitmap) else {
@@ -1311,11 +1360,50 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     
     private fun drawConnectionStrokes(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot) {
-        strokeQueryScratch.clear()
-        strokeQueryScratch.addAll(scene.canvasStrokes)
-        strokeQueryScratch.removeAll { it.connectionId == null }
-        TchRaster.drawLayer(canvas, strokeQueryScratch, strokePaint, colorOf = a2InkColor("canvas", scene))
+        // Keep bridge ink black on light portions, then resolve dark portions geometrically.
+        val bridges = scene.canvasStrokes.filter { it.connectionId != null }
+        TchRaster.drawLayer(canvas, bridges, strokePaint) { stroke ->
+            if (InkBackdrop.isAutoInk(stroke)) {
+                if (InkBackdrop.isOverMarkers(stroke, scene.markers[stroke.space].orEmpty())) Color.WHITE else Color.BLACK
+            } else stroke.color
+        }
+        // Card-local ink may continue through an existing link and onto the canvas.
+        for ((id, strokes) in scene.cardStrokes) {
+            val card = scene.cards[id] ?: continue
+            val local = canvas.save()
+            canvas.clipOutRect(card.rect())
+            canvas.translate(card.x, card.y)
+            for (stroke in strokes) if (InkBackdrop.isAutoInk(stroke)) {
+                val markers = scene.markers[stroke.space].orEmpty()
+                val color = if (InkBackdrop.isOverMarkers(stroke, markers)) Color.WHITE else Color.BLACK
+                TchRaster.draw(canvas, stroke, strokePaint, color)
+            }
+            canvas.restoreToCount(local)
+        }
+        val dark = Path()
+        for (neck in scene.necks) if (neck.dark) dark.op(neck.path, Path.Op.UNION)
+        for (card in scene.cardsByZ) {
+            val part = Path().apply { addRoundRect(card.rect(), CARD_RADIUS, CARD_RADIUS, Path.Direction.CW) }
+            dark.op(part, if (showsAccent(card)) Path.Op.UNION else Path.Op.DIFFERENCE)
+        }
+        if (dark.isEmpty) return
+        val save = canvas.save()
+        canvas.clipPath(dark)
+        for (stroke in scene.canvasStrokes) if (InkBackdrop.isAutoInk(stroke)) {
+            TchRaster.draw(canvas, stroke, strokePaint, Color.WHITE)
+        }
+        for ((id, strokes) in scene.cardStrokes) {
+            val card = scene.cards[id] ?: continue
+            val local = canvas.save()
+            canvas.translate(card.x, card.y)
+            for (stroke in strokes) if (InkBackdrop.isAutoInk(stroke)) {
+                TchRaster.draw(canvas, stroke, strokePaint, Color.WHITE)
+            }
+            canvas.restoreToCount(local)
+        }
+        canvas.restoreToCount(save)
     }
+
 
     
     private fun a2InkColor(
@@ -1396,31 +1484,79 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         canvas.restoreToCount(save)
     }
 
-    private fun drawLiquidAndCards(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot) {
-        val emphasis = outlineEmphasis
-        val white = whiteCards
+    private fun drawCardBacking(canvas: Canvas, panX: Float, panY: Float, scale: Float) {
+        val world = RectF(-panX / scale, -panY / scale, (width - panX) / scale, (height - panY) / scale)
+        val (cards, necks) = synchronized(BoardEngine.lock) {
+            val hidden = BoardEngine.hiddenCardIds
+            BoardEngine.cardsByZ.filter { !it.colored && it.id !in hidden && RectF.intersects(it.rect(), world) } to
+                BoardEngine.necks.values.filter { neck ->
+                    val link = BoardEngine.connections[neck.id]
+                    !neck.dark && RectF.intersects(neck.bounds, world) &&
+                        (link == null || (link.fromId !in hidden && link.toId !in hidden))
+                }
+        }
+        if (cards.isEmpty() && necks.isEmpty()) return
+        val saved = canvas.save()
+        canvas.translate(panX, panY)
+        canvas.scale(scale, scale)
+        val recipe = CardGrayRecipe.forMotion(movingCards, idleCardRecipe)
+        screenCardFill.color = recipe.low
+        screenCardFill.shader = CardGrayPattern.shader(canvas, recipe)
+        for (neck in necks) canvas.drawPath(neck.path, screenCardFill)
+        for (card in cards) {
+            card.rect(screenCardRect)
+            canvas.drawRoundRect(screenCardRect, CARD_RADIUS, CARD_RADIUS, screenCardFill)
+        }
+        screenCardFill.shader = null
+        canvas.restoreToCount(saved)
+    }
+
+    private fun drawLiquidAndCards(
+        canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot,
+        recipe: CardGrayRecipe = CardGrayRecipe.forMotion(movingCards, idleCardRecipe),
+        emphasis: Boolean = outlineEmphasis, white: Boolean = whiteCards,
+        cutoutCardFill: Boolean = false,
+    ) {
         val cardRect = RectF()
-        
-        
+        // Shadows belong outside the connected silhouette. In particular, a
+        // long note card must not leave its offset side shadow under the bridge.
+        val shadowSave = canvas.save()
+        if (scene.necks.isNotEmpty()) {
+            val scratch = rasterScratch.get()
+            val silhouette = scratch.connectedFillUnion
+            val part = scratch.connectedFillPart
+            silhouette.rewind()
+            var valid = true
+            for (card in scene.cardsByZ) {
+                card.rect(cardRect)
+                part.rewind()
+                part.addRoundRect(cardRect, CARD_RADIUS, CARD_RADIUS, Path.Direction.CW)
+                valid = silhouette.op(part, Path.Op.UNION) && valid
+            }
+            for (neck in scene.necks) valid = silhouette.op(neck.path, Path.Op.UNION) && valid
+            if (valid) canvas.clipOutPath(silhouette)
+        }
         if (emphasis) {
             drawFlatShadow(canvas, world, scene)
         } else {
             drawSilhouetteShadow(canvas, world, scene)
         }
+        canvas.restoreToCount(shadowSave)
         drawThreads(canvas, world, scene, emphasis)
         for (neck in scene.necks) {
             if (!RectF.intersects(neck.bounds, world)) continue
             neckFillPaint.color = when {
                 neck.dark -> CARD_COLORED_FILL_COLOR
                 white -> Color.WHITE
-                else -> CARD_FILL_COLOR
+                else -> recipe.low
             }
-            canvas.drawPath(neck.path, neckFillPaint)
+            neckFillPaint.shader = if (!neck.dark && !white) CardGrayPattern.shader(canvas, recipe) else null
+            canvas.drawPath(neck.path, if (cutoutCardFill && !neck.dark) rasterScratch.get().cardCutoutPaint else neckFillPaint)
             if (emphasis) {
-                emphasisStrokePaint.color = CARD_OUTLINE_EMPHASIS_COLOR
-                canvas.drawPath(neck.path, emphasisStrokePaint)
+                drawNeckOutline(canvas, neck.path, neck.bounds, scene)
             }
         }
+        neckFillPaint.shader = null
         for (card in scene.cardsByZ) {
             card.rect(cardRect)
             if (!RectF.intersects(cardRect, world)) continue
@@ -1429,10 +1565,13 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             cardFillPaint.color = when {
                 showsAccent(card) -> CARD_COLORED_FILL_COLOR
                 white -> Color.WHITE
-                else -> CARD_FILL_COLOR
+                else -> recipe.low
             }
-            canvas.drawRoundRect(cardRect, CARD_RADIUS, CARD_RADIUS, cardFillPaint)
+            cardFillPaint.shader = if (!showsAccent(card) && !white) CardGrayPattern.shader(canvas, recipe) else null
+            canvas.drawRoundRect(cardRect, CARD_RADIUS, CARD_RADIUS,
+                if (cutoutCardFill && !showsAccent(card)) rasterScratch.get().cardCutoutPaint else cardFillPaint)
         }
+        cardFillPaint.shader = null
         
         if (emphasis) drawCardOutlines(canvas, world, scene)
         
@@ -1444,6 +1583,28 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     }
 
     
+    fun drawEinkLabScene(canvas: Canvas, world: RectF, cards: List<BoardEngine.CardRec>, recipe: CardGrayRecipe) {
+        val neck = if (cards.size == 2) NeckGeometry.build(cards[0].rect(), cards[1].rect()) else null
+        val scene = BoardEngine.RenderSnapshot(
+            emptyList(), cards, cards.associateBy { it.id }, emptyMap(), emptyMap(), emptyMap(),
+            if (neck == null) emptyList() else listOf(BoardEngine.NeckRec("lab-neck", neck, false)), 1f,
+        )
+        drawLiquidAndCards(canvas, world, scene, recipe, emphasis = false, white = false)
+        // Sample ink stays visible throughout motion, in the same coordinates as each card.
+        val paint = rasterScratch.get().strokePaint
+        paint.color = Color.BLACK
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2f
+        for (card in cards) {
+            val path = Path().apply {
+                moveTo(card.x + 20f, card.y + card.height - 35f)
+                cubicTo(card.x + 50f, card.y + card.height - 80f, card.x + 80f,
+                    card.y + card.height + 5f, card.x + card.width - 20f, card.y + card.height - 45f)
+            }
+            canvas.drawPath(path, paint)
+        }
+    }
+
     private fun drawThreads(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot, emphasis: Boolean) {
         for (thread in scene.threads) {
             if (!RectF.intersects(thread.bounds, world)) continue
@@ -1472,6 +1633,21 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     private val outlineOccluders get() = rasterScratch.get().outlineOccluders
 
+    private fun drawNeckOutline(canvas: Canvas, path: Path, bounds: RectF, scene: BoardEngine.RenderSnapshot) {
+        val save = canvas.save()
+        val rect = RectF()
+        // Draw only the exposed bridge sides. Its closed end caps sit beneath
+        // antialiased card fills and otherwise bleed through as hairline seams.
+        for (card in scene.cardsByZ) {
+            card.rect(rect)
+            rect.inset(-(CARD_OUTLINE_WIDTH / 2f + 1f), -(CARD_OUTLINE_WIDTH / 2f + 1f))
+            if (RectF.intersects(rect, bounds)) canvas.clipOutRect(rect)
+        }
+        emphasisStrokePaint.color = CARD_OUTLINE_EMPHASIS_COLOR
+        canvas.drawPath(path, emphasisStrokePaint)
+        canvas.restoreToCount(save)
+    }
+
     
     private fun drawCardOutlines(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot) {
         outlineOccluders.rewind()
@@ -1483,6 +1659,15 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             if (!RectF.intersects(cardRect, world)) continue
             val save = canvas.save()
             if (!outlineOccluders.isEmpty) canvas.clipOutPath(outlineOccluders)
+            // Bridge footprints extend into their cards; clip each independently
+            // so overlapping paths keep their openings regardless of winding.
+            for (neck in scene.necks) {
+                if (RectF.intersects(neck.bounds, cardRect)) {
+                    val scratch = rasterScratch.get()
+                    scratch.outlineOpeningPaint.getFillPath(neck.path, scratch.outlineOpening)
+                    canvas.clipOutPath(scratch.outlineOpening)
+                }
+            }
             emphasisStrokePaint.color = CARD_OUTLINE_EMPHASIS_COLOR
             canvas.drawRoundRect(cardRect, CARD_RADIUS, CARD_RADIUS, emphasisStrokePaint)
             canvas.restoreToCount(save)

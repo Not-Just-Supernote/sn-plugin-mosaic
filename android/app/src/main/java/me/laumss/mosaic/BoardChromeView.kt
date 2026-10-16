@@ -111,6 +111,14 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
 
     var listener: Listener? = null
 
+    var onCardGrayTrialColor: ((Int, Int) -> Unit)? = null
+    var onOpenEinkLab: (() -> Unit)? = null
+    private val grayTrial = CardGrayTrialView(context).apply {
+        onColor = { color, brightPixels -> onCardGrayTrialColor?.invoke(color, brightPixels) }
+        onClosed = { listener?.onPenBlockChanged() }
+        addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> listener?.onPenBlockChanged() }
+    }
+
     private val density = resources.displayMetrics.density
     private fun dp(v: Float): Int = (v * density + 0.5f).toInt()
 
@@ -256,6 +264,10 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         
         
         val barH = dp(TOOLBAR_H_DP)
+        addView(grayTrial, LayoutParams(dp(360f), LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END).apply {
+            rightMargin = dp(12f)
+            bottomMargin = dp(12f)
+        })
         inkToolbarScroll.addView(inkToolbar, ViewGroup.LayoutParams(LayoutParams.WRAP_CONTENT, barH))
         
         val closeW = dp(TOOLBAR_CELL_W_DP * CLOSE_BUTTON_SCALE)
@@ -629,6 +641,17 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         for (button in listOf(translucentButton, lassoEditButton, lassoDeleteButton)) {
             toolsRow.addView(button, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48f)).apply { marginEnd = dp(10f) })
         }
+        toolsRow.addView(textButton("灰阶测试", 17f).apply {
+            setOnClickListener {
+                hideSwitcher()
+                grayTrial.start()
+                grayTrial.bringToFront()
+                listener?.onPenBlockChanged()
+            }
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48f)))
+        toolsRow.addView(textButton("墨水屏实验室", 17f).apply {
+            setOnClickListener { hideSwitcher(); grayTrial.close(); onOpenEinkLab?.invoke() }
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48f)))
         translucentLevelGroup.addView(translucentSlider, LinearLayout.LayoutParams(dp(180f), dp(48f)))
         translucentLevelGroup.addView(translucentLevelText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48f)))
         toolsRow.addView(
@@ -1039,7 +1062,21 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
 
     
     fun consumesPoint(xPx: Float, yPx: Float): Boolean =
-        blocksPen || yPx < toolbarHeightPx() || regionJumpContains(xPx, yPx) || touchToggleContains(xPx, yPx)
+        blocksPen || yPx < toolbarHeightPx() || regionJumpContains(xPx, yPx) || touchToggleContains(xPx, yPx) ||
+            grayTrialBounds()?.contains(xPx.toInt(), yPx.toInt()) == true
+
+    fun grayTrialBounds(): android.graphics.Rect? =
+        if (grayTrial.visibility != View.VISIBLE || grayTrial.width == 0) null
+        else android.graphics.Rect(grayTrial.left, grayTrial.top, grayTrial.right, grayTrial.bottom)
+
+    fun cleanupExclusionBounds(): List<android.graphics.Rect> = buildList {
+        if (toolbarHeightPx() > 0) add(android.graphics.Rect(0, 0, width, toolbarHeightPx()))
+        grayTrialBounds()?.let { add(it) }
+        touchToggleBounds()?.let { add(it) }
+        for (view in regionJumpViews.values) if (view.visibility == View.VISIBLE) {
+            add(android.graphics.Rect(view.left, view.top, view.right, view.bottom))
+        }
+    }
 
     private fun touchToggleContains(xPx: Float, yPx: Float): Boolean =
         touchToggle.visibility == View.VISIBLE &&

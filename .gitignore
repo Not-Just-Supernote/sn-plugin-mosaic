@@ -10,3 +10,4 @@ android/local.properties
 !.env.example
 React/
 .code/
+/android/app/.cxx/

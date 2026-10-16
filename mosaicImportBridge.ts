@@ -1,6 +1,7 @@
 import RNFS from 'react-native-fs';
-import { PluginManager } from 'sn-plugin-lib';
+import { NativeUIUtils, PluginManager } from 'sn-plugin-lib';
 import { NativeModules } from 'react-native';
+import { t } from './i18n';
 
 
 export const MOSAIC_INBOX_DIR = '/sdcard/EXPORT/mosaic/inbox';
@@ -74,6 +75,7 @@ export type PendingMosaicImageCard = {
   title: string;
   createdAt?: number;
   source?: string;
+  reportResult?: boolean;
 };
 
 export type PendingMosaicImageCardClaim = {
@@ -143,6 +145,7 @@ export async function claimPendingMosaicImageCard(): Promise<PendingMosaicImageC
           title: typeof parsed.title === 'string' ? parsed.title : '',
           createdAt: typeof parsed.createdAt === 'number' ? parsed.createdAt : undefined,
           source: typeof parsed.source === 'string' ? parsed.source : undefined,
+          reportResult: parsed.reportResult === true,
         },
         claimPath,
         originalPath: entry.path,
@@ -203,6 +206,11 @@ export async function completePendingMosaicImageCard(
       
     }
   }
+  const notePath = claim.request.notePath;
+  if (notePath.startsWith(`${MOSAIC_INBOX_DIR}/inkling-note-`) && notePath.endsWith('.pages')) {
+    const prepared = notePath.replace(/\.pages$/, '.prepared');
+    try { if (await RNFS.exists(prepared)) await RNFS.unlink(prepared); } catch { /* Retain for later cleanup. */ }
+  }
 }
 
 export async function releasePendingMosaicImageCard(
@@ -215,4 +223,26 @@ export async function releasePendingMosaicImageCard(
   } catch {
     
   }
+}
+
+const reportedNoteImports = new Set<string>();
+
+/** 最终结果由发起方统一呈现；旧请求在 Mosaic 中显示一次结果对话框。 */
+export async function reportNoteImportResult(
+  claim: PendingMosaicImageCardClaim,
+  success: boolean,
+): Promise<void> {
+  if (reportedNoteImports.has(claim.request.id)) return;
+  if (claim.request.reportResult) {
+    const resultPath = claim.originalPath.replace(/\.json$/, '.result');
+    const tempPath = `${resultPath}.tmp`;
+    await RNFS.writeFile(tempPath, JSON.stringify({ id: claim.request.id, success }), 'utf8');
+    await RNFS.moveFile(tempPath, resultPath);
+    reportedNoteImports.add(claim.request.id);
+    return;
+  }
+  reportedNoteImports.add(claim.request.id);
+  await NativeUIUtils.showRattaDialog(
+    t(success ? 'noteImportComplete' : 'noteImportFailed'), '', t('close'), false,
+  );
 }

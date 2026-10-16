@@ -58,7 +58,7 @@ class ScrollingDocument(
         }
 
         // Pulls the ink up to LEADING_MARGIN and shrinks every blank gap taller than MAX_EMPTY_GAP to COLLAPSED_GAP.
-        fun compact(strokes: List<BoardEngine.StrokeRec>): List<BoardEngine.StrokeRec> {
+        fun compact(strokes: List<BoardEngine.StrokeRec>, owned: Boolean = false): List<BoardEngine.StrokeRec> {
             if (strokes.isEmpty()) return strokes
             val sorted = strokes.sortedBy { it.bounds.top }
             val shiftById = HashMap<String, Float>()
@@ -78,6 +78,13 @@ class ScrollingDocument(
                 runningMaxBottom = if (runningMaxBottom.isNaN()) bottom else maxOf(runningMaxBottom, bottom)
             }
             if (shiftById.isEmpty()) return strokes
+            if (owned) {
+                for (stroke in strokes) shiftById[stroke.id]?.let { shift ->
+                    for (i in 1 until stroke.points.size step 2) stroke.points[i] -= shift
+                    stroke.bounds.offset(0f, -shift)
+                }
+                return strokes
+            }
             return strokes.map { s -> shiftById[s.id]?.let { s.translated(0f, -it, null, null) } ?: s }
         }
     }

@@ -13,25 +13,22 @@ class BoardPresentation(
     private val settleMs: Long,
 ) {
     
-    // motion：画面跟着手移动的手势，按系统 Note 的做法开关 regal（见 EinkRegal）。
-    // whiteCards：A2 期间灰卡临时画成白底；只切 A2、不改样子的原因不设。
+    // motion：画面跟着手移动的手势，选择运动配方；Regal 由宿主管理。
+    // 卡片在交互期间保留原来的底色。
     enum class Reason(
         val einkMode: Int?, val flat: Boolean, val suspendFog: Boolean,
         val motion: Boolean = false, val whiteCards: Boolean = false,
     ) {
         
         
-        PAN_ZOOM(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true, motion = true, whiteCards = true),
+        PAN_ZOOM(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true, motion = true),
 
         // Notipal 浮窗在白板上被拖动：与双指平移相同的显示，被浮窗让出的区域按 A2 快刷。
-        INKLING_DRAG(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true, whiteCards = true),
+        INKLING_DRAG(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true),
         
-        // 拖动、改尺寸、旋转不换样，原位置由控制器从内容层拿掉，只看叠加层的预览。
-        TRANSFORM(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false, motion = true),
+        // 拖动、改尺寸和旋转共用 A2 与运动配方，预览保留字迹。
+        TRANSFORM(MosaicEinkRefreshModule.MODE_A2, flat = false, suspendFog = false, motion = true),
 
-        // 卡片改尺寸（单卡，或含卡片的选中）：只切 A2，不改任何卡片的样子；只有笔迹的选中改尺寸走 TRANSFORM。
-        CARD_RESIZE(MosaicEinkRefreshModule.MODE_A2, flat = false, suspendFog = false, motion = true),
-        
         TOOL(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false),
         
         LASSO(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false),
@@ -50,6 +47,7 @@ class BoardPresentation(
         val hideTemplate: Boolean,
         val suspendFog: Boolean,
         val einkMode: Int?,
+        val movingCards: Boolean = false,
     ) {
         companion object { val IDLE = State(false, false, false, false, null) }
     }
@@ -72,15 +70,12 @@ class BoardPresentation(
     fun acquire(reason: Reason) {
         handler.removeCallbacks(settleTask)
         lingering.remove(reason)
-        // 先开 regal，再切模式和样子：从静止到移动的这一帧由 regal 清残影。
-        if (reason.motion && reason !in active) EinkRegal.begin(content.context, reason.name)
         if (active.add(reason)) commit("acquire:$reason")
         if (lingering.isNotEmpty()) handler.postDelayed(settleTask, settleMs)
     }
 
     fun release(reason: Reason, linger: Boolean = true) {
         val wasActive = active.remove(reason)
-        if (wasActive && reason.motion) EinkRegal.end(content.context, reason.name)
         if (linger) {
             
             if (!wasActive) return
@@ -100,16 +95,8 @@ class BoardPresentation(
     
     fun refresh(why: String) = commit("refresh:$why")
 
-    // 手势真正开始移动时调用。换样的图块还没上屏时先不关 regal，等下一次移动再试。
-    fun moved(reason: Reason) {
-        if (!reason.motion || reason !in active || content.isLookPending) return
-        EinkRegal.moved(content.context, reason.name)
-    }
-
-    
     fun reset(why: String) {
         handler.removeCallbacks(settleTask)
-        EinkRegal.restore(content.context, why)
         active.clear()
         lingering.clear()
         commit("reset:$why", force = true)
@@ -133,7 +120,8 @@ class BoardPresentation(
             val m = r.einkMode ?: continue
             if (eink == null || MosaicEinkRefreshModule.priority(m) > MosaicEinkRefreshModule.priority(eink)) eink = m
         }
-        return State(flat, white, flat && isBoardSurface(), fog, eink)
+        val moving = isBoardSurface() && (active + lingering).any { it.motion || it == Reason.INKLING_DRAG }
+        return State(flat, white, flat && isBoardSurface(), fog, eink, moving)
     }
 
     private fun commit(why: String, force: Boolean = false) {
@@ -142,30 +130,30 @@ class BoardPresentation(
         if (next == prev && !force) return
         applied = next
         val looksChanged = force || next.flatCards != prev.flatCards || next.whiteCards != prev.whiteCards ||
-            next.hideTemplate != prev.hideTemplate
+            next.hideTemplate != prev.hideTemplate || next.movingCards != prev.movingCards
         val einkChanged = force || next.einkMode != prev.einkMode
         
         val mode = next.einkMode
-        if (einkChanged && mode != null) MosaicEinkRefreshModule.applyNative(mode, einkOwner)
-        val leavingWhite = looksChanged && prev.whiteCards && !next.whiteCards && !force
-        if (looksChanged) content.setGesturePresentation(next.flatCards, next.whiteCards, next.hideTemplate)
-        if (einkChanged) resetGen++
-        if (einkChanged && next.einkMode == null) {
-            if (leavingWhite) {
-                
-                
+        if (einkChanged || next.movingCards != prev.movingCards) resetGen++
+        val leavingMotion = prev.movingCards && !next.movingCards
+        // Release A2 while the BW frame is still displayed; the next static
+        // DD/E0 frame is then drawn with the host's restored mode.
+        if (leavingMotion) {
+            if (mode == null) resetEink() else MosaicEinkRefreshModule.applyNative(mode, einkOwner)
+        }
+        if (looksChanged) content.setGesturePresentation(next.flatCards, next.whiteCards, next.hideTemplate, next.movingCards)
+        if (einkChanged && !leavingMotion) {
+            if (mode != null && next.movingCards && !prev.movingCards) {
+                // First present the BW recipe under the host mode, then enter A2.
                 val gen = resetGen
-                val resetOnce = Runnable {
-                    if (gen != resetGen || applied.einkMode != null) return@Runnable
-                    resetGen++
-                    resetEink()
-                    Log.i(TAG, "eink reset after looks restored")
-                }
-                content.runWhenSettled(resetOnce)
-                handler.postDelayed(resetOnce, RESET_DEFER_MAX_MS)
-            } else {
-                resetEink()
-            }
+                content.runWhenGestureFrameDrawn(Runnable {
+                    if (gen == resetGen && applied.einkMode == mode && applied.movingCards) {
+                        MosaicEinkRefreshModule.applyNative(mode, einkOwner)
+                        Log.i(TAG, "A2 after moving recipe ready")
+                    }
+                })
+            } else if (mode == null) resetEink()
+            else MosaicEinkRefreshModule.applyNative(mode, einkOwner)
         }
         if (force || next.suspendFog != prev.suspendFog) content.setSuspendTranslucent(next.suspendFog)
         if (looksChanged) onStateChanged?.invoke(next)
@@ -179,7 +167,5 @@ class BoardPresentation(
 
     private companion object {
         const val TAG = "MosaicPresentation"
-        
-        const val RESET_DEFER_MAX_MS = 400L
     }
 }

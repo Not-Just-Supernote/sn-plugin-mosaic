@@ -155,7 +155,7 @@ class MosaicBoardEngineModule(
     
     @ReactMethod
     fun importNoteCard(viewTag: Int, path: String, title: String, promise: Promise) {
-        withView(viewTag, onMissing = { promise.resolve(false) }) { view ->
+        withView(viewTag, onMissing = { promise.resolve(false) }, waitForBoard = false) { view ->
             view.controller.importNoteCard(path, title) { result ->
                 result.fold({ promise.resolve(it) }, { promise.reject("NOTE_IMPORT", it.message, it) })
             }
@@ -177,10 +177,12 @@ class MosaicBoardEngineModule(
     @ReactMethod
     fun removeListeners(count: Int) = Unit
 
-    private fun withView(viewTag: Int, onMissing: (() -> Unit)? = null, block: (MosaicBoardView) -> Unit) {
+    private fun withView(viewTag: Int, onMissing: (() -> Unit)? = null, waitForBoard: Boolean = true, block: (MosaicBoardView) -> Unit) {
         main.post {
             val board = resolveView(viewTag)
-            if (board == null) onMissing?.invoke() else WhiteboardSceneGate.dispatch { block(board) }
+            if (board == null) onMissing?.invoke()
+            else if (waitForBoard) WhiteboardSceneGate.dispatch { block(board) }
+            else block(board)
         }
     }
 

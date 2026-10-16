@@ -48,13 +48,25 @@ object EinkRegal {
         send(context, true, "restore:$why")
     }
 
-    private fun send(context: Context, enable: Boolean, tag: String) {
+    fun setForLab(context: Context, enabled: Boolean): Boolean {
+        closedForMove = !enabled
+        val hostApplied = viaHost(context, enabled, "lab")
+        // HandWriteClient caches regalStatus. Reassert the HWC command after a mode
+        // transition as well, so this experiment controls the actual hardware state.
+        val hardwareApplied = viaEink(context, enabled)
+        val applied = hostApplied || hardwareApplied
+        if (applied) Log.i(TAG, "regal=${if (enabled) "open" else "close"} lab host=$hostApplied hardware=$hardwareApplied")
+        return applied
+    }
+
+    private fun send(context: Context, enable: Boolean, tag: String): Boolean {
         val via = when {
             viaHost(context, enable, tag) -> "host"
             viaEink(context, enable) -> "eink"
-            else -> return
+            else -> return false
         }
         Log.i(TAG, "regal=${if (enable) "open" else "close"} $tag via=$via")
+        return true
     }
 
     private fun viaHost(context: Context, enable: Boolean, tag: String): Boolean {

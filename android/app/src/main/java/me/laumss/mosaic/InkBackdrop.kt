@@ -30,11 +30,37 @@ object InkBackdrop {
     }
 
     private fun cardDark(space: String, override: Boolean?): Boolean {
+        if (space.startsWith("connection:")) return BoardEngine.necks[space.substring(11)]?.dark == true
         if (!space.startsWith("card:")) return false
         return override ?: (BoardEngine.cards[space.substring(5)]?.colored == true)
     }
 
     
+    /** World-space background hit; use the filled neck, including its curved edges. */
+    fun darkAt(x: Float, y: Float): Boolean = synchronized(BoardEngine.lock) {
+        val top = BoardGeometry.topCardAt(BoardEngine.cardsByZ, x, y)
+        if (top != null) return@synchronized top.colored
+        BoardEngine.necks.values.any { it.dark && contains(it.path, it.bounds, x, y) }
+    }
+
+    private val neckHitRegions = java.util.WeakHashMap<android.graphics.Path, android.graphics.Region>()
+
+    private fun contains(path: android.graphics.Path, bounds: RectF, x: Float, y: Float): Boolean {
+        val scale = 8f
+        val region = neckHitRegions.getOrPut(path) {
+            val matrix = android.graphics.Matrix().apply { setScale(scale, scale) }
+            val scaled = android.graphics.Path().also { path.transform(matrix, it) }
+            val clip = android.graphics.Region(
+                kotlin.math.floor(bounds.left * scale).toInt() - 1,
+                kotlin.math.floor(bounds.top * scale).toInt() - 1,
+                kotlin.math.ceil(bounds.right * scale).toInt() + 1,
+                kotlin.math.ceil(bounds.bottom * scale).toInt() + 1,
+            )
+            android.graphics.Region().apply { setPath(scaled, clip) }
+        }
+        return region.contains(kotlin.math.floor(x * scale).toInt(), kotlin.math.floor(y * scale).toInt())
+    }
+
     fun resolve(
         s: BoardEngine.StrokeRec,
         cardDarkOverride: Boolean? = null,
@@ -162,6 +188,7 @@ object InkBackdrop {
         val candidates = LinkedHashMap<String, BoardEngine.StrokeRec>()
         synchronized(BoardEngine.lock) {
             val markerAreas = ArrayList<Pair<String, RectF>>()
+            var connectionsChanged = false
             for (diff in change.diffs) {
                 when (diff) {
                     is BoardHistory.Diff.Stroke -> {
@@ -174,7 +201,9 @@ object InkBackdrop {
                             if (isMarker(before)) markerAreas.add(before.space to markerBounds(before))
                         }
                     }
+                    is BoardHistory.Diff.Connection -> connectionsChanged = true
                     is BoardHistory.Diff.Card -> {
+                        connectionsChanged = true
                         val before = diff.before
                         val after = diff.after ?: continue
                         if (before == null || before.colored != after.colored) {
@@ -183,6 +212,10 @@ object InkBackdrop {
                     }
                     else -> {}
                 }
+            }
+            if (connectionsChanged) {
+                BoardEngine.strokes.values.filter { it.connectionId != null && isAutoInk(it) }
+                    .forEach { candidates[it.id] = it }
             }
             for ((space, area) in markerAreas) {
                 for (s in strokesIn(space)) {

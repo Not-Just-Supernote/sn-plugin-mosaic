@@ -54,6 +54,7 @@ import {
   ensureMosaicImportPermissions,
   ensureSyncNetworkPermission,
   releasePendingMosaicImageCard,
+  reportNoteImportResult,
 } from './mosaicImportBridge';
 import {
   canvasDataToBoard,
@@ -872,7 +873,7 @@ export default function App(): React.JSX.Element {
           committed = true;
           await completePendingMosaicImageCard(claim);
           console.log(`[MosaicImport] note import dropped request=${claim.request.id}: ${String(error)}`);
-          ToastAndroid.show(t('noteImportFailed'), ToastAndroid.LONG);
+          await reportNoteImportResult(claim, false);
           return;
         }
         if (!accepted) {
@@ -884,7 +885,7 @@ export default function App(): React.JSX.Element {
         committed = true;
         await completePendingMosaicImageCard(claim);
         console.log(`[MosaicImport] inserted note card request=${claim.request.id}`);
-        ToastAndroid.show(t('noteImportComplete'), ToastAndroid.SHORT);
+        await reportNoteImportResult(claim, true);
         return;
       }
       if (!imageAvailable()) throw new Error('MosaicImage native module unavailable');
@@ -926,7 +927,16 @@ export default function App(): React.JSX.Element {
       await completePendingMosaicImageCard(claim);
       console.log(`[MosaicImport] inserted card=${created.id} request=${claim.request.id}`);
     } catch (error) {
-      if (claim !== null && !committed) await releasePendingMosaicImageCard(claim);
+      if (claim !== null && !committed) {
+        if (claim.request.type === 'note') {
+          await completePendingMosaicImageCard(claim);
+          await reportNoteImportResult(claim, false).catch(reportError => {
+            console.log(`[MosaicImport] result write failed: ${String(reportError)}`);
+          });
+        } else {
+          await releasePendingMosaicImageCard(claim);
+        }
+      }
       console.log(`[MosaicImport] failed: ${String(error)}`);
     } finally {
       importBusyRef.current = false;

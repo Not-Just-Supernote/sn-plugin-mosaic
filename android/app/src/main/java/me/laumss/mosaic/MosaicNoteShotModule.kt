@@ -124,6 +124,7 @@ class MosaicNoteShotModule(
     }
 
     private data class TapDown(
+        val notePath: String,
         val x: Float,
         val y: Float,
         val toolType: Int,
@@ -155,6 +156,7 @@ class MosaicNoteShotModule(
     private val tapLock = Any()
     private val pendingLock = Any()
     @Volatile private var activeQueryToken = 0L
+    @Volatile private var activeQueryPath: String? = null
     private var tapDown: TapDown? = null
     private var pendingRestoreJson: String? = null
     private var inputReader: InputReader? = null
@@ -178,6 +180,7 @@ class MosaicNoteShotModule(
     }
 
     override fun invalidate() {
+        cancelActiveQuery("module-invalidated")
         inputReader?.stop()
         inputReader = null
         if (activeInstance === this) activeInstance = null
@@ -216,19 +219,16 @@ class MosaicNoteShotModule(
     }
 
     private fun onRawInput(action: Int, x: Float, y: Float, toolType: Int, pointerCount: Int) {
-        if (
-            boardVisible ||
-            !isNotePageForeground() ||
-            currentHostNotePath() == null ||
-            toolType != TOOL_TYPE_FINGER
-        ) {
+        val context = tapContext()
+        if (!context.permits() || toolType != TOOL_TYPE_FINGER) {
             synchronized(tapLock) { tapDown = null }
+            if (!context.permits()) cancelActiveQuery("note-context-blocked")
             return
         }
         val now = SystemClock.uptimeMillis()
         synchronized(tapLock) {
             when (action) {
-                0 -> tapDown = if (pointerCount == 1) TapDown(x, y, toolType, now) else null
+                0 -> tapDown = if (pointerCount == 1) TapDown(context.path!!, x, y, toolType, now) else null
                 2 -> tapDown?.let { down ->
                     if (pointerCount != 1 || down.toolType != toolType) {
                         tapDown = null
@@ -241,6 +241,7 @@ class MosaicNoteShotModule(
                     val down = tapDown
                     tapDown = null
                     if (down == null || pointerCount != 1 || down.toolType != toolType) return
+                    if (!context.permits(down.notePath)) return
                     val distance = maxOf(down.maxDistance, hypot(x - down.x, y - down.y))
                     val duration = now - down.at
                     if (duration <= TAP_MAX_DURATION_MS && distance <= TAP_MAX_DISTANCE_PX) {
@@ -254,6 +255,13 @@ class MosaicNoteShotModule(
 
     private fun pluginApp(): PluginAppAPI? =
         reactApplicationContext.getNativeModule(PluginModule::class.java)?.pluginApp
+
+    private fun tapContext(): NoteTapContext {
+        val covered = boardVisible || NoteTapHostWindows.blocksNoteTap()
+        return NoteTapContext(
+            currentHostNotePath(), !covered && isNotePageForeground(), boardVisible, covered,
+        )
+    }
 
     @Suppress("DEPRECATION")
     private fun isNotePageForeground(): Boolean = try {
@@ -269,9 +277,10 @@ class MosaicNoteShotModule(
 
     
     private fun inspectTap(x: Float, y: Float) {
-        if (boardVisible) return
-        val filePath = currentHostNotePath() ?: return
-        val token = beginQuery() ?: return
+        val context = tapContext()
+        if (!context.permits()) return
+        val filePath = context.path ?: return
+        val token = beginQuery(filePath) ?: return
         val app = pluginApp()
         val host = HostCommonAPI.getInstance()
         if (app == null || host == null) {
@@ -293,22 +302,24 @@ class MosaicNoteShotModule(
                     return@pageSizeCallback
                 }
                 host.getElements(app, page, filePath) elementsCallback@{ elementsResponse ->
-                    if (!queryIsActive(token)) return@elementsCallback
                     val cachePath = if (elementsResponse.isSuccess) elementsResponse.getResult(String::class.java) else null
                     if (cachePath.isNullOrEmpty()) {
                         finishQuery(token, "elements unavailable page=$page")
                         return@elementsCallback
                     }
                     val elements = try {
-                        app.readElementFromFile(cachePath)
+                        app.readElementFromFile(cachePath).orEmpty()
                     } catch (error: Throwable) {
                         Log.w(TAG, "read elements failed: $error")
                         emptyList()
                     }
                     val hit = try {
+                        // A request already sent to Note can finish after a window
+                        // opens. Drain its temporary file/cache, then discard the hit.
+                        if (!queryIsActive(token)) return@elementsCallback
                         hitTest(app, elements, pageSize, currentDisplaySize(), x, y, page)
                     } finally {
-                        recycleElements(elements)
+                        recycleElements(app, elements)
                     }
                     if (hit == null) {
                         finishQuery(token, "miss page=$page tap=(${x.toInt()},${y.toInt()})")
@@ -322,10 +333,10 @@ class MosaicNoteShotModule(
                         .put("adopt", hit.adopt)
                     if (hit.fingerprint.isNotEmpty()) target.put("f", hit.fingerprint)
                     hit.region?.let { target.put("r", it) }
-                    synchronized(pendingLock) { pendingRestoreJson = target.toString() }
                     if (!finishQuery(token, "hit id=${hit.id} page=$page num=${hit.num} adopt=${hit.adopt}")) return@elementsCallback
                     UiThreadUtil.runOnUiThread {
-                        if (!boardVisible && isNotePageForeground()) {
+                        if (tapContext().permits(filePath)) {
+                            synchronized(pendingLock) { pendingRestoreJson = target.toString() }
                             app.showPluginView()
                             mainHandler.postDelayed({ emitRestoreSignal() }, RESTORE_EMIT_DELAY_MS)
                         } else {
@@ -487,24 +498,36 @@ class MosaicNoteShotModule(
         return point
     }
 
-    private fun beginQuery(): Long? {
+    @Synchronized
+    private fun beginQuery(filePath: String): Long? {
         
         if (queryBusy.get()) cancelActiveQuery("tap-supersedes")
         if (!queryBusy.compareAndSet(false, true)) return null
         val token = querySequence.incrementAndGet()
+        activeQueryPath = filePath
         activeQueryToken = token
         mainHandler.postDelayed({
-            if (activeQueryToken == token && queryBusy.compareAndSet(true, false)) {
-                activeQueryToken = 0L
-                Log.w(TAG, "inspect timeout token=$token")
+            synchronized(this) {
+                if (activeQueryToken == token && queryBusy.compareAndSet(true, false)) {
+                    activeQueryToken = 0L
+                    Log.w(TAG, "inspect timeout token=$token")
+                }
             }
         }, QUERY_TIMEOUT_MS)
         return token
     }
 
-    private fun queryIsActive(token: Long): Boolean =
-        queryBusy.get() && activeQueryToken == token
+    @Synchronized
+    private fun queryIsActive(token: Long): Boolean {
+        if (!queryBusy.get() || activeQueryToken != token) return false
+        if (!tapContext().permits(activeQueryPath)) {
+            cancelActiveQuery("note-context-changed")
+            return false
+        }
+        return true
+    }
 
+    @Synchronized
     private fun cancelActiveQuery(reason: String) {
         val token = activeQueryToken
         if (token == 0L) return
@@ -513,6 +536,7 @@ class MosaicNoteShotModule(
         Log.i(TAG, "inspect cancelled token=$token reason=$reason")
     }
 
+    @Synchronized
     private fun finishQuery(token: Long, message: String): Boolean {
         if (!queryIsActive(token)) return false
         activeQueryToken = 0L
@@ -521,11 +545,13 @@ class MosaicNoteShotModule(
         return true
     }
 
-    private fun recycleElements(elements: List<Element>) {
+    private fun recycleElements(app: PluginAppAPI, elements: List<Element>) {
         for (element in elements) {
             try {
+                element.uuid?.let { app.removeTrail(it) }
                 element.recycle()
-            } catch (_: Throwable) {
+            } catch (error: Throwable) {
+                Log.w(TAG, "note tap element release failed: ${error.message}")
             }
         }
     }
