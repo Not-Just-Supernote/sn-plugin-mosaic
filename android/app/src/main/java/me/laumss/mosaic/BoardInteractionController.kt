@@ -14,10 +14,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import com.facebook.react.bridge.WritableMap
-import java.io.File
 import java.util.UUID
-import java.util.concurrent.Future
-import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
@@ -32,11 +29,11 @@ class BoardInteractionController(
     internal val emitter: BoardCommandEmitter,
 ) : InputRouter.Sink, BoardChromeView.Listener {
     companion object {
-        private const val TAG = "MosaicInteraction"
+        const val TAG = "MosaicInteraction"
         private const val TAG_PEN = "MosaicPen"
         private const val TAG_FINGER = "MosaicFinger"
         private const val TAG_PAN = "MosaicPan"
-        private const val TAG_LASSO = "MosaicLasso"
+        const val TAG_LASSO = "MosaicLasso"
         private const val TAG_TOOL = "MosaicTool"
         private const val TAG_TWO = "MosaicTwoFinger"
 
@@ -87,10 +84,6 @@ class BoardInteractionController(
         private const val NOTE_HEADER_PENDING = "#note-header"
         private const val NOTE_LINK_PENDING = "#note-link:"
 
-        private val IMPORT_CARD_WIDTHS = floatArrayOf(BoardGeometry.DEFAULT_CARD_WIDTH, 480f, 640f, 800f, 960f)
-
-        private const val IMPORT_CARD_MAX_ASPECT = 1.6f
-
         const val LASSO_ACTION_TAP_SLOP_DP = 12f
 
         const val TWO_FINGER_TAP_MAX_MS = 300L
@@ -101,10 +94,7 @@ class BoardInteractionController(
         const val LASSO_BOUNDS_PAD = 10f
         private const val EINK_OWNER = "gesture"
         private const val NOTE_SCROLL_EINK_OWNER = "note-scroll"
-        private const val NOTE_SCROLL_SETTLE_MS = 400L
-        private const val INKLING_DRAG_EINK_OWNER = "inkling-drag"
-        // 拖动结束的广播丢失时（Notipal 被杀等）也要退出拖动显示。
-        private const val INKLING_DRAG_MAX_MS = 15_000L
+        const val NOTE_SCROLL_SETTLE_MS = 400L
 
         const val GESTURE_SETTLE_MS = 600L
 
@@ -160,11 +150,6 @@ class BoardInteractionController(
 
     internal val density: Float get() = host.resources.displayMetrics.density.coerceAtLeast(1f)
 
-    private val clipboardIo = ClipboardStrokeIo()
-    private val clipboardPasteGeneration = AtomicLong(0L)
-    private val clipboardExportGeneration = AtomicLong(0L)
-    private var clipboardPasteTask: Future<*>? = null
-
     private val edgeSwipeStartPx: Float get() = EDGE_SWIPE_START_DP * density
     private val edgeSwipeZonePx: Float get() = EDGE_SWIPE_ZONE_DP * density
 
@@ -184,8 +169,8 @@ class BoardInteractionController(
     internal var surface: BoardSurface = whiteboard
 
     internal var surfaceSwitching = false
-    private val noteController = NoteController()
-    private var notesDirectory: String = ""
+    internal val noteController = NoteController()
+    internal var notesDirectory: String = ""
 
     internal class SuspendedBoard(val scene: BoardEngine.SceneSnapshot, val history: BoardHistory, val lasso: LassoSelection?)
 
@@ -195,7 +180,7 @@ class BoardInteractionController(
     private var currentNoteHeaderPlaceholder = false
     private var currentNoteHeaderHeight = 0f
     // View scale of the open note page; the header is laid out at screen size inside it.
-    private var notePageScale = 1f
+    internal var notePageScale = 1f
 
     private var noteEntryCard: BoardEngine.CardRec? = null
 
@@ -217,50 +202,6 @@ class BoardInteractionController(
     // ── Notipal 浮窗拖动 ──
     // 与双指平移一致：白板上走 PAN_ZOOM 同款显示（A2 + 灰卡临时白底 + flat），
     // 笔记卡片里只切 A2 刷新、不改卡片显示；松手后按各自的 settle 恢复。
-
-    private var inklingDragActive = false
-    private var inklingDragOnBoard = false
-    private var inklingDragNoteModeHeld = false
-    private val inklingDragTimeoutTask = Runnable { setInklingOverlayDrag(false, "timeout") }
-
-    private val inklingDragNoteResetTask = Runnable {
-        inklingDragNoteModeHeld = false
-        MosaicEinkRefreshModule.resetNative(INKLING_DRAG_EINK_OWNER)
-    }
-
-    fun setInklingOverlayDrag(active: Boolean, reason: String) {
-        handler.removeCallbacks(inklingDragTimeoutTask)
-        if (active) handler.postDelayed(inklingDragTimeoutTask, INKLING_DRAG_MAX_MS)
-        if (active == inklingDragActive) return
-        inklingDragActive = active
-        if (active) {
-            inklingDragOnBoard = surface.showsBoardChrome
-            if (inklingDragOnBoard) {
-                presentation.acquire(BoardPresentation.Reason.INKLING_DRAG)
-            } else {
-                handler.removeCallbacks(inklingDragNoteResetTask)
-                inklingDragNoteModeHeld = true
-                MosaicEinkRefreshModule.applyNative(MosaicEinkRefreshModule.MODE_A2, INKLING_DRAG_EINK_OWNER)
-            }
-        } else if (inklingDragOnBoard) {
-            presentation.release(BoardPresentation.Reason.INKLING_DRAG)
-        } else {
-            handler.removeCallbacks(inklingDragNoteResetTask)
-            handler.postDelayed(inklingDragNoteResetTask, NOTE_SCROLL_SETTLE_MS)
-        }
-        Log.i(TAG, "inkling overlay drag active=$active board=$inklingDragOnBoard reason=$reason")
-    }
-
-    private fun resetInklingOverlayDrag() {
-        handler.removeCallbacks(inklingDragTimeoutTask)
-        handler.removeCallbacks(inklingDragNoteResetTask)
-        if (inklingDragNoteModeHeld) {
-            inklingDragNoteModeHeld = false
-            MosaicEinkRefreshModule.resetNative(INKLING_DRAG_EINK_OWNER)
-        }
-        inklingDragActive = false
-        inklingDragOnBoard = false
-    }
 
     fun setNotesDirectory(path: String) {
         notesDirectory = path
@@ -349,7 +290,7 @@ class BoardInteractionController(
     private fun enterSurface(next: BoardSurface, scene: BoardEngine.SceneSnapshot) {
         cancelCardCleanup("surface-change")
         if (surface !== next) resetNoteScrollMode()
-        if (surface !== next) invalidateClipboardWork("surface:${next.name}")
+        if (surface !== next) inkling.invalidateClipboardWork("surface:${next.name}")
         surface = next
 
         NoteLinks.setActive(next.showsBoardChrome)
@@ -381,7 +322,7 @@ class BoardInteractionController(
     private fun openNote(ref: String?) {
         if (suspendedBoard != null || surfaceSwitching || ref.isNullOrBlank() || !ref.matches(Regex("note-[a-zA-Z0-9-]+")) || notesDirectory.isBlank()) return
         val sourceCard = synchronized(BoardEngine.lock) { BoardEngine.cards.values.firstOrNull { it.noteRef == ref } } ?: return
-        invalidateClipboardWork("open-note")
+        inkling.invalidateClipboardWork("open-note")
         val suspended = SuspendedBoard(BoardEngine.snapshotScene(), history, lasso)
         surfaceSwitching = true
         WhiteboardSceneGate.hold()
@@ -410,7 +351,7 @@ class BoardInteractionController(
     private fun closeNote() {
         val suspended = suspendedBoard ?: return
         if (surfaceSwitching) return
-        invalidateClipboardWork("close-note")
+        inkling.invalidateClipboardWork("close-note")
         surfaceSwitching = true
         closeCardEditor()
         cancelActiveInteractions("note-close")
@@ -502,7 +443,7 @@ class BoardInteractionController(
         return sel.strokeIds.all { BoardEngine.strokes[it]?.cardId == id }
     }
 
-    private fun selectSingleCard(card: BoardEngine.CardRec) {
+    internal fun selectSingleCard(card: BoardEngine.CardRec) {
         val frame = card.rect(RectF()).apply { inset(-LASSO_BOUNDS_PAD, -LASSO_BOUNDS_PAD) }
         setLasso(LassoSelection(frame, listOf(card.id), emptyList()))
     }
@@ -757,15 +698,15 @@ class BoardInteractionController(
     private var launcherPullStartY = Float.NaN
     private var panZoomArmed = false
 
-    private val presentation by lazy {
+    internal val presentation by lazy {
         BoardPresentation(handler, content, { surface.showsBoardChrome }, EINK_OWNER, GESTURE_SETTLE_MS).also {
             it.onStateChanged = { if (penHovering && !penContact) reevaluateTrailColor("presentation") }
         }
     }
 
     private val viewWorldRect = RectF()
-    private var viewOffsetX = 0
-    private var viewOffsetY = 0
+    internal var viewOffsetX = 0
+    internal var viewOffsetY = 0
     private val tmpLoc = IntArray(2)
 
     fun attach() {
@@ -788,7 +729,7 @@ class BoardInteractionController(
 
         applyTemplateForSurface(surface, if (surface.showsBoardChrome) null else noteController.document?.ref)
 
-        exportLassoStrokes(null)
+        inkling.exportLassoStrokes(null)
 
         if (MosaicSession.savedNoteRef(host.context) != null) {
             content.setHoldPaint(true)
@@ -821,7 +762,7 @@ class BoardInteractionController(
         releasePaintHold("detach")
         noteShots.reset()
 
-        exportLassoStrokes(null)
+        inkling.exportLassoStrokes(null)
         suspendedBoard?.let { suspended ->
 
             noteController.flush(false) { result -> result.onFailure { Log.e(TAG, "note detach save failed", it) } }
@@ -856,7 +797,7 @@ class BoardInteractionController(
         content.setGestureThrottle(false)
         overlay.clearAll()
         content.clearSettleWaiters()
-        resetInklingOverlayDrag()
+        inkling.resetOverlayDrag()
         presentation.reset("detach")
         handler.removeCallbacksAndMessages(null)
     }
@@ -907,9 +848,9 @@ class BoardInteractionController(
         restoreSessionNote()
     }
 
-    private fun worldX(px: Float): Float = (px / density - BoardEngine.panX) / BoardEngine.scale
+    internal fun worldX(px: Float): Float = (px / density - BoardEngine.panX) / BoardEngine.scale
 
-    private fun worldY(px: Float): Float = (px / density - BoardEngine.panY) / BoardEngine.scale
+    internal fun worldY(px: Float): Float = (px / density - BoardEngine.panY) / BoardEngine.scale
 
     private fun isOnDarkCard(wx: Float, wy: Float): Boolean =
         InkBackdrop.darkAt(wx, wy)
@@ -931,20 +872,17 @@ class BoardInteractionController(
         return out
     }
 
-    private fun viewWorld(): RectF =
+    internal fun viewWorld(): RectF =
         SparseNavigation.viewportWorldRect(
             BoardEngine.panX, BoardEngine.panY, BoardEngine.scale,
             host.width / density, host.height / density, viewWorldRect,
         )
 
-    private fun refreshViewOffset() {
+    internal fun refreshViewOffset() {
         host.getLocationOnScreen(tmpLoc)
         viewOffsetX = tmpLoc[0]
         viewOffsetY = tmpLoc[1]
     }
-
-    private fun inklingToolbarHit(viewX: Float, viewY: Float): Boolean =
-        InklingLink.consumesScreenPoint(viewX + viewOffsetX, viewY + viewOffsetY)
 
     fun closeForInkling() {
         if (surfaceSwitching) return
@@ -973,7 +911,7 @@ class BoardInteractionController(
         }
     }
 
-    private fun applyChange(change: BoardHistory.Change, record: Boolean, forward: Boolean = true, reconcileInk: Boolean = forward) {
+    internal fun applyChange(change: BoardHistory.Change, record: Boolean, forward: Boolean = true, reconcileInk: Boolean = forward) {
         if (change.isEmpty) return
         val emitCommands = surface.emitsCommands
         var inkFixed = false
@@ -1307,13 +1245,13 @@ class BoardInteractionController(
             else -> cancelFingerGestures("pen-down")
         }
         val waitingForJsScene = penHeldForJsScene && surface.showsBoardChrome
-        if (surfaceSwitching || waitingForJsScene || chrome.consumesPoint(x, y) || inklingToolbarHit(x, y) || noteHeaderHit(x, y) || noteOffPageHit(x, y)) {
+        if (surfaceSwitching || waitingForJsScene || chrome.consumesPoint(x, y) || inkling.toolbarHit(x, y) || noteHeaderHit(x, y) || noteOffPageHit(x, y)) {
             Log.i(
                 TAG_PEN,
                 "DOWN rejected: ${when {
                     surfaceSwitching -> "surface-switching"
                     waitingForJsScene -> "scene-cache"
-                    inklingToolbarHit(x, y) -> "inkling-toolbar"
+                    inkling.toolbarHit(x, y) -> "inkling-toolbar"
                     noteHeaderHit(x, y) -> "note-header"
                     noteOffPageHit(x, y) -> "note-off-page"
                     else -> "chrome"
@@ -1948,7 +1886,7 @@ class BoardInteractionController(
     }
 
     // LASSO_BOUNDS_PAD is world units on the board; above 100% (an open note) it stays the same on screen.
-    private fun lassoPadWorld(): Float = LASSO_BOUNDS_PAD / BoardEngine.scale.coerceAtLeast(1f)
+    internal fun lassoPadWorld(): Float = LASSO_BOUNDS_PAD / BoardEngine.scale.coerceAtLeast(1f)
 
     private fun selectionFrame(sel: LassoSelection): RectF {
         val out = RectF()
@@ -2076,7 +2014,7 @@ class BoardInteractionController(
             shapeSelectionPending = false
             applyTransition(arbiter.forceExit(ToolArbiter.Source.SHAPE), "shape-selection-cleared")
         }
-        exportLassoStrokes(next)
+        inkling.exportLassoStrokes(next)
         BoardEngine.mutate { setSelection(selectionIds()) }
         updateLassoOverlay()
         refreshHostToolFlags()
@@ -2321,12 +2259,12 @@ class BoardInteractionController(
         if (notesDirectory.isBlank()) return
         selectionCopyBusy = true
         val directory = notesDirectory
-        val generation = clipboardPasteGeneration.get()
+        val generation = inkling.pasteGeneration.get()
         noteController.copyAssets(directory, plan.noteRefs) { result ->
             selectionCopyBusy = false
             result.onFailure { Log.e(TAG_LASSO, "copy note assets failed", it) }
             if (result.isFailure) return@copyAssets
-            if (lasso !== sel || generation != clipboardPasteGeneration.get() || !surface.showsBoardChrome || surfaceSwitching) {
+            if (lasso !== sel || generation != inkling.pasteGeneration.get() || !surface.showsBoardChrome || surfaceSwitching) {
                 noteController.discardCopiedAssets(directory, plan.noteRefs.values)
                 return@copyAssets
             }
@@ -2334,7 +2272,7 @@ class BoardInteractionController(
         }
     }
 
-    private fun deleteLassoSelection() {
+    internal fun deleteLassoSelection() {
         val sel = lasso ?: return
         val change = BoardHistory.Change("lasso-delete")
         synchronized(BoardEngine.lock) {
@@ -2346,113 +2284,6 @@ class BoardInteractionController(
         setLasso(null)
         applyChange(change, record = true)
         Log.i(TAG_LASSO, "deleted strokes=${sel.strokeIds.size} cards=${sel.cardIds.size}")
-    }
-
-    fun clearLassoForInkling(delete: Boolean) {
-        if (!InklingLink.isInkSurface()) {
-            Log.i(TAG_LASSO, "inkling clear-selection deferred surface=${InklingLink.currentSurface()} delete=$delete")
-            return
-        }
-        val sel = lasso
-        if (sel == null) {
-            exportLassoStrokes(null)
-            Log.i(TAG_LASSO, "inkling clear-selection: no selection, file removed")
-            return
-        }
-        if (delete) {
-            deleteLassoSelection()
-        } else {
-            setLasso(null)
-        }
-        Log.i(TAG_LASSO, "inkling clear-selection delete=$delete strokes=${sel.strokeIds.size} cards=${sel.cardIds.size}")
-    }
-
-    fun insertTextCardFromInkling(text: String, anchorScreenX: Int, anchorScreenY: Int) {
-        if (!InklingLink.isBoardSurface()) {
-            Log.i(TAG, "inkling text-card deferred surface=${InklingLink.currentSurface()}")
-            return
-        }
-        refreshViewOffset()
-        val wx = worldX((anchorScreenX - viewOffsetX).toFloat())
-        val wy = worldY((anchorScreenY - viewOffsetY).toFloat())
-        emitImportedTextCard(TextReflow.reflow(text), wx, wy, "inkling", centered = false)
-    }
-
-    fun insertDocTextCard(text: String) {
-        if (!surface.showsBoardChrome) {
-            Log.i(TAG, "doc text-card ignored surface=${surface.name}")
-            return
-        }
-        val view = viewWorld()
-        emitImportedTextCard(TextReflow.reflow(text), view.centerX(), view.centerY(), "doc", centered = true)
-    }
-
-    fun importNoteCard(path: String, title: String, done: (Result<Boolean>) -> Unit) {
-        if (!surface.showsBoardChrome || suspendedBoard != null || surfaceSwitching || notesDirectory.isBlank()) {
-            Log.i(TAG, "note import deferred surface=${surface.name}")
-            done(Result.success(false))
-            return
-        }
-        val directory = notesDirectory
-        val ref = "note-" + UUID.randomUUID().toString().replace("-", "").take(12)
-        clipboardIo.submitNoteImport(File(path)) { parsed ->
-            handler.post {
-                val imported = parsed.getOrElse {
-                    Log.e(TAG, "note import parse failed path=$path", it)
-                    done(Result.failure(it))
-                    return@post
-                }
-                noteController.create(directory, ScrollingDocument(ref, imported.strokes, 0f), imported.preparedPreview) { written ->
-                    val doc = written.getOrElse {
-                        Log.e(TAG, "note import write failed ref=$ref", it)
-                        done(Result.failure(it))
-                        return@create
-                    }
-                    if (!surface.showsBoardChrome || suspendedBoard != null || surfaceSwitching) {
-                        File(directory, "$ref.mnote").delete(); File(directory, ref).deleteRecursively()
-                        Log.i(TAG, "note import deferred after write surface=${surface.name}")
-                        done(Result.success(false))
-                        return@create
-                    }
-                    val header = BoardContentView.noteHeaderFromText(title)
-                    val headerLines = if (header.isEmpty()) emptyList() else header.split('\n')
-                    val size = FloatArray(2)
-                    noteCardBoardSize(doc.contentHeight, NOTE_CARD_BOARD_WIDTH, size, BoardContentView.noteHeaderMarkdown(headerLines))
-                    val view = viewWorld()
-                    val top = if (size[1] < view.height()) view.centerY() - size[1] / 2f
-                        else view.top + toolbarHeightWorld() / BoardEngine.scale + LASSO_BOUNDS_PAD * 2f
-                    val card = BoardEngine.CardRec(
-                        newId("card-"), view.centerX() - size[0] / 2f, top, size[0], size[1],
-                        BoardGeometry.nextZIndex(BoardEngine.cards.values), "note", header,
-                        File(directory, ref).absolutePath, ref, "", "", headerLines.firstOrNull().orEmpty(),
-                    )
-                    applyChange(BoardHistory.Change("import-note").card(null, card), record = true)
-                    selectSingleCard(card); scheduleChromeUpdate()
-                    Log.i(TAG, "imported note card=${card.id} ref=$ref pages=${imported.pageCount} strokes=${doc.strokes.size} size=${size[0]}x${size[1]}")
-                    done(Result.success(true))
-                }
-            }
-        }
-    }
-
-    private fun emitImportedTextCard(text: String, x: Float, y: Float, source: String, centered: Boolean) {
-        if (text.isBlank()) return
-        var size = BoardContentView.measureTextCardSize(text, IMPORT_CARD_WIDTHS[0])
-        for (w in IMPORT_CARD_WIDTHS) {
-            size = BoardContentView.measureTextCardSize(text, w)
-            if (size.y <= w * IMPORT_CARD_MAX_ASPECT) break
-        }
-        val left = if (centered) x - size.x / 2f else x
-        val top = if (centered) y - size.y / 2f else y
-        emitter.action("insertTextCard") {
-            putString("text", text)
-            putDouble("x", left.toDouble())
-            putDouble("y", top.toDouble())
-            putDouble("width", size.x.toDouble())
-            putDouble("height", size.y.toDouble())
-            putString("source", source)
-        }
-        Log.i(TAG, "imported text card source=$source at world=($left,$top) size=${size.x}x${size.y} len=${text.length}")
     }
 
     private fun normalizeColoredCardToDefault(card: BoardEngine.CardRec): BoardHistory.Change? {
@@ -2504,216 +2335,6 @@ class BoardInteractionController(
             }
         }
         return "-$removed/+$added"
-    }
-
-    private fun invalidateClipboardWork(reason: String) {
-        val pasteGeneration = clipboardPasteGeneration.incrementAndGet()
-        clipboardPasteTask?.cancel(true)
-        clipboardPasteTask = null
-        // Drop the old surface's selection file too; only bumping the generation would also cancel a pending
-        // delete and leave a stale clip_lasso.json that makes Notipal save instead of paste.
-        exportLassoStrokes(null)
-        Log.i(TAG_LASSO, "clipboard work invalidated reason=$reason generation=$pasteGeneration")
-    }
-
-    private fun paletteStrokes(): List<BoardEngine.StrokeRec> = synchronized(BoardEngine.lock) {
-        val selected = lasso ?: return@synchronized emptyList()
-        val records = LinkedHashMap<String, BoardEngine.StrokeRec>()
-        selected.strokeIds.forEach { id -> BoardEngine.strokes[id]?.let { records[id] = it } }
-        selected.cardIds.forEach { id -> BoardEngine.cardStrokes[id]?.forEach { records[it.id] = it } }
-        records.values.toList()
-    }
-
-    fun paletteSelectionInfo(): org.json.JSONObject {
-        val strokes = paletteStrokes()
-        val penId = strokes.groupingBy { PaletteStrokeStyle.id(it) }.eachCount()
-            .maxByOrNull { it.value }?.key ?: "ball"
-        val spec = PaletteStrokeStyle.spec(penId)!!
-        val widths = strokes.filter { PaletteStrokeStyle.id(it) == penId }.map { PaletteStrokeStyle.thickness(it) }
-        return org.json.JSONObject().apply {
-            put("success", true)
-            put("mosaic", true)
-            put("selectionVersion", clipboardExportGeneration.get())
-            put("strokeIds", org.json.JSONArray(strokes.map { it.id }))
-            put("strokeCount", strokes.count { !it.isShape })
-            put("geometryCount", strokes.count { it.isShape })
-            put("avgThickness", if (widths.isEmpty()) DrawPathClient.noteCalligraphyThickness(400) else widths.average().toInt())
-            put("dominantPenId", penId)
-            put("dominantPenType", spec.notePenType)
-            put("hasMarkerStroke", strokes.any { it.penStyle == PenStyle.MARKER.objType })
-        }
-    }
-
-    fun applyPaletteSelection(data: org.json.JSONObject): org.json.JSONObject {
-        fun failure(reason: String) = org.json.JSONObject().put("success", false).put("error", reason)
-        val ids = data.optJSONArray("strokeIds") ?: return failure("select_ink")
-        val requested = (0 until ids.length()).map { ids.optString(it) }.toSet()
-        val strokes = paletteStrokes()
-        if (requested.isEmpty() || strokes.isEmpty()) return failure("select_ink")
-        if (data.optLong("selectionVersion", -1L) != clipboardExportGeneration.get() ||
-            requested != strokes.map { it.id }.toSet()) return failure("selection_changed")
-        val spec = PaletteStrokeStyle.spec(data.optString("penId")) ?: return failure("invalid_pen")
-        val thickness = data.optInt("thickness", 0)
-        if (thickness !in 1..4000) return failure("invalid_width")
-        val change = BoardHistory.Change("palette")
-        strokes.forEach { before ->
-            val after = PaletteStrokeStyle.restyle(before, spec, thickness, data.optBoolean("changePen", true))
-            if (!before.sameGeometry(after)) change.stroke(before, after)
-        }
-        val changed = change.diffs.size
-        applyChange(change, record = true)
-        setLasso(lasso)
-        content.markSettleRequested()
-        content.postInvalidateOnAnimation()
-        host.invalidate()
-        Log.i(TAG_LASSO, "Mosaic palette applied pen=${data.optString("penId")} strokes=$changed")
-        return org.json.JSONObject().put("success", true).put("changed", changed)
-    }
-
-    private fun exportLassoStrokes(sel: LassoSelection?) {
-        val sequence = clipboardExportGeneration.incrementAndGet()
-        val file = File(InklingLink.CLIP_LASSO_FILE)
-        if (sel == null) {
-            clipboardIo.submitDelete(file) { clipboardExportGeneration.get() == sequence }
-            return
-        }
-        val out = LinkedHashMap<String, ClipboardStrokeIo.ExportStroke>()
-
-        synchronized(BoardEngine.lock) {
-            for (id in sel.strokeIds) {
-                val rec = BoardEngine.strokes[id] ?: continue
-                val card = rec.cardId?.let { BoardEngine.cards[it] }
-                out[rec.id] = ClipboardStrokeIo.ExportStroke(
-                    rec.penStyle,
-                    rec.width,
-                    rec.points.copyOf(),
-                    rec.pressures.copyOf(),
-                    card?.x ?: 0f,
-                    card?.y ?: 0f,
-                    rec.drawPathWidth,
-                    rec.color,
-                    rec.sampleScale,
-                    rec.nibAngle,
-                    rec.angles.copyOf(),
-                    rec.contourOffsets.copyOf(),
-                )
-            }
-            for (cardId in sel.cardIds) {
-                val card = BoardEngine.cards[cardId] ?: continue
-                BoardEngine.cardStrokes[cardId]?.forEach { rec ->
-                    out[rec.id] = ClipboardStrokeIo.ExportStroke(
-                        rec.penStyle,
-                        rec.width,
-                        rec.points.copyOf(),
-                        rec.pressures.copyOf(),
-                        card.x,
-                        card.y,
-                        rec.drawPathWidth,
-                        rec.color,
-                        rec.sampleScale,
-                        rec.nibAngle,
-                        rec.angles.copyOf(),
-                    rec.contourOffsets.copyOf(),
-                    )
-                }
-            }
-        }
-        // A note page is shown at notePageScale; export at that size so the clip matches what is on screen.
-        clipboardIo.submitExport(
-            target = file,
-            strokes = out.values.toList(),
-            density = density * if (surface.showsBoardChrome) 1f else notePageScale,
-            screenShortPx = host.resources.displayMetrics.let { minOf(it.widthPixels, it.heightPixels).toFloat() },
-            isCurrent = { clipboardExportGeneration.get() == sequence },
-        ) { result ->
-            result.onSuccess { count ->
-                if (count > 0) Log.i(TAG_LASSO, "exported $count strokes -> ${file.path}")
-            }.onFailure { Log.w(TAG_LASSO, "exportLassoStrokes failed", it) }
-        }
-    }
-
-    fun handlePasteStrokes() {
-        if (!InklingLink.isInkSurface()) {
-            Log.i(TAG_LASSO, "paste deferred surface=${InklingLink.currentSurface()}")
-            return
-        }
-        val file = File(InklingLink.PASTE_STROKES_FILE)
-        val generation = clipboardPasteGeneration.incrementAndGet()
-        clipboardPasteTask?.cancel(true)
-        val viewCx = (host.width / density / 2f - BoardEngine.panX) / BoardEngine.scale
-        val viewCy = (host.height / density / 2f - BoardEngine.panY) / BoardEngine.scale
-        val d = density
-
-        // Clipboard dimensions use the fixed board scale; note pages have their intrinsic view scale.
-        val worldScale = 1f / (d * if (surface.showsBoardChrome) 1f else notePageScale)
-
-        val metrics = host.resources.displayMetrics
-        val transform = ClipboardStrokeIo.PasteTransform(
-            viewCx, viewCy, 0f, 0f, worldScale, 1f / worldScale,
-            minOf(metrics.widthPixels, metrics.heightPixels).toFloat(),
-        )
-        clipboardPasteTask = clipboardIo.submitPaste(file, transform) { result ->
-            handler.post {
-                if (generation != clipboardPasteGeneration.get() || surfaceSwitching || !InklingLink.isInkSurface()) return@post
-                val batch = result.getOrNull()
-                if (batch == null || batch.strokes.isEmpty()) {
-                    result.exceptionOrNull()?.let { Log.w(TAG_LASSO, "paste parse failed", it) }
-                    return@post
-                }
-                val change = BoardHistory.Change("paste")
-                val pastedIds = ArrayList<String>(batch.strokes.size)
-                val recs = batch.strokes.map { stroke ->
-                    BoardEngine.StrokeRec(
-                        UUID.randomUUID().toString(), "canvas", stroke.width, stroke.color,
-                        stroke.points, stroke.pressures, stroke.penStyle, stroke.sampleScale, stroke.drawPathWidth,
-                        stroke.nibAngle,
-                        stroke.angles,
-                        stroke.contourOffsets,
-                    )
-                }
-
-                val darkGrayMarkers = recs.filter {
-                    it.penStyle == PenStyle.MARKER.objType && MarkerInk.fromArgb(it.color) == MarkerInk.DARK_GRAY
-                }
-                var pinned = 0
-                for ((index, rec) in recs.withIndex()) {
-                    val pin = batch.strokes[index].noteWhite && darkGrayMarkers.isNotEmpty() &&
-                        InkBackdrop.isOverMarkers(rec, darkGrayMarkers)
-                    if (pin) pinned++
-                    change.stroke(null, if (pin) rec.withColor(BoardEngine.StrokeRec.INK_WHITE_PINNED) else rec)
-                    pastedIds.add(rec.id)
-                }
-                if (pastedIds.isEmpty()) return@post
-                applyChange(change, record = true)
-
-                selectPastedStrokes(pastedIds)
-                content.postInvalidateOnAnimation()
-                host.invalidate()
-                Log.i(
-                    TAG_LASSO,
-                    "pasted ${pastedIds.size} strokes at viewport center world=(${"%.0f".format(viewCx)},${"%.0f".format(viewCy)}) " +
-                        "size=${"%.0f".format((batch.maxX - batch.minX) * worldScale * batch.pageScale)}x${"%.0f".format((batch.maxY - batch.minY) * worldScale * batch.pageScale)} " +
-                        "pan=(${BoardEngine.panX},${BoardEngine.panY}) scale=${BoardEngine.scale} pageScale=${batch.pageScale} pinnedWhite=$pinned",
-                )
-            }
-        }
-    }
-
-    private fun selectPastedStrokes(ids: List<String>) {
-        if (ids.isEmpty()) return
-        val frame = RectF()
-        var any = false
-        synchronized(BoardEngine.lock) {
-            for (id in ids) {
-                val stroke = BoardEngine.strokes[id] ?: continue
-                val b = BoardEngine.strokeInkBounds(stroke)
-                if (!any) { frame.set(b); any = true } else frame.union(b)
-            }
-        }
-        if (!any) return
-        val pad = lassoPadWorld()
-        frame.inset(-pad, -pad)
-        setLasso(LassoSelection(frame, emptyList(), ids.toList()))
     }
 
     private fun collectCardRemoval(cardId: String, change: BoardHistory.Change) {
@@ -3446,7 +3067,7 @@ class BoardInteractionController(
             return
         }
 
-        if (inklingToolbarHit(x, y)) {
+        if (inkling.toolbarHit(x, y)) {
             Log.i(TAG_FINGER, "DOWN id=$id ignored: inkling-toolbar")
             return
         }
@@ -4137,7 +3758,7 @@ class BoardInteractionController(
         }
     }
 
-    private fun toolbarHeightWorld(): Float = chrome.toolbarHeightPx() / density
+    internal fun toolbarHeightWorld(): Float = chrome.toolbarHeightPx() / density
 
     private fun noteTopInsetWorld(): Float = toolbarHeightWorld() + currentNoteHeaderHeight * BoardEngine.scale
 
@@ -4362,7 +3983,7 @@ class BoardInteractionController(
         return regions
     }
 
-    private fun scheduleChromeUpdate() {
+    internal fun scheduleChromeUpdate() {
         if (chromeUpdatePosted) return
         chromeUpdatePosted = true
         handler.post {
@@ -4830,4 +4451,6 @@ class BoardInteractionController(
     override fun onLocateNoteLink(shotId: String) = noteShots.locateLink(shotId)
 
     override fun onDeleteNoteLink(shotId: String) = noteShots.deleteLink(shotId)
+
+    internal val inkling = InklingBridge(this)
 }

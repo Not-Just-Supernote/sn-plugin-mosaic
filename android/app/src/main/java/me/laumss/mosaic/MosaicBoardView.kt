@@ -574,7 +574,7 @@ class MosaicBoardView(
         if (!attached) return
         handler.post {
             if (!attached) return@post
-            controller.setInklingOverlayDrag(active, "inkling")
+            controller.inkling.setOverlayDrag(active, "inkling")
         }
     }
 
@@ -594,7 +594,7 @@ class MosaicBoardView(
                 Log.i(TAG, "inkling paste deferred surface=${InklingLink.currentSurface()}")
                 return@post
             }
-            controller.handlePasteStrokes()
+            controller.inkling.handlePasteStrokes()
         }
     }
 
@@ -606,7 +606,7 @@ class MosaicBoardView(
                 Log.i(TAG, "inkling clear-selection deferred surface=${InklingLink.currentSurface()} delete=$delete")
                 return@post
             }
-            controller.clearLassoForInkling(delete)
+            controller.inkling.clearSelection(delete)
         }
     }
 
@@ -618,7 +618,7 @@ class MosaicBoardView(
                 Log.i(TAG, "inkling text-card deferred surface=${InklingLink.currentSurface()}")
                 return@post
             }
-            controller.insertTextCardFromInkling(text, anchorScreenX, anchorScreenY)
+            controller.inkling.insertTextCard(text, anchorScreenX, anchorScreenY)
         }
     }
 
@@ -626,8 +626,8 @@ class MosaicBoardView(
         handler.post {
             val result = if (attached && InklingLink.isBoardSurface()) {
                 try {
-                    if (data == null) controller.paletteSelectionInfo()
-                    else controller.applyPaletteSelection(org.json.JSONObject(data))
+                    if (data == null) controller.inkling.paletteSelectionInfo()
+                    else controller.inkling.applyPaletteSelection(org.json.JSONObject(data))
                 } catch (error: Exception) {
                     Log.w(TAG, "palette request failed", error)
                     org.json.JSONObject().put("success", false).put("error", "apply_failed")

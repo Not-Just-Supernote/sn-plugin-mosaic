@@ -133,13 +133,13 @@ class MosaicBoardEngineModule(
 
     @ReactMethod
     fun insertDocTextCard(viewTag: Int, text: String) {
-        withView(viewTag) { it.controller.insertDocTextCard(text) }
+        withView(viewTag) { it.controller.inkling.insertDocTextCard(text) }
     }
 
     @ReactMethod
     fun importNoteCard(viewTag: Int, path: String, title: String, promise: Promise) {
         withView(viewTag, onMissing = { promise.resolve(false) }, waitForBoard = false) { view ->
-            view.controller.importNoteCard(path, title) { result ->
+            view.controller.inkling.importNoteCard(path, title) { result ->
                 result.fold({ promise.resolve(it) }, { promise.reject("NOTE_IMPORT", it.message, it) })
             }
         }
