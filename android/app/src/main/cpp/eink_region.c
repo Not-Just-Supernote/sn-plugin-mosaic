@@ -21,7 +21,7 @@ _Static_assert(sizeof(DisplayArea)==24, "driver area ABI");
 
 /* Full-refresh completion observation; all mappings in this probe are read-only. */
 JNIEXPORT jint JNICALL
-Java_me_laumss_mosaic_EinkRegionDriver_displayBusyNative(JNIEnv *env, jobject self) {
+Java_me_laumss_mosaic_eink_EinkRegionDriver_displayBusyNative(JNIEnv *env, jobject self) {
     (void)env; (void)self;
     uint32_t info[64]={0};
     int result=-1;
@@ -127,7 +127,7 @@ static void finish_batch(void) {
         prepared-started,submitted-prepared,submitted-batch.black_submitted_ms);
 }
 JNIEXPORT jlong JNICALL
-Java_me_laumss_mosaic_EinkRegionDriver_beginBlackBatchNative(JNIEnv *env,jobject self,jintArray input) {
+Java_me_laumss_mosaic_eink_EinkRegionDriver_beginBlackBatchNative(JNIEnv *env,jobject self,jintArray input) {
     (void)self;
     if(batch.token) {snprintf(batch_result,sizeof(batch_result),"skip: another cleanup owns the driver");return 0;}
     double started=monotonic_ms();
@@ -231,31 +231,31 @@ abort:
     release_batch();return 0;
 }
 JNIEXPORT jstring JNICALL
-Java_me_laumss_mosaic_EinkRegionDriver_finishBlackBatchNative(JNIEnv *env,jobject self,jlong token) {
+Java_me_laumss_mosaic_eink_EinkRegionDriver_finishBlackBatchNative(JNIEnv *env,jobject self,jlong token) {
     (void)self;
     if(token && token==batch.token) finish_batch();
     else return (*env)->NewStringUTF(env,"skip: expired cleanup token");
     return (*env)->NewStringUTF(env,batch_result);
 }
 JNIEXPORT jint JNICALL
-Java_me_laumss_mosaic_EinkRegionDriver_batchBusyNative(JNIEnv *env,jobject self,jlong token) {
+Java_me_laumss_mosaic_eink_EinkRegionDriver_batchBusyNative(JNIEnv *env,jobject self,jlong token) {
     (void)env;(void)self;
     if(!token || token!=batch.token) return -1;
     return (jint)count_batch_plane(6,-1,1);
 }
 JNIEXPORT jstring JNICALL
-Java_me_laumss_mosaic_EinkRegionDriver_completeBatchNative(JNIEnv *env,jobject self,jlong token) {
+Java_me_laumss_mosaic_eink_EinkRegionDriver_completeBatchNative(JNIEnv *env,jobject self,jlong token) {
     (void)self;
     if(!token || token!=batch.token) return (*env)->NewStringUTF(env,"skip: expired cleanup token");
     finish_batch();
     unsigned white=count_batch_plane(2,15,0);
-    int busy=Java_me_laumss_mosaic_EinkRegionDriver_batchBusyNative(env,self,token);
+    int busy=Java_me_laumss_mosaic_eink_EinkRegionDriver_batchBusyNative(env,self,token);
     snprintf(batch_result,sizeof(batch_result),"released: token=%lld pixels=%u whiteRc=%d historyWhite=%u busy=%d",
         (long long)token,batch.selected,batch.white_rc,white,busy);
     release_batch();
     return (*env)->NewStringUTF(env,batch_result);
 }
 JNIEXPORT jstring JNICALL
-Java_me_laumss_mosaic_EinkRegionDriver_batchResultNative(JNIEnv *env,jobject self) {
+Java_me_laumss_mosaic_eink_EinkRegionDriver_batchResultNative(JNIEnv *env,jobject self) {
     (void)self;return (*env)->NewStringUTF(env,batch_result);
 }

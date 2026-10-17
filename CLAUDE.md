@@ -2,7 +2,19 @@
 
 Supernote 上的手写白板插件。React Native 是外壳，画面和交互都在 Kotlin 里。
 
-Kotlin 代码在 `android/app/src/main/java/me/laumss/mosaic/`。
+Kotlin 代码在 `android/app/src/main/java/me/laumss/mosaic/`，按职责分包：
+
+- 根包：React Native 入口（`MosaicEinkPackage`、各 `Mosaic*Module`）、宿主视图 `MosaicBoardView`、`MainApplication`。宿主按 `package` 声明扫描 ReactPackage，这些类留在根包。
+- `board/`：交互控制器 `BoardInteractionController` 和它的各部分：选区 `SelectionController`、拖动缩放旋转 `SelectionTransforms`、整卡编辑 `CardCommands`、文字编辑 `CardTextEditing`、编辑卡片的笔画手势 `CardStrokeGestures`。
+- `input/`：输入。笔 `PenInput`、手指 `TouchInput`、双指平移缩放 `PanZoomGesture`、工具 `ToolArbiter`，以及读取系统输入事件的 `InputReader`、`SliderReader` 等。
+- `engine/`：场景数据和几何。`BoardEngine`（场景）、`BoardViewport`（视口）、`BoardHistory`（撤销）、`BoardGeometry`、`NeckGeometry`、`Shapes` 等，不依赖视图。
+- `render/`：四层视图和绘制，见下。
+- `drawpath/`：系统笔迹服务。连接和配置在 `DrawPathSession`，抬笔后的交接、背景同步和清轨迹的整屏刷新在 `InkHandoff`。
+- `eink/`：刷新模式 `BoardPresentation`，卡片移动后的残影清理 `CardTrailCleanup`、`EinkTrailCleanup`、`EinkRegionDriver`（JNI 在 `cpp/eink_region.c`，函数名带包名，换包要一起改）。
+- `note/`：笔记卡片。打开关闭和页面状态在 `NoteSession`，文件读写在 `NoteController`、`TchFile`，插入 Note 的截图和链接在 `NoteShots`。
+- `inkling/`：Notipal 协同。广播在 `InklingLink`，剪贴板、调色盘和导入在 `InklingBridge`，回调在 `InklingCallbacks`。
+
+控制器的各部分都持有控制器（`board`），通过 `board.selection`、`board.pen` 这样的字段互相调用；外部（JS 模块、`MosaicBoardView`）也走 `controller.inkling` 这样的字段。`MosaicBoardView` 的各部分同理，用 `host.drawPath`、`host.inkHandoff`。
 
 README 和代码不一致时，以代码为准。
 
@@ -10,7 +22,7 @@ README 和代码不一致时，以代码为准。
 
 Kotlin 处理画面和输入，改动后把结果发给 JS。JS 负责保存和同步。读档或收到远程改动时，JS 把数据推回 Kotlin。
 
-交互在 `BoardInteractionController.kt`，数据在 `BoardEngine.kt`，撤销在 `BoardHistory.kt`。
+交互在 `BoardInteractionController.kt` 和 `board/`、`input/` 里的各部分，数据在 `BoardEngine.kt`，视口在 `BoardViewport.kt`，撤销在 `BoardHistory.kt`。
 
 画面从下到上四层：`BoardContentView` 画内容，`TransientInkView` 画套索和图形的轨迹，`InteractionOverlayView` 画选框和手柄，`BoardChromeView` 画工具条和菜单。
 
@@ -40,9 +52,9 @@ JS 依赖的 `React/src/` 只有 `boardFormat.ts` 在仓库里，其余文件不
 
 每条笔迹属于画布、某张卡片或某条连接，由落笔位置决定。属于卡片或连接的笔迹跟着它移动。
 
-笔尖下的笔迹由系统服务实时绘制，代码在 `DrawPathClient.kt`。抬笔后笔迹立即存入，但停笔 3 秒后才由 Mosaic 重绘替换。这 3 秒里内容层不能重画，否则系统笔迹会消失。逻辑在 `MosaicBoardView` 的 `holdInkHandoff` 附近。
+笔尖下的笔迹由系统服务实时绘制，代码在 `DrawPathClient.kt`。抬笔后笔迹立即存入，但停笔 3 秒后才由 Mosaic 重绘替换。这 3 秒里内容层不能重画，否则系统笔迹会消失。逻辑在 `InkHandoff` 的 `holdInkHandoff` 附近。
 
-画框、拉出新卡片、连线、方括号扩卡这些手势不留笔迹。抬笔 0.6 秒后整屏刷新（插件根视图 `forceEinkFullUpdate`），系统笔迹就清掉了；背景同步（`syncBackground`）等刷新后 1.2 秒再发（`syncHoldUntil`）。书法笔（drawPath 类型 15）下设备实测：抬笔后 150ms 内刷新经常清不掉（先关掉再打开服务也不能稳定解决），0.6 秒和 1 秒后刷新每次都清掉；只同步背景、只重开服务、在原处重画再擦掉都清不掉。逻辑在 `MosaicBoardView` 的 `onPenTrailDiscarded` 和 `runPendingFullRefresh`。
+画框、拉出新卡片、连线、方括号扩卡这些手势不留笔迹。抬笔 0.6 秒后整屏刷新（插件根视图 `forceEinkFullUpdate`），系统笔迹就清掉了；背景同步（`syncBackground`）等刷新后 1.2 秒再发（`syncHoldUntil`）。书法笔（drawPath 类型 15）下设备实测：抬笔后 150ms 内刷新经常清不掉（先关掉再打开服务也不能稳定解决），0.6 秒和 1 秒后刷新每次都清掉；只同步背景、只重开服务、在原处重画再擦掉都清不掉。逻辑在 `InkHandoff` 的 `onPenTrailDiscarded` 和 `runPendingFullRefresh`。
 
 套索和图形不走系统服务，轨迹由 Mosaic 自己画。
 
@@ -118,7 +130,7 @@ regal（硬件清残影）由宿主管理，Mosaic 不开关它。
 
 打开后是一页宽 480 的竖向长页。工具条的更多换成选取下方，撤销重做只能用滑条。工具条的关闭回到白板；从顶部下拉和白板上一样退出插件，下次打开直接回到这篇笔记。两种方式都会去掉大段空白、更新缩略图。
 
-笔记里双指捏合在 70% 到 150% 之间缩放，100% 是页面铺满屏宽。双指手势先判断是平移还是缩放，之后只做这一种。100% 时只能上下滚动，松手时接近 100% 会吸回铺满。缩小后页面外是白色，页面四边有黑框，底边就在笔迹结尾处，页面左右不能移出屏幕。缩小时页面上下都能拖出黑框外，最多拖出页面在屏幕上高度的 30%（不超过屏幕高度的 30%），框外只是白色。框外不能书写：系统笔迹服务的禁写区包含页面外，笔迹划出页面会在边上截断，逻辑在 `noteOffPageRectsPx` 和 `appendWritePoint`。双指双击隐藏或显示工具条时，停在顶部的页面跟着工具条边缘移动。代码在 `NoteSurface` 和 `updatePanZoom`。
+笔记里双指捏合在 70% 到 150% 之间缩放，100% 是页面铺满屏宽。双指手势先判断是平移还是缩放，之后只做这一种。100% 时只能上下滚动，松手时接近 100% 会吸回铺满。缩小后页面外是白色，页面四边有黑框，底边就在笔迹结尾处，页面左右不能移出屏幕。缩小时页面上下都能拖出黑框外，最多拖出页面在屏幕上高度的 30%（不超过屏幕高度的 30%），框外只是白色。框外不能书写：系统笔迹服务的禁写区包含页面外，笔迹划出页面会在边上截断，逻辑在 `NoteSession.noteOffPageRectsPx` 和 `PenInput.appendWritePoint`。双指双击隐藏或显示工具条时，停在顶部的页面跟着工具条边缘移动。代码在 `NoteSurface` 和 `PanZoomGesture.update`。
 
 笔记文件存在 `notes/`，读写在 `TchFile.kt` 和 `NoteController.kt`。
 
@@ -144,7 +156,7 @@ Notipal 浮动工具条所在区域不能书写。笔粗细、图形、模板二
 
 ## 改代码时
 
-新改动在 `BoardInteractionController` 里通过 `applyChange()` 提交，才能撤销和保存。JS 也要保存的，要在 `boardCommands.ts` 和 `App.tsx` 接上。
+对场景的改动通过控制器的 `applyChange()` 提交（各部分里写作 `board.applyChange(...)`），才能撤销和保存。新功能放进对应的部分，控制器只做分发和公共状态。JS 也要保存的，要在 `boardCommands.ts` 和 `App.tsx` 接上。
 
 工具只存在 `ToolArbiter` 里，切换工具要经过控制器的 `applyTransition`，它会调用 `syncToolViews` 同步工具条、系统笔迹和刷新模式。选区、菜单这些也会影响能否书写，改动后要调用 `syncToolViews`。
 
