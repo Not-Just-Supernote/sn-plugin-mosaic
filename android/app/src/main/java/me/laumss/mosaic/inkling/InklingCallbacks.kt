@@ -47,7 +47,7 @@ internal class InklingCallbacks(private val view: MosaicBoardView) : InklingLink
         view.mainHandler.post {
             if (!view.attached) return@post
             if (!InklingLink.isInkSurface()) {
-                Log.i(MosaicBoardView.TAG, "inkling paste deferred surface=${InklingLink.currentSurface()}")
+                Log.i(LogTags.BOARD_VIEW, "inkling paste deferred surface=${InklingLink.currentSurface()}")
                 return@post
             }
             view.controller.inkling.handlePasteStrokes()
@@ -59,7 +59,7 @@ internal class InklingCallbacks(private val view: MosaicBoardView) : InklingLink
         view.mainHandler.post {
             if (!view.attached) return@post
             if (!InklingLink.isInkSurface()) {
-                Log.i(MosaicBoardView.TAG, "inkling clear-selection deferred surface=${InklingLink.currentSurface()} delete=$delete")
+                Log.i(LogTags.BOARD_VIEW, "inkling clear-selection deferred surface=${InklingLink.currentSurface()} delete=$delete")
                 return@post
             }
             view.controller.inkling.clearSelection(delete)
@@ -71,7 +71,7 @@ internal class InklingCallbacks(private val view: MosaicBoardView) : InklingLink
         view.mainHandler.post {
             if (!view.attached) return@post
             if (!InklingLink.isBoardSurface()) {
-                Log.i(MosaicBoardView.TAG, "inkling text-card deferred surface=${InklingLink.currentSurface()}")
+                Log.i(LogTags.BOARD_VIEW, "inkling text-card deferred surface=${InklingLink.currentSurface()}")
                 return@post
             }
             view.controller.inkling.insertTextCard(text, anchorScreenX, anchorScreenY)
@@ -85,7 +85,7 @@ internal class InklingCallbacks(private val view: MosaicBoardView) : InklingLink
                     if (data == null) view.controller.inkling.paletteSelectionInfo()
                     else view.controller.inkling.applyPaletteSelection(org.json.JSONObject(data))
                 } catch (error: Exception) {
-                    Log.w(MosaicBoardView.TAG, "palette request failed", error)
+                    Log.w(LogTags.BOARD_VIEW, "palette request failed", error)
                     org.json.JSONObject().put("success", false).put("error", "apply_failed")
                 }
             } else org.json.JSONObject().put("success", false).put("error", "surface_changed")
@@ -99,7 +99,7 @@ internal class InklingCallbacks(private val view: MosaicBoardView) : InklingLink
             if (!view.attached) return@post
             view.controller.notes.preparePendingNoteImport()
             if (!InklingLink.isBoardSurface()) {
-                Log.i(MosaicBoardView.TAG, "inkling inbox notification deferred surface=${InklingLink.currentSurface()}")
+                Log.i(LogTags.BOARD_VIEW, "inkling inbox notification deferred surface=${InklingLink.currentSurface()}")
                 return@post
             }
             view.reactContext
@@ -121,7 +121,7 @@ internal class InklingCallbacks(private val view: MosaicBoardView) : InklingLink
             view.reactContext
                 .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
                 .emit(MosaicBoardView.BOARD_VISIBILITY_EVENT, data)
-            Log.i(MosaicBoardView.TAG, "surface event surface=$surface noteRef=$noteRef")
+            Log.i(LogTags.BOARD_VIEW, "surface event surface=$surface noteRef=$noteRef")
         }
     }
 }

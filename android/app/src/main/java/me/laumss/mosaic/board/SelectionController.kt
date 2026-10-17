@@ -108,7 +108,7 @@ internal class SelectionController(private val board: BoardInteractionController
         for (c in cards) { c.rect(r); if (frame.isEmpty) frame.set(r) else frame.union(r) }
         frame.inset(-LASSO_BOUNDS_PAD, -LASSO_BOUNDS_PAD)
         setLasso(LassoSelection(frame, cards.map { it.id }, emptyList()))
-        Log.i(BoardInteractionController.TAG_LASSO, "selectCards from JS count=${cards.size}")
+        Log.i(LogTags.LASSO, "selectCards from JS count=${cards.size}")
     }
 
     /** Selects what a lasso drawn through [pts] (view pixels, x/y pairs) encloses. */
@@ -136,13 +136,13 @@ internal class SelectionController(private val board: BoardInteractionController
         val query = RectF(board.worldX(minX), board.worldY(minY), board.worldX(maxX), board.worldY(maxY))
         val hits = selectInRect(query)
         if (hits == null) {
-            Log.i(BoardInteractionController.TAG_LASSO, "finalize empty query=$query")
+            Log.i(LogTags.LASSO, "finalize empty query=$query")
             setLasso(null)
             return
         }
         val frame = selectionFrame(hits)
         val selection = LassoSelection(frame, hits.cardIds, hits.strokeIds, fromLasso = true)
-        Log.i(BoardInteractionController.TAG_LASSO, "finalize query=$query frame=$frame cards=${selection.cardIds.size} strokes=${selection.strokeIds.size}")
+        Log.i(LogTags.LASSO, "finalize query=$query frame=$frame cards=${selection.cardIds.size} strokes=${selection.strokeIds.size}")
         setLasso(selection)
     }
 
@@ -268,7 +268,7 @@ internal class SelectionController(private val board: BoardInteractionController
 
         if (next == null && selectBelowPendingRestore) {
             selectBelowPendingRestore = false
-            Log.i(BoardInteractionController.TAG_LASSO, "select-below selection cleared -> toolbar back to ${board.arbiter.describe()}")
+            Log.i(LogTags.LASSO, "select-below selection cleared -> toolbar back to ${board.arbiter.describe()}")
         }
         lasso = next
         if (next == null && board.shapeSelectionPending && board.arbiter.hasOverride(ToolArbiter.Source.SHAPE)) {
@@ -470,7 +470,7 @@ internal class SelectionController(private val board: BoardInteractionController
         val next = stroke.withPoints(transform(stroke.points))
         if (next.points.contentEquals(stroke.points)) return
         board.applyChange(BoardHistory.Change("shape-$action").stroke(stroke, next), record = true)
-        Log.i(BoardInteractionController.TAG_LASSO, "shape convert $kind -> $action")
+        Log.i(LogTags.LASSO, "shape convert $kind -> $action")
         selectStroke(next)
     }
 
@@ -485,7 +485,7 @@ internal class SelectionController(private val board: BoardInteractionController
             val frame = RectF(sel.rect).apply { offset(offset, offset) }
             val copied = LassoSelection(frame, plan.cardIds, plan.strokeIds, sel.fromLasso)
             setLasso(LassoSelection(selectionFrame(copied), copied.cardIds, copied.strokeIds, copied.fromLasso))
-            Log.i(BoardInteractionController.TAG_LASSO, "copy cards=${plan.cardIds.size} strokes=${plan.strokeIds.size} offset=$offset")
+            Log.i(LogTags.LASSO, "copy cards=${plan.cardIds.size} strokes=${plan.strokeIds.size} offset=$offset")
         }
         if (plan.noteRefs.isEmpty()) { commit(); return }
         if (board.notes.notesDirectory.isBlank()) return
@@ -494,7 +494,7 @@ internal class SelectionController(private val board: BoardInteractionController
         val generation = board.inkling.pasteGeneration.get()
         board.notes.noteController.copyAssets(directory, plan.noteRefs) { result ->
             selectionCopyBusy = false
-            result.onFailure { Log.e(BoardInteractionController.TAG_LASSO, "copy note assets failed", it) }
+            result.onFailure { Log.e(LogTags.LASSO, "copy note assets failed", it) }
             if (result.isFailure) return@copyAssets
             if (lasso !== sel || generation != board.inkling.pasteGeneration.get() || !board.surface.showsBoardChrome || board.surfaceSwitching) {
                 board.notes.noteController.discardCopiedAssets(directory, plan.noteRefs.values)
@@ -515,7 +515,7 @@ internal class SelectionController(private val board: BoardInteractionController
         }
         setLasso(null)
         board.applyChange(change, record = true)
-        Log.i(BoardInteractionController.TAG_LASSO, "deleted strokes=${sel.strokeIds.size} cards=${sel.cardIds.size}")
+        Log.i(LogTags.LASSO, "deleted strokes=${sel.strokeIds.size} cards=${sel.cardIds.size}")
     }
 
     fun refreshSingleCardFrame() {
@@ -552,7 +552,7 @@ internal class SelectionController(private val board: BoardInteractionController
         selectBelowArmed = true
         board.chrome.setSelectBelowActive(true)
         board.syncToolViews()
-        Log.i(BoardInteractionController.TAG_LASSO, "select-below armed ${board.arbiter.describe()}")
+        Log.i(LogTags.LASSO, "select-below armed ${board.arbiter.describe()}")
     }
 
     private fun cancelSelectBelow(reason: String) {
@@ -560,7 +560,7 @@ internal class SelectionController(private val board: BoardInteractionController
         selectBelowArmed = false
         board.chrome.setSelectBelowActive(false)
         board.syncToolViews()
-        Log.i(BoardInteractionController.TAG_LASSO, "select-below cancelled reason=$reason")
+        Log.i(LogTags.LASSO, "select-below cancelled reason=$reason")
     }
 
     fun handleSelectBelow(wy: Float) {
@@ -586,10 +586,10 @@ internal class SelectionController(private val board: BoardInteractionController
         if (hits != null) {
             selectBelowPendingRestore = true
             setLasso(LassoSelection(selectionFrame(hits), hits.cardIds, hits.strokeIds))
-            Log.i(BoardInteractionController.TAG_LASSO, "select-below hit cards=${hits.cardIds.size} strokes=${hits.strokeIds.size} y=$wy")
+            Log.i(LogTags.LASSO, "select-below hit cards=${hits.cardIds.size} strokes=${hits.strokeIds.size} y=$wy")
         } else {
             board.syncToolViews()
-            Log.i(BoardInteractionController.TAG_LASSO, "select-below nothing below y=$wy")
+            Log.i(LogTags.LASSO, "select-below nothing below y=$wy")
         }
     }
 }

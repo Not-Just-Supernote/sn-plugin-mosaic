@@ -20,9 +20,9 @@ internal class CloseWatchdog(private val view: MosaicBoardView) {
     }
 
     private val fireTask = Runnable {
-        Log.i(MosaicBoardView.TAG, "[CloseWatchdog] fired attached=${view.attached} sinceArmMs=${SystemClock.uptimeMillis() - armedUptime}")
+        Log.i(LogTags.BOARD_VIEW, "[CloseWatchdog] fired attached=${view.attached} sinceArmMs=${SystemClock.uptimeMillis() - armedUptime}")
         if (!view.attached) return@Runnable
-        Log.w(MosaicBoardView.TAG, "[CloseWatchdog] JS did not close within ${delayMs}ms; forcing host closePluginView")
+        Log.w(LogTags.BOARD_VIEW, "[CloseWatchdog] JS did not close within ${delayMs}ms; forcing host closePluginView")
         forceHostClose("watchdog")
     }
 
@@ -36,7 +36,7 @@ internal class CloseWatchdog(private val view: MosaicBoardView) {
         override fun run() {
             val up = SystemClock.uptimeMillis() - armedUptime
             val wall = System.currentTimeMillis() - armedWall
-            Log.i(MosaicBoardView.TAG, "[CloseWatchdog] tick uptimeMs=$up wallMs=$wall drift=${wall - up} attached=${view.attached}")
+            Log.i(LogTags.BOARD_VIEW, "[CloseWatchdog] tick uptimeMs=$up wallMs=$wall drift=${wall - up} attached=${view.attached}")
             if (view.attached) view.mainHandler.postDelayed(this, 1000L)
         }
     }
@@ -50,30 +50,30 @@ internal class CloseWatchdog(private val view: MosaicBoardView) {
         view.mainHandler.removeCallbacks(heartbeat)
         view.mainHandler.postDelayed(fireTask, delayMs)
         view.mainHandler.postDelayed(heartbeat, 1000L)
-        Log.i(MosaicBoardView.TAG, "[CloseWatchdog] armed reason=$reason delay=${delayMs}ms")
+        Log.i(LogTags.BOARD_VIEW, "[CloseWatchdog] armed reason=$reason delay=${delayMs}ms")
     }
 
     private fun forceHostClose(reason: String) {
         try {
             val module = view.reactContext.catalystInstance?.getNativeModule(HOST_PLUGIN_MANAGER_MODULE)
             if (module == null) {
-                Log.w(MosaicBoardView.TAG, "[CloseWatchdog] $HOST_PLUGIN_MANAGER_MODULE unavailable reason=$reason")
+                Log.w(LogTags.BOARD_VIEW, "[CloseWatchdog] $HOST_PLUGIN_MANAGER_MODULE unavailable reason=$reason")
                 return
             }
             val methods = module.javaClass.methods.filter { it.name == "closePluginView" }
             methods.firstOrNull { it.parameterTypes.isEmpty() }?.let {
                 it.invoke(module)
-                Log.i(MosaicBoardView.TAG, "[CloseWatchdog] closePluginView() forced reason=$reason")
+                Log.i(LogTags.BOARD_VIEW, "[CloseWatchdog] closePluginView() forced reason=$reason")
                 return
             }
             methods.firstOrNull { it.parameterTypes.size == 1 }?.let {
                 it.invoke(module, com.facebook.react.bridge.PromiseImpl(null, null))
-                Log.i(MosaicBoardView.TAG, "[CloseWatchdog] closePluginView(promise) forced reason=$reason")
+                Log.i(LogTags.BOARD_VIEW, "[CloseWatchdog] closePluginView(promise) forced reason=$reason")
                 return
             }
-            Log.w(MosaicBoardView.TAG, "[CloseWatchdog] no closePluginView method on host module reason=$reason")
+            Log.w(LogTags.BOARD_VIEW, "[CloseWatchdog] no closePluginView method on host module reason=$reason")
         } catch (error: Throwable) {
-            Log.w(MosaicBoardView.TAG, "[CloseWatchdog] force close failed reason=$reason", error)
+            Log.w(LogTags.BOARD_VIEW, "[CloseWatchdog] force close failed reason=$reason", error)
         }
     }
 }

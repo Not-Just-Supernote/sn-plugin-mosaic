@@ -26,7 +26,7 @@ class MosaicBoardView(
     internal val reactContext: ReactContext,
 ) : FrameLayout(reactContext) {
     companion object {
-        const val TAG = "MosaicBoardView"
+        private const val TAG = LogTags.BOARD_VIEW
         private const val NATIVE_BUILD_TAG = "pressure-clock-20260928a"
 
         const val BOARD_VISIBILITY_EVENT = "MosaicBoardVisibility"

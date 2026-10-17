@@ -19,7 +19,7 @@ import kotlin.math.max
 /** Two-finger pan and pinch zoom on the board and in a note, with zoom snapping and jumps to the next card group. */
 internal class PanZoomGesture(private val board: BoardInteractionController) {
     companion object {
-        const val TAG_PAN = "MosaicPan"
+        private const val TAG_PAN = LogTags.PAN
         private const val ZOOM_SNAP_RATIO = 0.03f
         // Releasing a note pinch this close to 100% snaps back to the page filling the width.
         private const val NOTE_ZOOM_SNAP_RATIO = 0.08f

@@ -43,7 +43,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         hideFromTiles(listOf(card.id))
         board.overlay.showCardPreview(board.worldRectToPx(session.preview, RectF()), card.kind, card.colored)
         board.presentation.acquire(BoardPresentation.Reason.TRANSFORM)
-        Log.i(BoardInteractionController.TAG, "[CardAdjust] resize begin card=${card.id} handle=$handle corner=${handle.isCorner} pen=$isPen")
+        Log.i(LogTags.INTERACTION, "[CardAdjust] resize begin card=${card.id} handle=$handle corner=${handle.isCorner} pen=$isPen")
         return session
     }
 
@@ -129,7 +129,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         board.overlay.beginMovePreview(board.worldRectToPx(sel.rect, RectF()), cardRects, inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardViewport.scale * board.density, cards.map { !it.colored }, grayBridges, ink = previewInk)
         hideFromTiles(sel.cardIds, sel.strokeIds)
         board.presentation.acquire(BoardPresentation.Reason.TRANSFORM)
-        Log.i(BoardInteractionController.TAG_LASSO, "resize begin cards=${cards.size} strokes=${strokes.size} handle=$handle pen=$isPen")
+        Log.i(LogTags.LASSO, "resize begin cards=${cards.size} strokes=${strokes.size} handle=$handle pen=$isPen")
         return session
     }
 
@@ -207,7 +207,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         board.overlay.updateRotatePreview(0f, framePx.centerX(), framePx.centerY())
         hideFromTiles(sel.cardIds, sel.strokeIds)
         board.presentation.acquire(BoardPresentation.Reason.TRANSFORM)
-        Log.i(BoardInteractionController.TAG_LASSO, "rotate begin strokes=${strokes.size} pen=$isPen")
+        Log.i(LogTags.LASSO, "rotate begin strokes=${strokes.size} pen=$isPen")
         return MoveSession.SelectionRotate(isPen, pointerId, wx, wy, sel, strokes, sel.rect.centerX(), sel.rect.centerY())
     }
 
@@ -285,7 +285,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         hideFromTiles(sel.cardIds, sel.strokeIds)
         board.presentation.acquire(BoardPresentation.Reason.TRANSFORM)
         val liftZ = if (board.selection.isSingleCardSelection(sel)) BoardGeometry.nextZIndex(BoardEngine.cards.values) else null
-        Log.i(BoardInteractionController.TAG_LASSO, "move begin cards=${cards.size} strokes=${strokes.size} pen=$isPen singleCard=${liftZ != null}")
+        Log.i(LogTags.LASSO, "move begin cards=${cards.size} strokes=${strokes.size} pen=$isPen singleCard=${liftZ != null}")
         return MoveSession.Selection(isPen, pointerId, wx, wy, sel, cards, strokes, liftZ)
     }
 
@@ -342,7 +342,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
                     board.applyChange(change, record = true)
                 }
                 board.selection.refreshSingleCardFrame()
-                Log.i(BoardInteractionController.TAG, "[CardPerf] kind=resize input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed handle=${m.handle}")
+                Log.i(LogTags.INTERACTION, "[CardPerf] kind=resize input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed handle=${m.handle}")
             }
             is MoveSession.Selection -> {
                 board.overlay.endMovePreview()
@@ -353,7 +353,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
                     val (card, z) = single
                     settleCardDrop(card, card.x + dx, card.y + dy, z)
                     board.selection.refreshSingleCardFrame()
-                    Log.i(BoardInteractionController.TAG, "[CardPerf] kind=move input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed")
+                    Log.i(LogTags.INTERACTION, "[CardPerf] kind=move input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed")
                 } else if (abs(dx) > 0.01f || abs(dy) > 0.01f) {
                     val change = BoardHistory.Change("selection-move")
                     val movedCards = HashMap<String, BoardEngine.CardRec>()
@@ -383,10 +383,10 @@ internal class SelectionTransforms(private val board: BoardInteractionController
                     val rect = RectF(m.selection.rect).apply { offset(dx, dy) }
                     board.selection.lasso = LassoSelection(rect, m.selection.cardIds, m.selection.strokeIds, m.selection.fromLasso)
                     BoardEngine.mutate { setSelection(board.selection.selectionIds()) }
-                    Log.i(BoardInteractionController.TAG_LASSO, "reassigned strokes=${m.strokes.size} destination=${if (destInGroup) "unchanged:in-selection" else destination?.id ?: "canvas"}")
+                    Log.i(LogTags.LASSO, "reassigned strokes=${m.strokes.size} destination=${if (destInGroup) "unchanged:in-selection" else destination?.id ?: "canvas"}")
                 }
                 board.selection.updateLassoOverlay()
-                Log.i(BoardInteractionController.TAG, "[LassoPerf] input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed dx=$dx dy=$dy")
+                Log.i(LogTags.INTERACTION, "[LassoPerf] input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed dx=$dx dy=$dy")
             }
             is MoveSession.SelectionResize -> {
                 board.overlay.endMovePreview()
@@ -424,7 +424,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
                     BoardEngine.mutate { setSelection(board.selection.selectionIds()) }
                 }
                 board.selection.updateLassoOverlay()
-                Log.i(BoardInteractionController.TAG, "[LassoPerf] kind=selection-resize input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed fx=$fx fy=$fy")
+                Log.i(LogTags.INTERACTION, "[LassoPerf] kind=selection-resize input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed fx=$fx fy=$fy")
             }
             is MoveSession.SelectionRotate -> {
                 board.overlay.endMovePreview()
@@ -444,7 +444,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
                     BoardEngine.mutate { setSelection(board.selection.selectionIds()) }
                 }
                 board.selection.updateLassoOverlay()
-                Log.i(BoardInteractionController.TAG, "[LassoPerf] kind=selection-rotate input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed deg=${Math.toDegrees(m.angle.toDouble())}")
+                Log.i(LogTags.INTERACTION, "[LassoPerf] kind=selection-rotate input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed deg=${Math.toDegrees(m.angle.toDouble())}")
             }
         }
         board.presentation.release(BoardPresentation.Reason.TRANSFORM)

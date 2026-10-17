@@ -27,9 +27,9 @@ class BoardInteractionController(
     internal val emitter: BoardCommandEmitter,
 ) : InputRouter.Sink, BoardChromeView.Listener {
     companion object {
-        const val TAG = "MosaicInteraction"
-        const val TAG_PEN = "MosaicPen"
-        const val TAG_LASSO = "MosaicLasso"
+        private const val TAG = LogTags.INTERACTION
+        private const val TAG_PEN = LogTags.PEN
+        private const val TAG_LASSO = LogTags.LASSO
         private const val TAG_TOOL = "MosaicTool"
 
         const val PEN_WIDTH_DP = 2f

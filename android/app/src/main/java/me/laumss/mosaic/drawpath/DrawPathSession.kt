@@ -103,7 +103,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
 
             view.mainHandler.post {
                 if (!view.attached) return@post
-                Log.i(MosaicBoardView.TAG, "display changed: rotation=${view.display?.rotation}")
+                Log.i(LogTags.BOARD_VIEW, "display changed: rotation=${view.display?.rotation}")
                 requestRotationReconfigure("displayChanged")
             }
         }
@@ -122,7 +122,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
             if (!view.attached) return
             val rotation = view.display?.rotation ?: 0
             if (rotation != lastObservedRotation) {
-                Log.i(MosaicBoardView.TAG, "orientation watcher: $lastObservedRotation -> $rotation")
+                Log.i(LogTags.BOARD_VIEW, "orientation watcher: $lastObservedRotation -> $rotation")
                 requestRotationReconfigure("orientationWatcher")
             }
             view.mainHandler.postDelayed(this, 250L)
@@ -205,7 +205,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
                     DrawPathClient.restoreHostPenButtonStyle(binder, drawPathAppName, settings.raw["lamy_button"] == "1")
                     DrawPathClient.release(binder, drawPathAppName)
                 }
-            } catch (e: Throwable) { Log.w(MosaicBoardView.TAG, "drawPath release on detach failed", e) }
+            } catch (e: Throwable) { Log.w(LogTags.BOARD_VIEW, "drawPath release on detach failed", e) }
         }
         drawPathActive = false
         configured = false
@@ -218,7 +218,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         penStyle = style
         penWidth = (width * 100f).toInt().coerceIn(50, 4000)
         penConfigDirty = true
-        Log.i(MosaicBoardView.TAG, "pen style requested type=${style.objType} stdWidth=$width sent=${drawPathPenWidth()} configured=$configured suspended=$drawPathSuspended")
+        Log.i(LogTags.BOARD_VIEW, "pen style requested type=${style.objType} stdWidth=$width sent=${drawPathPenWidth()} configured=$configured suspended=$drawPathSuspended")
         if (configured && !drawPathSuspended) rearmDrawPath("pen-style")
     }
 
@@ -303,12 +303,12 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         if (color == previous) return
         penConfigDirty = true
         if (!configured || !drawPathActive) {
-            Log.i(MosaicBoardView.TAG, "[MosaicTrail] color=$color stored reason=$reason configured=$configured active=$drawPathActive")
+            Log.i(LogTags.BOARD_VIEW, "[MosaicTrail] color=$color stored reason=$reason configured=$configured active=$drawPathActive")
             return
         }
         if (view.inkHandoff.stylusContact || view.inkHandoff.awaitingStrokeCommit) {
             view.inkHandoff.hoverRearmDeferred = true
-            Log.i(MosaicBoardView.TAG, "[MosaicTrail] color=$color deferred reason=$reason contact=${view.inkHandoff.stylusContact} awaitingCommit=${view.inkHandoff.awaitingStrokeCommit}")
+            Log.i(LogTags.BOARD_VIEW, "[MosaicTrail] color=$color deferred reason=$reason contact=${view.inkHandoff.stylusContact} awaitingCommit=${view.inkHandoff.awaitingStrokeCommit}")
             return
         }
         val binder = drawPathBinder ?: return
@@ -319,10 +319,10 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
                 DrawPathClient.sendPenButtonOverride(binder, drawPathAppName, drawPathPenType(), drawPathPenWidth(), color)
             }
             penConfigDirty = false
-            Log.i(MosaicBoardView.TAG, "[MosaicTrail] color=$color sent reason=$reason")
+            Log.i(LogTags.BOARD_VIEW, "[MosaicTrail] color=$color sent reason=$reason")
         } catch (error: Throwable) {
             drawPathBinder = null
-            Log.w(MosaicBoardView.TAG, "[MosaicTrail] sendPenInfo failed reason=$reason", error)
+            Log.w(LogTags.BOARD_VIEW, "[MosaicTrail] sendPenInfo failed reason=$reason", error)
         }
     }
 
@@ -343,7 +343,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
     private fun applyDrawPathSuspension(was: Boolean, reason: String) {
         val suspended = drawPathSuspended
         if (was == suspended) return
-        Log.i(MosaicBoardView.TAG, "drawPath suspended=$suspended reason=$reason requested=$suspendRequested region=$regionBlocked configured=$configured active=$drawPathActive")
+        Log.i(LogTags.BOARD_VIEW, "drawPath suspended=$suspended reason=$reason requested=$suspendRequested region=$regionBlocked configured=$configured active=$drawPathActive")
         if (!configured) return
         if (suspended) {
             if (drawPathActive) disableDrawPath("suspend:$reason")
@@ -360,12 +360,12 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         if (!force && now - lastWriteInfoRefreshAt < WRITE_INFO_REFRESH_MIN_INTERVAL_MS) return
         lastWriteInfoRefreshAt = now
         val requestId = writeInfoRequestId.incrementAndGet()
-        Log.i(MosaicBoardView.TAG, "drawPath context refresh queued reason=$reason request=$requestId")
+        Log.i(LogTags.BOARD_VIEW, "drawPath context refresh queued reason=$reason request=$requestId")
         DrawPathContextClient.refresh(view.reactContext) { snapshot ->
             view.mainHandler.post {
                 if (!view.attached || requestId != writeInfoRequestId.get()) return@post
                 if (snapshot == null) {
-                    Log.i(MosaicBoardView.TAG, "drawPath context unavailable reason=$reason request=$requestId")
+                    Log.i(LogTags.BOARD_VIEW, "drawPath context unavailable reason=$reason request=$requestId")
                     return@post
                 }
                 val currentPath = try {
@@ -375,7 +375,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
                 }
                 if (currentPath != null && currentPath != snapshot.notePath) {
                     Log.i(
-                        MosaicBoardView.TAG,
+                        LogTags.BOARD_VIEW,
                         "drawPath context changed during query reason=$reason " +
                             "${snapshot.notePath}->$currentPath",
                     )
@@ -390,7 +390,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
                 writeContext = context
                 val binder = drawPathBinder ?: ensureBinder()
                 if (binder == null) {
-                    Log.i(MosaicBoardView.TAG, "drawPath context cached without binder reason=$reason")
+                    Log.i(LogTags.BOARD_VIEW, "drawPath context cached without binder reason=$reason")
                     return@post
                 }
                 if (lastWriteInfoSent == context) return@post
@@ -403,13 +403,13 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
                     )
                     lastWriteInfoSent = context
                     Log.i(
-                        MosaicBoardView.TAG,
+                        LogTags.BOARD_VIEW,
                         "drawPath context applied reason=$reason " +
                             "sdkPage=${snapshot.sdkPage} hostPage=${snapshot.hostPage} " +
                             "layer=${snapshot.layerId}",
                     )
                 } catch (error: Throwable) {
-                    Log.w(MosaicBoardView.TAG, "drawPath context apply failed reason=$reason", error)
+                    Log.w(LogTags.BOARD_VIEW, "drawPath context apply failed reason=$reason", error)
                     drawPathBinder = null
                 }
             }
@@ -427,14 +427,14 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
             )
             lastWriteInfoSent = context
             Log.i(
-                MosaicBoardView.TAG,
+                LogTags.BOARD_VIEW,
                 "drawPath context reasserted reason=$reason " +
                     "sdkPage=${context.sdkPage} hostPage=${context.hostPage} " +
                     "layer=${context.layerId}",
             )
             true
         } catch (error: Throwable) {
-            Log.w(MosaicBoardView.TAG, "drawPath context reassert failed reason=$reason", error)
+            Log.w(LogTags.BOARD_VIEW, "drawPath context reassert failed reason=$reason", error)
             drawPathBinder = null
             false
         }
@@ -443,7 +443,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
     fun enableDrawPath(reason: String) {
         val binder = ensureBinder()
         if (binder == null) {
-            Log.w(MosaicBoardView.TAG, "drawPath enable pending: reason=$reason binder=null")
+            Log.w(LogTags.BOARD_VIEW, "drawPath enable pending: reason=$reason binder=null")
             drawPathActive = false
             return
         }
@@ -452,7 +452,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
             drawPathActive = true
             penConfigDirty = false
             Log.i(
-                MosaicBoardView.TAG,
+                LogTags.BOARD_VIEW,
                 "drawPath direct enabled: reason=$reason app=$drawPathAppName " +
                     "type=${drawPathPenType()} style=${penStyle.name} " +
                     "width=${drawPathPenWidth()} color=$drawPathPenColor",
@@ -460,12 +460,12 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         } catch (error: Throwable) {
             drawPathActive = false
             drawPathBinder = null
-            Log.w(MosaicBoardView.TAG, "drawPath enable failed: reason=$reason", error)
+            Log.w(LogTags.BOARD_VIEW, "drawPath enable failed: reason=$reason", error)
         }
     }
 
     fun reassertPenBlock(reason: String) {
-        Log.i(MosaicBoardView.TAG, "[MosaicPenButton] block reason=$reason ink=${view.inkEnabled} lasso=${view.lassoEnabled} active=$drawPathActive configured=$configured contact=${view.inkHandoff.stylusContact}")
+        Log.i(LogTags.BOARD_VIEW, "[MosaicPenButton] block reason=$reason ink=${view.inkEnabled} lasso=${view.lassoEnabled} active=$drawPathActive configured=$configured contact=${view.inkHandoff.stylusContact}")
         if (!view.attached || !configured || view.inkEnabled || drawPathActive) return
 
         DrawPathGate.reblock("pen-block:$reason", PEN_BLOCK_REASSERT_MS)
@@ -476,10 +476,10 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         val binder = drawPathBinder ?: return
         try {
             synchronized(DrawPathGate.writeLock) { DrawPathClient.disableAll(binder, drawPathAppName) }
-            Log.i(MosaicBoardView.TAG, "drawPath disabled: reason=$reason")
+            Log.i(LogTags.BOARD_VIEW, "drawPath disabled: reason=$reason")
         } catch (error: Throwable) {
             drawPathBinder = null
-            Log.w(MosaicBoardView.TAG, "drawPath disable failed: reason=$reason", error)
+            Log.w(LogTags.BOARD_VIEW, "drawPath disable failed: reason=$reason", error)
         }
     }
 
@@ -517,7 +517,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
                 DrawPathClient.sendStylusCalibration(binder, drawPathAppName, stylusCalibX, stylusCalibY, stylusLeftHand)
             } else {
                 DrawPathClient.disableAll(binder, drawPathAppName)
-                if (held) Log.i(MosaicBoardView.TAG, "drawPath enable held by pen gate reason=$reason ${DrawPathGate.describe()}")
+                if (held) Log.i(LogTags.BOARD_VIEW, "drawPath enable held by pen gate reason=$reason ${DrawPathGate.describe()}")
             }
 
             DrawPathClient.sendPenButtonOverride(binder, drawPathAppName, drawPathPenType(), drawPathPenWidth(), drawPathPenColor)
@@ -534,7 +534,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         val realSize = Point()
         view.display?.getRealSize(realSize)
         Log.i(
-            MosaicBoardView.TAG,
+            LogTags.BOARD_VIEW,
             "drawPath reconfigure requested: source=$source token=$token " +
                 "rotation=$expectedRotation display=${realSize.x}x${realSize.y}",
         )
@@ -543,24 +543,24 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         listOf(350L, 900L, 1600L, 2800L).forEach { delay ->
             view.mainHandler.postDelayed({
                 if (!view.attached) {
-                    Log.i(MosaicBoardView.TAG, "drawPath settle skipped: source=$source delay=$delay detached")
+                    Log.i(LogTags.BOARD_VIEW, "drawPath settle skipped: source=$source delay=$delay detached")
                     return@postDelayed
                 }
                 if (token != rotationReconfigureToken) {
-                    Log.i(MosaicBoardView.TAG, "drawPath settle skipped: source=$source delay=$delay superseded")
+                    Log.i(LogTags.BOARD_VIEW, "drawPath settle skipped: source=$source delay=$delay superseded")
                     return@postDelayed
                 }
                 val actualRotation = view.display?.rotation ?: -1
                 if (actualRotation != expectedRotation) {
                     Log.i(
-                        MosaicBoardView.TAG,
+                        LogTags.BOARD_VIEW,
                         "drawPath settle skipped: source=$source delay=$delay " +
                             "rotationChanged=$expectedRotation->$actualRotation",
                     )
                     return@postDelayed
                 }
                 Log.i(
-                    MosaicBoardView.TAG,
+                    LogTags.BOARD_VIEW,
                     "drawPath settle reconfigure: source=$source token=$token " +
                         "delay=$delay rotation=$actualRotation",
                 )
@@ -574,13 +574,13 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         configured = false
         val generation = ++configureGeneration
         Log.i(
-            MosaicBoardView.TAG,
+            LogTags.BOARD_VIEW,
             "drawPath configure queued: reason=$reason generation=$generation " +
                 "rotation=${view.display?.rotation} attached=${view.attached}",
         )
         view.mainHandler.post {
             Log.i(
-                MosaicBoardView.TAG,
+                LogTags.BOARD_VIEW,
                 "drawPath configure dispatch: reason=$reason generation=$generation " +
                     "currentGeneration=$configureGeneration",
             )
@@ -590,24 +590,24 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
 
     private fun configureWithRetry(generation: Int, attempt: Int, reason: String) {
         if (!view.attached) {
-            Log.i(MosaicBoardView.TAG, "drawPath configure cancelled: reason=$reason generation=$generation detached")
+            Log.i(LogTags.BOARD_VIEW, "drawPath configure cancelled: reason=$reason generation=$generation detached")
             return
         }
         if (generation != configureGeneration) {
             Log.i(
-                MosaicBoardView.TAG,
+                LogTags.BOARD_VIEW,
                 "drawPath configure cancelled: reason=$reason generation=$generation " +
                     "supersededBy=$configureGeneration",
             )
             return
         }
         if (configured) {
-            Log.i(MosaicBoardView.TAG, "drawPath configure skipped: reason=$reason generation=$generation alreadyConfigured")
+            Log.i(LogTags.BOARD_VIEW, "drawPath configure skipped: reason=$reason generation=$generation alreadyConfigured")
             return
         }
 
         Log.i(
-            MosaicBoardView.TAG,
+            LogTags.BOARD_VIEW,
             "drawPath configure enter: reason=$reason generation=$generation " +
                 "attempt=$attempt rotation=${view.display?.rotation}",
         )
@@ -615,7 +615,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
             publishHostRotation()
             val binder = ensureBinder()
             if (binder == null) {
-                Log.w(MosaicBoardView.TAG, "drawPath binder unavailable: reason=$reason attempt=$attempt")
+                Log.w(LogTags.BOARD_VIEW, "drawPath binder unavailable: reason=$reason attempt=$attempt")
                 scheduleRetry(generation, attempt, reason)
                 return
             }
@@ -625,7 +625,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
             configured = true
             drawPathActive = shouldRender
             Log.i(
-                MosaicBoardView.TAG,
+                LogTags.BOARD_VIEW,
                 "drawPath direct configured: reason=$reason generation=$generation " +
                     "rotation=${view.display?.rotation} attempt=$attempt " +
                     "active=$drawPathActive width=$drawPathWidth color=$drawPathPenColor",
@@ -640,7 +640,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
             }
         } catch (error: Throwable) {
             Log.w(
-                MosaicBoardView.TAG,
+                LogTags.BOARD_VIEW,
                 "drawPath configure failed: reason=$reason generation=$generation attempt=$attempt",
                 error,
             )
@@ -655,9 +655,9 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         try {
             configureDrawPath(binder, drawPathActive, reason)
             penConfigDirty = false
-            Log.i(MosaicBoardView.TAG, "drawPath rearm: reason=$reason active=$drawPathActive")
+            Log.i(LogTags.BOARD_VIEW, "drawPath rearm: reason=$reason active=$drawPathActive")
         } catch (e: Throwable) {
-            Log.w(MosaicBoardView.TAG, "drawPath rearm failed: reason=$reason", e)
+            Log.w(LogTags.BOARD_VIEW, "drawPath rearm failed: reason=$reason", e)
             drawPathBinder = null
         }
     }
@@ -665,7 +665,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
     private fun scheduleRetry(generation: Int, attempt: Int, reason: String) {
         val delay = if (attempt < FAST_MAX_ATTEMPTS) RETRY_INTERVAL_MS else SLOW_RETRY_INTERVAL_MS
         Log.i(
-            MosaicBoardView.TAG,
+            LogTags.BOARD_VIEW,
             "drawPath retry queued: reason=$reason generation=$generation " +
                 "nextAttempt=${attempt + 1} delay=$delay",
         )

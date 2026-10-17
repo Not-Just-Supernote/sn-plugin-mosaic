@@ -39,15 +39,15 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
         if (candidate != null) {
             board.pen.discardWriteTrail(s, "card-frame")
             createCardFromFrame(candidate)
-            Log.i(BoardInteractionController.TAG_PEN, "UP consumed as card frame")
+            Log.i(LogTags.PEN, "UP consumed as card frame")
             return true
         }
         if (extendCardFromBracket(s)) {
-            Log.i(BoardInteractionController.TAG_PEN, "UP consumed as card edge extend")
+            Log.i(LogTags.PEN, "UP consumed as card edge extend")
             return true
         }
         if (completeCardStroke(s)) {
-            Log.i(BoardInteractionController.TAG_PEN, "UP consumed as card connection")
+            Log.i(LogTags.PEN, "UP consumed as card connection")
             return true
         }
         return false
@@ -65,7 +65,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
             if (moved < CARD_FRAME_PREVIEW_CANCEL_MOVE_DP) return
             s.frameCandidate = null
             board.overlay.hideFramePreview()
-            Log.i(BoardInteractionController.TAG_PEN, "[CardFrame] preview cancelled movement=${moved}dp")
+            Log.i(LogTags.PEN, "[CardFrame] preview cancelled movement=${moved}dp")
         }
         val movement = hypot(wx - s.frameLastMeaningfulX, wy - s.frameLastMeaningfulY) * scale
         if (movement < CARD_FRAME_HOLD_MOVE_SLOP_DP) return
@@ -79,14 +79,14 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
             val evaluation = CardFrameRecognizer.evaluate(s.points.toArray(), CardFrameRecognizer.Options(viewportScale = BoardViewport.scale))
             val rect = evaluation.rect
             if (rect == null) {
-                Log.i(BoardInteractionController.TAG_PEN, "[CardFrame] hold rejected attempt=${s.frameEvaluations} reason=${evaluation.reason} ${evaluation.metrics?.format()}")
+                Log.i(LogTags.PEN, "[CardFrame] hold rejected attempt=${s.frameEvaluations} reason=${evaluation.reason} ${evaluation.metrics?.format()}")
                 return@Runnable
             }
             s.frameCandidate = rect
             s.frameRecognizedX = s.points[s.points.size - 2]
             s.frameRecognizedY = s.points[s.points.size - 1]
             board.overlay.showFramePreview(board.worldRectToPx(BoardGeometry.cardRectFromFrame(rect), RectF()))
-            Log.i(BoardInteractionController.TAG_PEN, "[CardFrame] hold recognized attempt=${s.frameEvaluations} ${evaluation.metrics?.format()}")
+            Log.i(LogTags.PEN, "[CardFrame] hold recognized attempt=${s.frameEvaluations} ${evaluation.metrics?.format()}")
         }
         frameHoldTask = task
         board.handler.postDelayed(task, CARD_FRAME_HOLD_MS)
@@ -106,7 +106,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
             captured++
         }
         board.applyChange(change, record = true)
-        Log.i(BoardInteractionController.TAG_PEN, "[CardFrame] created card=${created.id} rect=$rect capturedInk=$captured")
+        Log.i(LogTags.PEN, "[CardFrame] created card=${created.id} rect=$rect capturedInk=$captured")
     }
 
     // 在卡片边上画方括号，卡片朝那一侧变宽或变高，最多长到挡路的卡片前。框进新区域的画布笔迹收进卡片。
@@ -122,7 +122,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
         val result = CardEdgeExtend.recognize(world, BoardEngine.cardsByZ.asReversed(), BoardViewport.scale)
         val match = result.match
         if (match == null) {
-            result.note?.let { Log.i(BoardInteractionController.TAG_PEN, "[CardExtend] rejected $it") }
+            result.note?.let { Log.i(LogTags.PEN, "[CardExtend] rejected $it") }
             return false
         }
         val card = match.card
@@ -132,7 +132,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
         // 认出是方括号就吃掉这一笔，挡死了也不留下笔迹。
         board.pen.discardWriteTrail(s, "card-extend")
         if (target.width() - card.width < 1f && target.height() - card.height < 1f) {
-            Log.i(BoardInteractionController.TAG_PEN, "[CardExtend] blocked card=${card.id} side=${match.side} ${match.metrics}")
+            Log.i(LogTags.PEN, "[CardExtend] blocked card=${card.id} side=${match.side} ${match.metrics}")
             return true
         }
         val grown = card.withRect(target)
@@ -157,7 +157,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
         }
         board.applyChange(change, record = true)
         val clamped = target != match.rect
-        Log.i(BoardInteractionController.TAG_PEN, "[CardExtend] card=${card.id} side=${match.side} rect=$target clamped=$clamped capturedInk=$captured ${match.metrics}")
+        Log.i(LogTags.PEN, "[CardExtend] card=${card.id} side=${match.side} rect=$target clamped=$clamped capturedInk=$captured ${match.metrics}")
         return true
     }
 
@@ -190,7 +190,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
         val r = RectF()
         for (other in BoardEngine.cards.values) {
             if (other.id != cardId && RectF.intersects(grown, other.rect(r)) && !RectF.intersects(old, r)) {
-                Log.i(BoardInteractionController.TAG_PEN, "card grow skipped card=$cardId blocked-by=${other.id}")
+                Log.i(LogTags.PEN, "card grow skipped card=$cardId blocked-by=${other.id}")
                 return null
             }
         }
@@ -202,7 +202,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
         } else {
             change.stroke(null, rec)
         }
-        Log.i(BoardInteractionController.TAG_PEN, "card grow card=$cardId $old -> $grown")
+        Log.i(LogTags.PEN, "card grow card=$cardId $old -> $grown")
         change
     }
 
@@ -235,12 +235,12 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
         onRecognized(if (target != null) "card-connection" else "card-from-stroke")
         if (target != null) {
             if (!BoardGeometry.canConnect(source, target)) {
-                Log.i(BoardInteractionController.TAG_PEN, "card thread rejected source=$sourceId target=${target.id} reason=color-mismatch")
+                Log.i(LogTags.PEN, "card thread rejected source=$sourceId target=${target.id} reason=color-mismatch")
                 return true
             }
             val thread = BoardEngine.threadStroke(board.newId("stroke-"), source, target)
             if (thread == null) {
-                Log.i(BoardInteractionController.TAG_PEN, "card thread rejected source=$sourceId target=${target.id} reason=overlap")
+                Log.i(LogTags.PEN, "card thread rejected source=$sourceId target=${target.id} reason=overlap")
                 return true
             }
             board.applyChange(BoardHistory.Change("thread").stroke(null, thread), record = true)

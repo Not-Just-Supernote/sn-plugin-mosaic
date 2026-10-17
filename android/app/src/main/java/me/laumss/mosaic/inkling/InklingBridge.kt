@@ -66,7 +66,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
             board.handler.removeCallbacks(dragNoteResetTask)
             board.handler.postDelayed(dragNoteResetTask, BoardInteractionController.NOTE_SCROLL_SETTLE_MS)
         }
-        Log.i(BoardInteractionController.TAG, "inkling overlay drag active=$active board=$dragOnBoard reason=$reason")
+        Log.i(LogTags.INTERACTION, "inkling overlay drag active=$active board=$dragOnBoard reason=$reason")
     }
 
     fun resetOverlayDrag() {
@@ -85,13 +85,13 @@ internal class InklingBridge(private val board: BoardInteractionController) {
 
     fun clearSelection(delete: Boolean) {
         if (!InklingLink.isInkSurface()) {
-            Log.i(BoardInteractionController.TAG_LASSO, "inkling clear-selection deferred surface=${InklingLink.currentSurface()} delete=$delete")
+            Log.i(LogTags.LASSO, "inkling clear-selection deferred surface=${InklingLink.currentSurface()} delete=$delete")
             return
         }
         val sel = board.selection.lasso
         if (sel == null) {
             exportLassoStrokes(null)
-            Log.i(BoardInteractionController.TAG_LASSO, "inkling clear-selection: no selection, file removed")
+            Log.i(LogTags.LASSO, "inkling clear-selection: no selection, file removed")
             return
         }
         if (delete) {
@@ -99,12 +99,12 @@ internal class InklingBridge(private val board: BoardInteractionController) {
         } else {
             board.selection.setLasso(null)
         }
-        Log.i(BoardInteractionController.TAG_LASSO, "inkling clear-selection delete=$delete strokes=${sel.strokeIds.size} cards=${sel.cardIds.size}")
+        Log.i(LogTags.LASSO, "inkling clear-selection delete=$delete strokes=${sel.strokeIds.size} cards=${sel.cardIds.size}")
     }
 
     fun insertTextCard(text: String, anchorScreenX: Int, anchorScreenY: Int) {
         if (!InklingLink.isBoardSurface()) {
-            Log.i(BoardInteractionController.TAG, "inkling text-card deferred surface=${InklingLink.currentSurface()}")
+            Log.i(LogTags.INTERACTION, "inkling text-card deferred surface=${InklingLink.currentSurface()}")
             return
         }
         board.refreshViewOffset()
@@ -115,7 +115,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
 
     fun insertDocTextCard(text: String) {
         if (!board.surface.showsBoardChrome) {
-            Log.i(BoardInteractionController.TAG, "doc text-card ignored surface=${board.surface.name}")
+            Log.i(LogTags.INTERACTION, "doc text-card ignored surface=${board.surface.name}")
             return
         }
         val view = board.viewWorld()
@@ -124,7 +124,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
 
     fun importNoteCard(path: String, title: String, done: (Result<Boolean>) -> Unit) {
         if (!board.surface.showsBoardChrome || board.notes.suspendedBoard != null || board.surfaceSwitching || board.notes.notesDirectory.isBlank()) {
-            Log.i(BoardInteractionController.TAG, "note import deferred surface=${board.surface.name}")
+            Log.i(LogTags.INTERACTION, "note import deferred surface=${board.surface.name}")
             done(Result.success(false))
             return
         }
@@ -133,19 +133,19 @@ internal class InklingBridge(private val board: BoardInteractionController) {
         clipboardIo.submitNoteImport(File(path)) { parsed ->
             board.handler.post {
                 val imported = parsed.getOrElse {
-                    Log.e(BoardInteractionController.TAG, "note import parse failed path=$path", it)
+                    Log.e(LogTags.INTERACTION, "note import parse failed path=$path", it)
                     done(Result.failure(it))
                     return@post
                 }
                 board.notes.noteController.create(directory, ScrollingDocument(ref, imported.strokes, 0f), imported.preparedPreview) { written ->
                     val doc = written.getOrElse {
-                        Log.e(BoardInteractionController.TAG, "note import write failed ref=$ref", it)
+                        Log.e(LogTags.INTERACTION, "note import write failed ref=$ref", it)
                         done(Result.failure(it))
                         return@create
                     }
                     if (!board.surface.showsBoardChrome || board.notes.suspendedBoard != null || board.surfaceSwitching) {
                         File(directory, "$ref.mnote").delete(); File(directory, ref).deleteRecursively()
-                        Log.i(BoardInteractionController.TAG, "note import deferred after write surface=${board.surface.name}")
+                        Log.i(LogTags.INTERACTION, "note import deferred after write surface=${board.surface.name}")
                         done(Result.success(false))
                         return@create
                     }
@@ -163,7 +163,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
                     )
                     board.applyChange(BoardHistory.Change("import-note").card(null, card), record = true)
                     board.selection.selectSingleCard(card); board.scheduleChromeUpdate()
-                    Log.i(BoardInteractionController.TAG, "imported note card=${card.id} ref=$ref pages=${imported.pageCount} strokes=${doc.strokes.size} size=${size[0]}x${size[1]}")
+                    Log.i(LogTags.INTERACTION, "imported note card=${card.id} ref=$ref pages=${imported.pageCount} strokes=${doc.strokes.size} size=${size[0]}x${size[1]}")
                     done(Result.success(true))
                 }
             }
@@ -187,7 +187,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
             putDouble("height", size.y.toDouble())
             putString("source", source)
         }
-        Log.i(BoardInteractionController.TAG, "imported text card source=$source at world=($left,$top) size=${size.x}x${size.y} len=${text.length}")
+        Log.i(LogTags.INTERACTION, "imported text card source=$source at world=($left,$top) size=${size.x}x${size.y} len=${text.length}")
     }
 
     fun invalidateClipboardWork(reason: String) {
@@ -197,7 +197,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
         // Drop the old surface's selection file too; only bumping the generation would also cancel a pending
         // delete and leave a stale clip_lasso.json that makes Notipal save instead of paste.
         exportLassoStrokes(null)
-        Log.i(BoardInteractionController.TAG_LASSO, "clipboard work invalidated reason=$reason generation=$generation")
+        Log.i(LogTags.LASSO, "clipboard work invalidated reason=$reason generation=$generation")
     }
 
     private fun paletteStrokes(): List<BoardEngine.StrokeRec> = synchronized(BoardEngine.lock) {
@@ -250,7 +250,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
         board.content.markSettleRequested()
         board.content.postInvalidateOnAnimation()
         board.host.invalidate()
-        Log.i(BoardInteractionController.TAG_LASSO, "Mosaic palette applied pen=${data.optString("penId")} strokes=$changed")
+        Log.i(LogTags.LASSO, "Mosaic palette applied pen=${data.optString("penId")} strokes=$changed")
         return org.json.JSONObject().put("success", true).put("changed", changed)
     }
 
@@ -311,14 +311,14 @@ internal class InklingBridge(private val board: BoardInteractionController) {
             isCurrent = { exportGeneration.get() == sequence },
         ) { result ->
             result.onSuccess { count ->
-                if (count > 0) Log.i(BoardInteractionController.TAG_LASSO, "exported $count strokes -> ${file.path}")
-            }.onFailure { Log.w(BoardInteractionController.TAG_LASSO, "exportLassoStrokes failed", it) }
+                if (count > 0) Log.i(LogTags.LASSO, "exported $count strokes -> ${file.path}")
+            }.onFailure { Log.w(LogTags.LASSO, "exportLassoStrokes failed", it) }
         }
     }
 
     fun handlePasteStrokes() {
         if (!InklingLink.isInkSurface()) {
-            Log.i(BoardInteractionController.TAG_LASSO, "paste deferred surface=${InklingLink.currentSurface()}")
+            Log.i(LogTags.LASSO, "paste deferred surface=${InklingLink.currentSurface()}")
             return
         }
         val file = File(InklingLink.PASTE_STROKES_FILE)
@@ -341,7 +341,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
                 if (generation != pasteGeneration.get() || board.surfaceSwitching || !InklingLink.isInkSurface()) return@post
                 val batch = result.getOrNull()
                 if (batch == null || batch.strokes.isEmpty()) {
-                    result.exceptionOrNull()?.let { Log.w(BoardInteractionController.TAG_LASSO, "paste parse failed", it) }
+                    result.exceptionOrNull()?.let { Log.w(LogTags.LASSO, "paste parse failed", it) }
                     return@post
                 }
                 val change = BoardHistory.Change("paste")
@@ -374,7 +374,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
                 board.content.postInvalidateOnAnimation()
                 board.host.invalidate()
                 Log.i(
-                    BoardInteractionController.TAG_LASSO,
+                    LogTags.LASSO,
                     "pasted ${pastedIds.size} strokes at viewport center world=(${"%.0f".format(viewCx)},${"%.0f".format(viewCy)}) " +
                         "size=${"%.0f".format((batch.maxX - batch.minX) * worldScale * batch.pageScale)}x${"%.0f".format((batch.maxY - batch.minY) * worldScale * batch.pageScale)} " +
                         "pan=(${BoardViewport.panX},${BoardViewport.panY}) scale=${BoardViewport.scale} pageScale=${batch.pageScale} pinnedWhite=$pinned",

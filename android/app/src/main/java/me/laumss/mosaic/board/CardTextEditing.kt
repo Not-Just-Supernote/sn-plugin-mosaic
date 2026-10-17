@@ -107,7 +107,7 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
         } else 0f
         val want = wantPx / board.density
         if (want == keyboardShift) return
-        Log.i(BoardInteractionController.TAG, "card editor keyboard shift ${keyboardShift}->$want obscuredTop=$obscuredTop")
+        Log.i(LogTags.INTERACTION, "card editor keyboard shift ${keyboardShift}->$want obscuredTop=$obscuredTop")
         BoardViewport.set(BoardViewport.panX, BoardViewport.panY + keyboardShift - want, BoardViewport.scale)
         keyboardShift = want
         board.scheduleChromeUpdate()
@@ -187,7 +187,7 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
         editorView = editor
         board.host.addView(editor, FrameLayout.LayoutParams(-1, -1))
         board.host.bringChildToFront(editor)
-        Log.i(BoardInteractionController.TAG, "note header edit ref=$ref")
+        Log.i(LogTags.INTERACTION, "note header edit ref=$ref")
     }
 
     private fun updatePageHeader(ref: String, plain: String) {

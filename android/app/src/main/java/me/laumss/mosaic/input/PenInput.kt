@@ -128,11 +128,11 @@ internal class PenInput(private val board: BoardInteractionController) {
                 val session = PenSession.Lasso()
                 session.pointsPx.add(penLastX); session.pointsPx.add(penLastY)
                 penSession = session
-                Log.i(BoardInteractionController.TAG_PEN, "contact converted to lasso source=$source")
+                Log.i(LogTags.PEN, "contact converted to lasso source=$source")
             }
             state.shape -> {
                 penSession = PenSession.Shape(board.shapeKind, penLastX, penLastY)
-                Log.i(BoardInteractionController.TAG_PEN, "contact converted to shape source=$source")
+                Log.i(LogTags.PEN, "contact converted to shape source=$source")
             }
             else -> {
                 if (board.selection.lasso != null) { penSession = PenSession.Consumed; return }
@@ -151,11 +151,11 @@ internal class PenInput(private val board: BoardInteractionController) {
                 )
                 val pressure = InputReader.currentPenPressure()
                 if (pressure != null) appendWritePoint(session, wx, wy, pressure)
-                else Log.i(BoardInteractionController.TAG_PEN, "contact write waiting for drawPath pressure source")
+                else Log.i(LogTags.PEN, "contact write waiting for drawPath pressure source")
                 session.frameLastMeaningfulX = wx
                 session.frameLastMeaningfulY = wy
                 penSession = session
-                Log.i(BoardInteractionController.TAG_PEN, "contact converted to write source=$source")
+                Log.i(LogTags.PEN, "contact converted to write source=$source")
             }
         }
     }
@@ -229,7 +229,7 @@ internal class PenInput(private val board: BoardInteractionController) {
         val waitingForJsScene = board.penHeldForJsScene && board.surface.showsBoardChrome
         if (board.surfaceSwitching || waitingForJsScene || board.chrome.consumesPoint(x, y) || board.inkling.toolbarHit(x, y) || board.notes.noteHeaderHit(x, y) || board.notes.noteOffPageHit(x, y)) {
             Log.i(
-                BoardInteractionController.TAG_PEN,
+                LogTags.PEN,
                 "DOWN rejected: ${when {
                     board.surfaceSwitching -> "surface-switching"
                     waitingForJsScene -> "scene-cache"
@@ -249,7 +249,7 @@ internal class PenInput(private val board: BoardInteractionController) {
         penHoverX = x; penHoverY = y
         reevaluateTrailColor("down")
         Log.i(
-            BoardInteractionController.TAG_PEN,
+            LogTags.PEN,
             "DOWN px=($x,$y) raw=(${e.x},${e.y}) inkAlign=(${InkAlign.offsetX},${InkAlign.offsetY}) " +
                 "world=(${wx.toInt()},${wy.toInt()}) eraser=${board.eraserMode} lasso=${board.lassoMode} " +
                 "${board.arbiter.describe()} | ${InputReader.describePenRaw()} density=${board.density} " +
@@ -259,7 +259,7 @@ internal class PenInput(private val board: BoardInteractionController) {
         val downCard = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
         val downLayer = if (downCard != null) InkBackdrop.layerAt("card:${downCard.id}", wx - downCard.x, wy - downCard.y, board.penWidth * 0.5f)
             else InkBackdrop.layerAt("canvas", wx, wy, board.penWidth * 0.5f)
-        Log.i(BoardInteractionController.TAG_PEN, "[MosaicTrail] down trailWhite=$trailWhite cause=$trailCause layer=${downLayer ?: "none"} card=${downCard?.id ?: "canvas"} dark=${downCard?.colored == true}")
+        Log.i(LogTags.PEN, "[MosaicTrail] down trailWhite=$trailWhite cause=$trailCause layer=${downLayer ?: "none"} card=${downCard?.id ?: "canvas"} dark=${downCard?.colored == true}")
 
         if (board.selection.selectBelowArmed) {
             board.selection.handleSelectBelow(wy)
@@ -311,16 +311,16 @@ internal class PenInput(private val board: BoardInteractionController) {
                 val session = PenSession.Lasso()
                 session.pointsPx.add(x); session.pointsPx.add(y)
                 penSession = session
-                Log.i(BoardInteractionController.TAG_LASSO, "pen DOWN outside selection: lasso tool redraws")
+                Log.i(LogTags.LASSO, "pen DOWN outside selection: lasso tool redraws")
                 return
             }
             if (board.shapeMode) {
                 penSession = PenSession.Shape(board.shapeKind, x, y)
-                Log.i(BoardInteractionController.TAG_LASSO, "pen DOWN outside selection: shape tool draws")
+                Log.i(LogTags.LASSO, "pen DOWN outside selection: shape tool draws")
                 return
             }
             penSession = PenSession.Consumed
-            Log.i(BoardInteractionController.TAG_LASSO, "pen DOWN outside selection: cleared")
+            Log.i(LogTags.LASSO, "pen DOWN outside selection: cleared")
             return
         }
 
@@ -348,7 +348,7 @@ internal class PenInput(private val board: BoardInteractionController) {
         if (linkId != null) {
             board.host.drawPath.setSuspended(true, "note-link-tap")
             penSession = PenSession.OpenNote("", wx, wy, linkId)
-            Log.i(BoardInteractionController.TAG_PEN, "DOWN on note link badge: open on tap id=$linkId")
+            Log.i(LogTags.PEN, "DOWN on note link badge: open on tap id=$linkId")
             return
         }
         val card = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
@@ -371,7 +371,7 @@ internal class PenInput(private val board: BoardInteractionController) {
         // renders with the same directional nib; only the PEN raster reads it.
         session.nibAngle = InputReader.calligraphyNibAngleForMotionEvent(e)
         if (downPressure != null) appendWritePoint(session, wx, wy, downPressure)
-        else Log.i(BoardInteractionController.TAG_PEN, "DOWN write waiting for drawPath pressure source")
+        else Log.i(LogTags.PEN, "DOWN write waiting for drawPath pressure source")
         session.raw(e.x, e.y)
         session.frameLastMeaningfulX = wx
         session.frameLastMeaningfulY = wy
@@ -459,7 +459,7 @@ internal class PenInput(private val board: BoardInteractionController) {
     private fun penUp(e: MotionEvent, cancelled: Boolean) {
         val wasContact = penContact
         penContact = false
-        if (wasContact) Log.i(BoardInteractionController.TAG_PEN, "UP px=(${penX(e)},${penY(e)}) raw=(${e.x},${e.y}) cancelled=$cancelled | ${InputReader.describePenRaw()}")
+        if (wasContact) Log.i(LogTags.PEN, "UP px=(${penX(e)},${penY(e)}) raw=(${e.x},${e.y}) cancelled=$cancelled | ${InputReader.describePenRaw()}")
         try {
             val move = penMoveSession
             if (move != null) {
@@ -557,7 +557,7 @@ internal class PenInput(private val board: BoardInteractionController) {
         board.host.inkHandoff.commitPlainStroke { board.applyChange(change, record = true) }
         lastCardWriteId = s.cardId
         lastCardWriteAt = SystemClock.uptimeMillis()
-        if (!marker && (ink != INK_BLACK) != trailWhite) Log.i(BoardInteractionController.TAG_PEN, "[MosaicTrail] color differs from hardware trail committedWhite=${ink != INK_BLACK} trailWhite=$trailWhite stroke=${s.id}")
+        if (!marker && (ink != INK_BLACK) != trailWhite) Log.i(LogTags.PEN, "[MosaicTrail] color differs from hardware trail committedWhite=${ink != INK_BLACK} trailWhite=$trailWhite stroke=${s.id}")
         val committedPressures = s.pressures.toArray()
         val minPressure = committedPressures.minOrNull() ?: 0f
         val maxPressure = committedPressures.maxOrNull() ?: 0f
@@ -571,7 +571,7 @@ internal class PenInput(private val board: BoardInteractionController) {
         if (!minRasterWidth.isFinite()) minRasterWidth = 0f
         val screenMin = minRasterWidth * board.density * BoardViewport.scale
         val screenMax = maxRasterWidth * board.density * BoardViewport.scale
-        Log.i(BoardInteractionController.TAG_PEN, "UP committed stroke ${s.id} style=${board.penStyle.name} stdWidth=${board.penWidth} drawPathWidth=$committedDrawPathWidth pressureRange=$minPressure..$maxPressure rasterWorldRange=$minRasterWidth..$maxRasterWidth rasterScreenPxRange=$screenMin..$screenMax nibAngle=${rec.nibAngle} points=${s.points.size / 2} space=${s.space} ink=${Integer.toHexString(ink)}")
+        Log.i(LogTags.PEN, "UP committed stroke ${s.id} style=${board.penStyle.name} stdWidth=${board.penWidth} drawPathWidth=$committedDrawPathWidth pressureRange=$minPressure..$maxPressure rasterWorldRange=$minRasterWidth..$maxRasterWidth rasterScreenPxRange=$screenMin..$screenMax nibAngle=${rec.nibAngle} points=${s.points.size / 2} space=${s.space} ink=${Integer.toHexString(ink)}")
     }
 
     private fun eraseAt(session: PenSession.Erase, wx: Float, wy: Float) {
@@ -596,14 +596,14 @@ internal class PenInput(private val board: BoardInteractionController) {
         flushErase(session)
         if (!session.change.isEmpty) {
             board.history.push(session.change)
-            Log.i(BoardInteractionController.TAG_PEN, "erased ${session.change.diffs.size} strokes")
+            Log.i(LogTags.PEN, "erased ${session.change.diffs.size} strokes")
         }
     }
 
     private fun finalizeShape(s: PenSession.Shape): Boolean {
         val dragPx = hypot(s.curX - s.anchorX, s.curY - s.anchorY)
         if (dragPx < SHAPE_MIN_DRAG_DP * board.density) {
-            Log.i(BoardInteractionController.TAG_LASSO, "shape: drag too short ${dragPx}px")
+            Log.i(LogTags.LASSO, "shape: drag too short ${dragPx}px")
             return false
         }
         val ax = board.worldX(s.anchorX); val ay = board.worldY(s.anchorY)
@@ -622,7 +622,7 @@ internal class PenInput(private val board: BoardInteractionController) {
         )
         board.applyChange(BoardHistory.Change("shape").stroke(null, rec), record = true)
         val kind = Shapes.kindOf(rec)
-        Log.i(BoardInteractionController.TAG_LASSO, "shape: ${kind} points=${shape.size / 2} card=${card?.id ?: "canvas"}")
+        Log.i(LogTags.LASSO, "shape: ${kind} points=${shape.size / 2} card=${card?.id ?: "canvas"}")
         board.selection.selectStroke(rec)
         return true
     }

@@ -46,7 +46,7 @@ internal class CardCommands(private val board: BoardInteractionController) {
 
         val relinked = reconcileConnectionsForColor(moved, change)
         board.applyChange(change, record = true)
-        Log.i(BoardInteractionController.TAG, "toggle card black id=${card.id} wasBlack=$isBlack connections=$relinked")
+        Log.i(LogTags.INTERACTION, "toggle card black id=${card.id} wasBlack=$isBlack connections=$relinked")
     }
 
     private fun reconcileConnectionsForColor(next: BoardEngine.CardRec, change: BoardHistory.Change): String {
@@ -142,13 +142,13 @@ internal class CardCommands(private val board: BoardInteractionController) {
         val change = BoardHistory.Change("card-accent").card(card, next)
         val relinked = reconcileConnectionsForColor(next, change)
         board.applyChange(change, record = true)
-        Log.i(BoardInteractionController.TAG, "toggle card accent id=${card.id} colored=${next.colored} connections=$relinked")
+        Log.i(LogTags.INTERACTION, "toggle card accent id=${card.id} colored=${next.colored} connections=$relinked")
     }
 
     fun recognizeSelection() {
         val sel = board.selection.lasso ?: return
         if (!board.selection.isPureInkSelection(sel)) {
-            Log.i(BoardInteractionController.TAG_LASSO, "recognize skipped: selection not pure ink cards=${sel.cardIds.size} strokes=${sel.strokeIds.size}")
+            Log.i(LogTags.LASSO, "recognize skipped: selection not pure ink cards=${sel.cardIds.size} strokes=${sel.strokeIds.size}")
             return
         }
         val strokeIds = sel.strokeIds.toList()
@@ -158,18 +158,18 @@ internal class CardCommands(private val board: BoardInteractionController) {
         board.emitter.begin()
         board.emitter.action("recognizeLasso")
         board.emitter.commit()
-        Log.i(BoardInteractionController.TAG_LASSO, "recognize requested strokes=${strokeIds.size}")
+        Log.i(LogTags.LASSO, "recognize requested strokes=${strokeIds.size}")
     }
 
     fun createRecognizedTextCard(text: String) {
         val pending = pendingRecognition ?: return
         pendingRecognition = null
         val trimmed = text.trim()
-        if (trimmed.isEmpty()) { Log.i(BoardInteractionController.TAG_LASSO, "recognize empty text; scene unchanged"); return }
+        if (trimmed.isEmpty()) { Log.i(LogTags.LASSO, "recognize empty text; scene unchanged"); return }
         if (!board.surface.showsBoardChrome) {
             board.selection.setLasso(null)
             board.textEditing.editPageHeader(recognized = trimmed)
-            Log.i(BoardInteractionController.TAG_LASSO, "recognize note header strokes=${pending.strokeIds.size} chars=${trimmed.length}")
+            Log.i(LogTags.LASSO, "recognize note header strokes=${pending.strokeIds.size} chars=${trimmed.length}")
             return
         }
         val ink = synchronized(BoardEngine.lock) {
@@ -196,7 +196,7 @@ internal class CardCommands(private val board: BoardInteractionController) {
         board.selection.setLasso(null)
         board.applyChange(change, record = true)
         board.scheduleChromeUpdate()
-        Log.i(BoardInteractionController.TAG_LASSO, "recognize card=${created.id} replaced strokes=${pending.strokeIds.size} chars=${trimmed.length} fontScale=$fontScale")
+        Log.i(LogTags.LASSO, "recognize card=${created.id} replaced strokes=${pending.strokeIds.size} chars=${trimmed.length} fontScale=$fontScale")
     }
 
     // Text scale that makes recognized text about as large as the handwriting. Strokes are grouped into rows; the

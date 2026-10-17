@@ -57,7 +57,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
     /** The plugin is closing inside a note: save it, and put the board scene back for the scene cache. */
     fun leaveOnDetach() {
         val suspended = suspendedBoard ?: return
-        noteController.flush(false) { result -> result.onFailure { Log.e(BoardInteractionController.TAG, "note detach save failed", it) } }
+        noteController.flush(false) { result -> result.onFailure { Log.e(LogTags.INTERACTION, "note detach save failed", it) } }
         suspendedBoard = null
         board.history = suspended.history
         board.selection.lasso = null
@@ -132,7 +132,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
         board.host.inklingCallbacks.onInklingSurfaceChanged(next.name, noteRef)
         MosaicSession.saveNoteRef(board.host.context, noteRef)
         applyTemplateForSurface(next, noteRef)
-        Log.i(BoardInteractionController.TAG, "surface entered name=${next.name}")
+        Log.i(LogTags.INTERACTION, "surface entered name=${next.name}")
     }
 
     fun applyTemplateForSurface(next: BoardSurface, noteRef: String?) {
@@ -151,7 +151,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
         WhiteboardSceneGate.hold()
         noteController.open(notesDirectory, ref, create = false) { result ->
             board.surfaceSwitching = false
-            result.onFailure { WhiteboardSceneGate.release(); board.releasePaintHold("note-open-failed"); Log.e(BoardInteractionController.TAG, "note open failed", it) }
+            result.onFailure { WhiteboardSceneGate.release(); board.releasePaintHold("note-open-failed"); Log.e(LogTags.INTERACTION, "note open failed", it) }
             result.onSuccess { doc ->
                 suspendedBoard = suspended
                 board.history = BoardHistory(); board.selection.lasso = null
@@ -165,7 +165,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
                 val scene = BoardEngine.SceneSnapshot(doc.strokes, emptyList(), emptyList(), emptyList(), emptyList(), 0f, panY, scale)
                 enterSurface(note, scene)
                 board.releasePaintHold("note-opened")
-                Log.i(BoardInteractionController.TAG, "note opened ref=$ref height=${doc.contentHeight} scrollY=${doc.scrollY}")
+                Log.i(LogTags.INTERACTION, "note opened ref=$ref height=${doc.contentHeight} scrollY=${doc.scrollY}")
                 preparePendingNoteImport()
             }
         }
@@ -186,7 +186,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
         }
         noteController.flush(true) { result ->
             board.surfaceSwitching = false
-            result.onFailure { Log.e(BoardInteractionController.TAG, "note save failed; keeping note open", it) }
+            result.onFailure { Log.e(LogTags.INTERACTION, "note save failed; keeping note open", it) }
             result.onSuccess { doc ->
                 suspendedBoard = null
                 board.history = suspended.history
@@ -207,7 +207,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
                     BoardEngine.mutate { invalidateAll() }
                 }
                 noteEntryCard = null
-                board.scheduleChromeUpdate(); Log.i(BoardInteractionController.TAG, "note closed ref=${doc.ref} height=${doc.contentHeight}")
+                board.scheduleChromeUpdate(); Log.i(LogTags.INTERACTION, "note closed ref=${doc.ref} height=${doc.contentHeight}")
             }
         }
     }
@@ -233,8 +233,8 @@ internal class NoteSession(private val board: BoardInteractionController) {
         }
         noteController.flush(true) { result ->
             board.surfaceSwitching = false
-            result.onFailure { Log.e(BoardInteractionController.TAG, "note save failed on exit reason=$reason", it) }
-            Log.i(BoardInteractionController.TAG, "exit from note reason=$reason")
+            result.onFailure { Log.e(LogTags.INTERACTION, "note save failed on exit reason=$reason", it) }
+            Log.i(LogTags.INTERACTION, "exit from note reason=$reason")
             board.whiteboard.onCloseRequested(BoardSurface.CloseSource.TOOLBAR)
         }
     }
@@ -316,11 +316,11 @@ internal class NoteSession(private val board: BoardInteractionController) {
         }
         val ref = "note-" + UUID.randomUUID().toString().replace("-", "").take(12)
         noteController.open(notesDirectory, ref, create = true) { result ->
-            result.onFailure { Log.e(BoardInteractionController.TAG, "convert-to-note create failed", it) }
+            result.onFailure { Log.e(LogTags.INTERACTION, "convert-to-note create failed", it) }
             result.onSuccess {
                 noteController.changed(moved)
                 noteController.flush(preview = true) { flushed ->
-                    flushed.onFailure { Log.e(BoardInteractionController.TAG, "convert-to-note flush failed", it) }
+                    flushed.onFailure { Log.e(LogTags.INTERACTION, "convert-to-note flush failed", it) }
                     val contentHeight = flushed.getOrNull()?.contentHeight ?: ScrollingDocument.WIDTH
                     noteController.clear()
                     val size = FloatArray(2)
@@ -353,6 +353,6 @@ internal class NoteSession(private val board: BoardInteractionController) {
         val panY = if (BoardViewport.panY >= restingTop - 0.5f) BoardViewport.panY + (now - before) else BoardViewport.panY
         board.surface.constrainPan(BoardViewport.panX, panY, scale, board.viewportTmp)
         board.commitViewport(board.snapPanToPx(board.viewportTmp[0]), board.snapPanToPx(board.viewportTmp[1]), scale)
-        Log.i(BoardInteractionController.TAG, "note toolbar inset $before->$now panY ${BoardViewport.panY}")
+        Log.i(LogTags.INTERACTION, "note toolbar inset $before->$now panY ${BoardViewport.panY}")
     }
 }

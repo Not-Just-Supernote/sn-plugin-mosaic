@@ -520,7 +520,7 @@ internal class TouchInput(private val board: BoardInteractionController) {
         fingerGesture = FingerGesture.Idle
         if (a == null || b == null) return
         if (!adoptScreenTool(a, b, reason)) {
-            Log.i(PanZoomGesture.TAG_PAN, "panzoom yielded to pen: no screen tool reason=$reason")
+            Log.i(LogTags.PAN, "panzoom yielded to pen: no screen tool reason=$reason")
         }
     }
 
@@ -537,7 +537,7 @@ internal class TouchInput(private val board: BoardInteractionController) {
                 val start = launcherPullStartY
                 launcherPullStartY = Float.NaN
                 if (!start.isNaN() && y - start > 180f) {
-                    Log.i(BoardInteractionController.TAG, "launcher top-pull close distance=${y - start} surface=${board.surface.name}")
+                    Log.i(LogTags.INTERACTION, "launcher top-pull close distance=${y - start} surface=${board.surface.name}")
 
                     if (!board.surfaceSwitching) board.surface.onCloseRequested(BoardSurface.CloseSource.LAUNCHER_PULL)
                     return true

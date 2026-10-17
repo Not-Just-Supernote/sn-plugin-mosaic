@@ -55,16 +55,16 @@ internal class InkHandoff(private val view: MosaicBoardView) {
         if (!inkHandoffPending) return@Runnable
         val sincePen = SystemClock.uptimeMillis() - lastPenEventAt
         if (stylusContact && sincePen < INK_CONTACT_STALE_MS) {
-            Log.i(MosaicBoardView.TAG, "ink handoff idle: pen in contact, retry sincePen=$sincePen")
+            Log.i(LogTags.BOARD_VIEW, "ink handoff idle: pen in contact, retry sincePen=$sincePen")
             view.mainHandler.postDelayed(inkHandoffTask, INK_HANDOFF_RETRY_MS)
             return@Runnable
         }
         if (stylusContact) {
-            Log.w(MosaicBoardView.TAG, "ink handoff idle: stale pen contact cleared sincePen=$sincePen")
+            Log.w(LogTags.BOARD_VIEW, "ink handoff idle: stale pen contact cleared sincePen=$sincePen")
             stylusContact = false
             InputArbiter.onPenContact(false)
         }
-        Log.i(MosaicBoardView.TAG, "ink handoff idle: finalize")
+        Log.i(LogTags.BOARD_VIEW, "ink handoff idle: finalize")
         finalizeInkSession("idle")
     }
 
@@ -81,7 +81,7 @@ internal class InkHandoff(private val view: MosaicBoardView) {
             holdPenRefreshUntilSettle = false
             penModeApplied = false
             MosaicEinkRefreshModule.resetNative("pen")
-            Log.i(MosaicBoardView.TAG, "pen refresh mode reset by fallback")
+            Log.i(LogTags.BOARD_VIEW, "pen refresh mode reset by fallback")
         }
     }
 
@@ -120,7 +120,7 @@ internal class InkHandoff(private val view: MosaicBoardView) {
             plainStrokeCommit -> if (awaitingStrokeCommit || inkHandoffPending) holdInkHandoff()
             awaitingStrokeCommit -> finalizeInkSession("commit")
             inkHandoffPending && !stylusContact -> {
-                Log.i(MosaicBoardView.TAG, "ink handoff flushed by content change reason=$reason moved=$moved")
+                Log.i(LogTags.BOARD_VIEW, "ink handoff flushed by content change reason=$reason moved=$moved")
                 finalizeInkSession("flush")
             }
         }
@@ -195,9 +195,9 @@ internal class InkHandoff(private val view: MosaicBoardView) {
             )
             backgroundSyncUrgency = SyncUrgency.NONE
             discardSyncPending = false
-            Log.i(MosaicBoardView.TAG, "drawPath background sync: urgency=$urgency discard=$discard")
+            Log.i(LogTags.BOARD_VIEW, "drawPath background sync: urgency=$urgency discard=$discard")
         } catch (error: Throwable) {
-            Log.w(MosaicBoardView.TAG, "drawPath background sync failed: urgency=$urgency", error)
+            Log.w(LogTags.BOARD_VIEW, "drawPath background sync failed: urgency=$urgency", error)
             view.drawPath.drawPathBinder = null
         }
     }
@@ -221,7 +221,7 @@ internal class InkHandoff(private val view: MosaicBoardView) {
             syncHoldUntil = SystemClock.uptimeMillis() + SYNC_HOLD_FOR_REFRESH_MAX_MS
             view.mainHandler.postDelayed({ if (view.attached) requestFullRefreshWhenSettled(reason) }, TRAIL_CLEAR_REFRESH_DELAY_MS)
         }
-        Log.i(MosaicBoardView.TAG, "pen trail discarded: reason=$reason sync=${if (stylusContact) "now" else "deferred"} fullRefresh=$fullRefresh stylus=$stylusContact active=${view.drawPath.drawPathActive}")
+        Log.i(LogTags.BOARD_VIEW, "pen trail discarded: reason=$reason sync=${if (stylusContact) "now" else "deferred"} fullRefresh=$fullRefresh stylus=$stylusContact active=${view.drawPath.drawPathActive}")
     }
 
     private fun requestFullRefreshWhenSettled(reason: String) {
@@ -232,7 +232,7 @@ internal class InkHandoff(private val view: MosaicBoardView) {
     private fun runPendingFullRefresh(reason: String) {
         if (!fullRefreshPending || !view.attached) return
         if (stylusContact || awaitingStrokeCommit || inkHandoffPending) {
-            Log.i(MosaicBoardView.TAG, "full refresh waits for ink reason=$reason contact=$stylusContact awaiting=$awaitingStrokeCommit handoff=$inkHandoffPending")
+            Log.i(LogTags.BOARD_VIEW, "full refresh waits for ink reason=$reason contact=$stylusContact awaiting=$awaitingStrokeCommit handoff=$inkHandoffPending")
             return
         }
         fullRefreshPending = false
@@ -271,7 +271,7 @@ internal class InkHandoff(private val view: MosaicBoardView) {
         inkHandoffPending = true
         view.mainHandler.removeCallbacks(inkHandoffTask)
         view.mainHandler.postDelayed(inkHandoffTask, INK_HANDOFF_IDLE_MS)
-        Log.i(MosaicBoardView.TAG, "ink handoff hold: ${INK_HANDOFF_IDLE_MS}ms")
+        Log.i(LogTags.BOARD_VIEW, "ink handoff hold: ${INK_HANDOFF_IDLE_MS}ms")
     }
 
     fun clearInkHandoff(): Boolean {
@@ -308,7 +308,7 @@ internal class InkHandoff(private val view: MosaicBoardView) {
                 if (view.attached && !stylusContact) sendBackgroundSync(force = true)
             }
         }
-        Log.i(MosaicBoardView.TAG, "ink session finalize: reason=$reason")
+        Log.i(LogTags.BOARD_VIEW, "ink session finalize: reason=$reason")
     }
 
     fun releaseInkDefer() {
