@@ -27,7 +27,7 @@ class BoardInteractionController(
 ) : InputRouter.Sink, BoardChromeView.Listener {
     companion object {
         const val TAG = "MosaicInteraction"
-        private const val TAG_PEN = "MosaicPen"
+        const val TAG_PEN = "MosaicPen"
         private const val TAG_FINGER = "MosaicFinger"
         private const val TAG_PAN = "MosaicPan"
         const val TAG_LASSO = "MosaicLasso"
@@ -54,17 +54,8 @@ class BoardInteractionController(
         const val ACCENT_BG_COLOR = "#FFF9E3"
         const val ACCENT_TEXT_COLOR = "#3f3b2e"
 
-        const val CARD_FRAME_HOLD_MS = 500L
-        const val CARD_FRAME_HOLD_MOVE_SLOP_DP = 3f
-        const val CARD_FRAME_PREVIEW_CANCEL_MOVE_DP = 8f
-        const val CARD_FRAME_CAPTURE_INK_RATIO = 0.70f
-        // 方括号扩卡时离挡路卡片留的空隙。
-        private const val CARD_EXTEND_GAP = 12f
-
         // A card stroke that starts this soon after the previous stroke on the same card is handwriting, not a card gesture.
         const val CARD_CONTINUOUS_WRITE_MS = 1500L
-        // Room left around ink when a card grows to take in a stroke written past its edge.
-        const val CARD_GROW_PAD = 16f
 
         const val TWO_FINGER_CANDIDATE_HOLD_MS = 300L
 
@@ -225,63 +216,7 @@ class BoardInteractionController(
     private var lastCardWriteId: String? = null
     private var lastCardWriteAt = 0L
 
-    private sealed class PenSession {
-        class Write(
-            val id: String,
-            val space: String,
-            val cardId: String?,
-            val cardX: Float,
-            val cardY: Float,
-        ) : PenSession() {
-            val points = FloatArrayList()
-            val pressures = FloatArrayList()
-            var nibAngle = Float.NaN
-
-            var frameLastMeaningfulX = 0f
-            var frameLastMeaningfulY = 0f
-            var frameCandidate: RectF? = null
-            var frameRecognizedX = 0f
-            var frameRecognizedY = 0f
-            var frameEvaluations = 0
-            var continuousWrite = false
-            // Set once the stroke leaves a note page; later points are dropped.
-            var clipped = false
-
-            var convertFromIndex = -1
-
-            var rawMinX = Float.MAX_VALUE
-            var rawMinY = Float.MAX_VALUE
-            var rawMaxX = -Float.MAX_VALUE
-            var rawMaxY = -Float.MAX_VALUE
-
-            fun raw(x: Float, y: Float) {
-                if (x < rawMinX) rawMinX = x; if (x > rawMaxX) rawMaxX = x
-                if (y < rawMinY) rawMinY = y; if (y > rawMaxY) rawMaxY = y
-            }
-        }
-
-        class Erase(val change: BoardHistory.Change) : PenSession() {
-            var pending = BoardHistory.Change("erase")
-            val pendingIds = HashSet<String>()
-        }
-
-        class Lasso : PenSession() {
-            val pointsPx = FloatArrayList()
-        }
-
-        class Shape(val kind: Shapes.Kind, val anchorX: Float, val anchorY: Float) : PenSession() {
-            var curX = anchorX
-            var curY = anchorY
-        }
-
-        object Consumed : PenSession()
-
-        class OpenNote(val ref: String, val downX: Float, val downY: Float, val shotId: String? = null) : PenSession() {
-            var moved = false
-        }
-    }
-
-    private var penSession: PenSession? = null
+    internal var penSession: PenSession? = null
     private var penMoveSession: MoveSession? = null
 
     private class Finger(val id: Int, val downX: Float, val downY: Float, val downAt: Long, val penPriority: Boolean) {
@@ -429,7 +364,7 @@ class BoardInteractionController(
         chrome.listener = null
         InkAlign.stop()
         cancelCardLongPress()
-        cancelFrameHold()
+        cardGestures.cancelFrameHold()
         penSession = null
         penMoveSession = null
         fingerMoveSession = null
@@ -675,7 +610,7 @@ class BoardInteractionController(
         val previous = penSession
         var discardedWrite: PenSession.Write? = null
         when (previous) {
-            is PenSession.Write -> { cancelFrameHold(); overlay.hideFramePreview(); penSession = null; discardedWrite = previous }
+            is PenSession.Write -> { cardGestures.cancelFrameHold(); overlay.hideFramePreview(); penSession = null; discardedWrite = previous }
             is PenSession.Erase -> { finishErase(previous); penSession = null }
             is PenSession.Lasso -> { penSession = null; ink.abortStroke() }
             is PenSession.Shape -> { penSession = null; overlay.hideShapePreview() }
@@ -747,7 +682,7 @@ class BoardInteractionController(
         }
     }
 
-    private fun discardWriteTrail(s: PenSession.Write, reason: String) {
+    internal fun discardWriteTrail(s: PenSession.Write, reason: String) {
         if (s.points.size < 4) return
         host.onPenTrailDiscarded(reason)
     }
@@ -1061,7 +996,7 @@ class BoardInteractionController(
                 if (pressure != null) {
                     appendWritePoint(s, wx, wy, pressure)
                     s.raw(e.x, e.y)
-                    if (s.cardId == null && surface.allowsCardFrame) updateFrameGesture(s, wx, wy)
+                    if (s.cardId == null && surface.allowsCardFrame) cardGestures.updateFrameGesture(s, wx, wy)
                 }
             }
             is PenSession.OpenNote -> {
@@ -1108,7 +1043,7 @@ class BoardInteractionController(
             penSession = null
             when (s) {
                 is PenSession.Write -> {
-                    cancelFrameHold()
+                    cardGestures.cancelFrameHold()
                     if (cancelled) {
                         overlay.hideFramePreview()
                         discardWriteTrail(s, "cancel")
@@ -1118,27 +1053,7 @@ class BoardInteractionController(
                     val wy = worldY(penY(e))
                     s.raw(e.x, e.y)
                     reportStrokeForAlignment(s)
-                    var candidate = s.frameCandidate
-                    if (candidate != null) {
-                        val moved = hypot(wx - s.frameRecognizedX, wy - s.frameRecognizedY) * BoardEngine.scale
-                        if (moved >= CARD_FRAME_PREVIEW_CANCEL_MOVE_DP) candidate = null
-                    }
-                    overlay.hideFramePreview()
-                    if (candidate != null) {
-                        discardWriteTrail(s, "card-frame")
-                        createCardFromFrame(candidate)
-                        Log.i(TAG_PEN, "UP consumed as card frame")
-                        return
-                    }
-                    if (extendCardFromBracket(s)) {
-                        Log.i(TAG_PEN, "UP consumed as card edge extend")
-                        return
-                    }
-                    if (completeCardStroke(s)) {
-                        Log.i(TAG_PEN, "UP consumed as card connection")
-                        return
-                    }
-                    commitStroke(s)
+                    if (!cardGestures.consumeStroke(s, wx, wy)) commitStroke(s)
                 }
                 is PenSession.Erase -> finishErase(s)
                 is PenSession.Lasso -> {
@@ -1209,7 +1124,7 @@ class BoardInteractionController(
         )
         val ink = synchronized(BoardEngine.lock) { InkBackdrop.resolve(draft) }
         val rec = draft.withColor(ink)
-        val change = (if (s.continuousWrite) growCardForStroke(rec) else null)
+        val change = (if (s.continuousWrite) cardGestures.growCardForStroke(rec) else null)
             ?: BoardHistory.Change("draw").stroke(null, rec)
         host.commitPlainStroke { applyChange(change, record = true) }
         lastCardWriteId = s.cardId
@@ -1257,216 +1172,6 @@ class BoardInteractionController(
             history.push(session.change)
             Log.i(TAG_PEN, "erased ${session.change.diffs.size} strokes")
         }
-    }
-
-    private var frameHoldTask: Runnable? = null
-
-    private fun cancelFrameHold() {
-        frameHoldTask?.let { handler.removeCallbacks(it) }
-        frameHoldTask = null
-    }
-
-    private fun updateFrameGesture(s: PenSession.Write, wx: Float, wy: Float) {
-        val scale = max(0.01f, BoardEngine.scale)
-        if (s.frameCandidate != null) {
-            val moved = hypot(wx - s.frameRecognizedX, wy - s.frameRecognizedY) * scale
-            if (moved < CARD_FRAME_PREVIEW_CANCEL_MOVE_DP) return
-            s.frameCandidate = null
-            overlay.hideFramePreview()
-            Log.i(TAG_PEN, "[CardFrame] preview cancelled movement=${moved}dp")
-        }
-        val movement = hypot(wx - s.frameLastMeaningfulX, wy - s.frameLastMeaningfulY) * scale
-        if (movement < CARD_FRAME_HOLD_MOVE_SLOP_DP) return
-        s.frameLastMeaningfulX = wx
-        s.frameLastMeaningfulY = wy
-        cancelFrameHold()
-        val task = Runnable {
-            frameHoldTask = null
-            if (!penContact || penSession !== s) return@Runnable
-            s.frameEvaluations++
-            val evaluation = CardFrameRecognizer.evaluate(s.points.toArray(), CardFrameRecognizer.Options(viewportScale = BoardEngine.scale))
-            val rect = evaluation.rect
-            if (rect == null) {
-                Log.i(TAG_PEN, "[CardFrame] hold rejected attempt=${s.frameEvaluations} reason=${evaluation.reason} ${evaluation.metrics?.format()}")
-                return@Runnable
-            }
-            s.frameCandidate = rect
-            s.frameRecognizedX = s.points[s.points.size - 2]
-            s.frameRecognizedY = s.points[s.points.size - 1]
-            overlay.showFramePreview(worldRectToPx(BoardGeometry.cardRectFromFrame(rect), RectF()))
-            Log.i(TAG_PEN, "[CardFrame] hold recognized attempt=${s.frameEvaluations} ${evaluation.metrics?.format()}")
-        }
-        frameHoldTask = task
-        handler.postDelayed(task, CARD_FRAME_HOLD_MS)
-    }
-
-    private fun createCardFromFrame(frame: RectF) {
-        val rect = BoardGeometry.cardRectFromFrame(frame)
-        val created = BoardEngine.CardRec(newId("card-"), rect.left, rect.top, rect.width(), rect.height(), BoardGeometry.nextZIndex(BoardEngine.cards.values))
-        val change = BoardHistory.Change("card-frame").card(null, created)
-
-        val candidates = ArrayList<BoardEngine.StrokeRec>()
-        synchronized(BoardEngine.lock) { BoardEngine.queryCanvasStrokes(rect, candidates) }
-        var captured = 0
-        for (stroke in candidates) {
-            if (strokeCoverage(stroke, rect) < CARD_FRAME_CAPTURE_INK_RATIO) continue
-            change.stroke(stroke, stroke.translated(0f, 0f, null, created))
-            captured++
-        }
-        applyChange(change, record = true)
-        Log.i(TAG_PEN, "[CardFrame] created card=${created.id} rect=$rect capturedInk=$captured")
-    }
-
-    // 在卡片边上画方括号，卡片朝那一侧变宽或变高，最多长到挡路的卡片前。框进新区域的画布笔迹收进卡片。
-    private fun extendCardFromBracket(s: PenSession.Write): Boolean {
-        if (!surface.allowsCardFrame || s.points.size < 8) return false
-        val world = s.points.toArray()
-        var i = 0
-        while (i < world.size) {
-            world[i] += s.cardX
-            world[i + 1] += s.cardY
-            i += 2
-        }
-        val result = CardEdgeExtend.recognize(world, BoardEngine.cardsByZ.asReversed(), BoardEngine.scale)
-        val match = result.match
-        if (match == null) {
-            result.note?.let { Log.i(TAG_PEN, "[CardExtend] rejected $it") }
-            return false
-        }
-        val card = match.card
-        val target = synchronized(BoardEngine.lock) {
-            CardEdgeExtend.clampToBlockers(card, match.side, match.rect, BoardEngine.cards.values, CARD_EXTEND_GAP)
-        }
-        // 认出是方括号就吃掉这一笔，挡死了也不留下笔迹。
-        discardWriteTrail(s, "card-extend")
-        if (target.width() - card.width < 1f && target.height() - card.height < 1f) {
-            Log.i(TAG_PEN, "[CardExtend] blocked card=${card.id} side=${match.side} ${match.metrics}")
-            return true
-        }
-        val grown = card.withRect(target)
-        val change = BoardHistory.Change("card-extend").card(card, grown)
-        // 卡片上的笔迹存的是相对卡片左上角的坐标，向左或向上扩时要补回偏移。
-        if (grown.x != card.x || grown.y != card.y) synchronized(BoardEngine.lock) {
-            BoardEngine.cardStrokes[card.id]?.forEach { change.stroke(it, it.translated(0f, 0f, card, grown)) }
-        }
-        val added = when (match.side) {
-            CardEdgeExtend.Side.LEFT -> RectF(grown.x, grown.y, card.x, grown.y + grown.height)
-            CardEdgeExtend.Side.RIGHT -> RectF(card.x + card.width, grown.y, grown.x + grown.width, grown.y + grown.height)
-            CardEdgeExtend.Side.TOP -> RectF(grown.x, grown.y, grown.x + grown.width, card.y)
-            CardEdgeExtend.Side.BOTTOM -> RectF(grown.x, card.y + card.height, grown.x + grown.width, grown.y + grown.height)
-        }
-        val candidates = ArrayList<BoardEngine.StrokeRec>()
-        synchronized(BoardEngine.lock) { BoardEngine.queryCanvasStrokes(added, candidates) }
-        var captured = 0
-        for (stroke in candidates) {
-            if (stroke.space != "canvas" || strokeCoverage(stroke, added) < CARD_FRAME_CAPTURE_INK_RATIO) continue
-            change.stroke(stroke, stroke.translated(0f, 0f, null, grown))
-            captured++
-        }
-        applyChange(change, record = true)
-        val clamped = target != match.rect
-        Log.i(TAG_PEN, "[CardExtend] card=${card.id} side=${match.side} rect=$target clamped=$clamped capturedInk=$captured ${match.metrics}")
-        return true
-    }
-
-    private fun strokeCoverage(stroke: BoardEngine.StrokeRec, rect: RectF): Float {
-        val pts = stroke.points
-        val n = pts.size / 2
-        if (n == 0) return 0f
-        var inside = 0
-        var i = 0
-        while (i < pts.size) {
-            if (rect.contains(pts[i], pts[i + 1])) inside++
-            i += 2
-        }
-        return inside.toFloat() / n
-    }
-
-    // Grows a text card to take in a stroke written past its edge; the card keeps its strokes in place on the board.
-    private fun growCardForStroke(rec: BoardEngine.StrokeRec): BoardHistory.Change? = synchronized(BoardEngine.lock) {
-        val cardId = rec.cardId ?: return null
-        val card = BoardEngine.cards[cardId] ?: return null
-        if (card.kind != "text") return null
-        val old = card.rect(RectF())
-        val ink = RectF(rec.bounds).apply { offset(card.x, card.y) }
-        if (old.contains(ink)) return null
-        val grown = RectF(old)
-        if (ink.left < old.left) grown.left = ink.left - CARD_GROW_PAD
-        if (ink.top < old.top) grown.top = ink.top - CARD_GROW_PAD
-        if (ink.right > old.right) grown.right = ink.right + CARD_GROW_PAD
-        if (ink.bottom > old.bottom) grown.bottom = ink.bottom + CARD_GROW_PAD
-        val r = RectF()
-        for (other in BoardEngine.cards.values) {
-            if (other.id != cardId && RectF.intersects(grown, other.rect(r)) && !RectF.intersects(old, r)) {
-                Log.i(TAG_PEN, "card grow skipped card=$cardId blocked-by=${other.id}")
-                return null
-            }
-        }
-        val next = card.withRect(grown)
-        val change = BoardHistory.Change("draw-grow").card(card, next)
-        if (next.x != card.x || next.y != card.y) {
-            BoardEngine.cardStrokes[cardId]?.forEach { change.stroke(it, it.translated(0f, 0f, card, next)) }
-            change.stroke(null, rec.translated(0f, 0f, card, next))
-        } else {
-            change.stroke(null, rec)
-        }
-        Log.i(TAG_PEN, "card grow card=$cardId $old -> $grown")
-        change
-    }
-
-    private fun completeCardStroke(s: PenSession.Write): Boolean {
-        val sourceId = s.cardId ?: return false
-        if (s.points.size < 4) return false
-        if (s.continuousWrite) return false
-        val source = BoardEngine.cards[sourceId] ?: return false
-        val fx = s.points[0]; val fy = s.points[1]
-        val lx = s.points[s.points.size - 2]; val ly = s.points[s.points.size - 1]
-        if (hypot(lx - fx, ly - fy) < BoardGeometry.CARD_STROKE_MIN_DISTANCE) return false
-        val endX = source.x + lx
-        val endY = source.y + ly
-        return completeCardLink(source, endX, endY) { reason -> discardWriteTrail(s, reason) }
-    }
-
-    private fun completeCardLink(source: BoardEngine.CardRec, endX: Float, endY: Float,
-                                 onRecognized: (String) -> Unit): Boolean {
-        val sourceId = source.id
-        val target = BoardGeometry.topCardAt(BoardEngine.cardsByZ, endX, endY)
-        if (target?.id == sourceId) return false
-        // Ending on this card's own bridge, or on a card it already links to, is writing across the link.
-        if (target == null) {
-            val bridge = BoardEngine.connectionAt(endX, endY)
-            if (bridge != null && bridge.touches(sourceId)) return false
-        } else if (BoardEngine.connectionBetween(sourceId, target.id) != null || BoardEngine.threadBetween(sourceId, target.id) != null) {
-            return false
-        }
-
-        onRecognized(if (target != null) "card-connection" else "card-from-stroke")
-        if (target != null) {
-            if (!BoardGeometry.canConnect(source, target)) {
-                Log.i(TAG_PEN, "card thread rejected source=$sourceId target=${target.id} reason=color-mismatch")
-                return true
-            }
-            val thread = BoardEngine.threadStroke(newId("stroke-"), source, target)
-            if (thread == null) {
-                Log.i(TAG_PEN, "card thread rejected source=$sourceId target=${target.id} reason=overlap")
-                return true
-            }
-            applyChange(BoardHistory.Change("thread").stroke(null, thread), record = true)
-            return true
-        }
-        val rect = BoardGeometry.cardFromStrokeRect(source, endX, endY)
-
-        val created = BoardEngine.CardRec(
-            newId("card-"), rect.left, rect.top, rect.width(), rect.height(), BoardGeometry.nextZIndex(BoardEngine.cards.values),
-            bgColor = source.bgColor, textColor = source.textColor,
-        )
-        applyChange(
-            BoardHistory.Change("card-from-stroke")
-                .card(null, created)
-                .connection(null, BoardEngine.ConnectionRec(newId("conn-"), sourceId, created.id)),
-            record = true,
-        )
-        return true
     }
 
     private fun finalizeShape(s: PenSession.Shape): Boolean {
@@ -2018,7 +1723,7 @@ class BoardInteractionController(
         cancelFingerGestures(reason)
         penMoveSession?.let { transforms.cancelMoveSession(it) }
         penMoveSession = null
-        cancelFrameHold()
+        cardGestures.cancelFrameHold()
         overlay.hideFramePreview()
         val s = penSession
         penSession = null
@@ -2732,4 +2437,6 @@ class BoardInteractionController(
     internal val notes = NoteSession(this)
 
     override fun onConvertCardToNote() = notes.convertCardToNote()
+
+    internal val cardGestures = CardStrokeGestures(this)
 }
