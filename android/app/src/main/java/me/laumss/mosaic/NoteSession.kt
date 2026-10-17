@@ -121,7 +121,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
 
         val noteRef = if (next.showsBoardChrome) null else noteController.document?.ref
         InklingLink.setSurface(next.name, noteRef, "surface-switch")
-        board.host.onInklingSurfaceChanged(next.name, noteRef)
+        board.host.inklingCallbacks.onInklingSurfaceChanged(next.name, noteRef)
         MosaicSession.saveNoteRef(board.host.context, noteRef)
         applyTemplateForSurface(next, noteRef)
         Log.i(BoardInteractionController.TAG, "surface entered name=${next.name}")

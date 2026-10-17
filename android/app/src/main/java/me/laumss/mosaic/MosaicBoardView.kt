@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicLong
 @SuppressLint("ViewConstructor")
 class MosaicBoardView(
     internal val reactContext: ReactContext,
-) : FrameLayout(reactContext), InklingLink.Host {
+) : FrameLayout(reactContext) {
     companion object {
         private val PEN_BLOCK_REASSERT_MS = longArrayOf(0L, 60L, 200L, 500L)
         const val TAG = "MosaicBoardView"
@@ -32,8 +32,7 @@ class MosaicBoardView(
         private const val RETRY_INTERVAL_MS = 500L
         private const val SLOW_RETRY_INTERVAL_MS = 2000L
         private const val FAST_MAX_ATTEMPTS = 20
-        private const val BOARD_VISIBILITY_EVENT = "MosaicBoardVisibility"
-        private const val INBOX_READY_EVENT = "MosaicInboxReady"
+        const val BOARD_VISIBILITY_EVENT = "MosaicBoardVisibility"
 
         private val REARM_DELAYS_MS = longArrayOf(400L, 900L, 1700L)
 
@@ -165,6 +164,7 @@ class MosaicBoardView(
 
     val controller = BoardInteractionController(this, contentView, inkView, overlayView, chromeView, commandEmitter)
     internal val closeWatchdog = CloseWatchdog(this)
+    internal val inklingCallbacks = InklingCallbacks(this)
     private var sceneChangeCounter = 0
     private var stylusContact = false
 
@@ -363,7 +363,7 @@ class MosaicBoardView(
         attached = true
 
         InputReader.ensureBoardReader(context)
-        InklingLink.attach(context, this)
+        InklingLink.attach(context, inklingCallbacks)
         publishBoardVisibility(true)
         mainHandler.post {
             if (!attached) return@post
@@ -394,7 +394,7 @@ class MosaicBoardView(
         attached = false
         InputReader.releaseBoardReader()
         publishBoardVisibility(false)
-        InklingLink.detach(this)
+        InklingLink.detach(inklingCallbacks)
         controller.detach()
         context.applicationContext.unregisterComponentCallbacks(configurationCallback)
         displayManager.unregisterDisplayListener(displayListener)
@@ -571,113 +571,6 @@ class MosaicBoardView(
             areas.add(DrawPathClient.DisableArea(loc[0] + r.left, loc[1] + r.top, r.width(), r.height()))
         }
         return areas
-    }
-
-    override fun onInklingToolbarRectChanged() {
-        if (!attached) return
-        mainHandler.post {
-            if (!attached) return@post
-            rearmDrawPath("inkling-toolbar-rect")
-        }
-    }
-
-    override fun onInklingOverlayDragChanged(active: Boolean) {
-        if (!attached) return
-        mainHandler.post {
-            if (!attached) return@post
-            controller.inkling.setOverlayDrag(active, "inkling")
-        }
-    }
-
-    override fun onInklingCloseRequested() {
-        if (!attached) return
-        mainHandler.post {
-            if (!attached) return@post
-            controller.notes.closeForInkling()
-        }
-    }
-
-    override fun onInklingPasteStrokesRequested() {
-        if (!attached) return
-        mainHandler.post {
-            if (!attached) return@post
-            if (!InklingLink.isInkSurface()) {
-                Log.i(TAG, "inkling paste deferred surface=${InklingLink.currentSurface()}")
-                return@post
-            }
-            controller.inkling.handlePasteStrokes()
-        }
-    }
-
-    override fun onInklingClearSelectionRequested(delete: Boolean) {
-        if (!attached) return
-        mainHandler.post {
-            if (!attached) return@post
-            if (!InklingLink.isInkSurface()) {
-                Log.i(TAG, "inkling clear-selection deferred surface=${InklingLink.currentSurface()} delete=$delete")
-                return@post
-            }
-            controller.inkling.clearSelection(delete)
-        }
-    }
-
-    override fun onInklingTextCardRequested(text: String, anchorScreenX: Int, anchorScreenY: Int) {
-        if (!attached) return
-        mainHandler.post {
-            if (!attached) return@post
-            if (!InklingLink.isBoardSurface()) {
-                Log.i(TAG, "inkling text-card deferred surface=${InklingLink.currentSurface()}")
-                return@post
-            }
-            controller.inkling.insertTextCard(text, anchorScreenX, anchorScreenY)
-        }
-    }
-
-    override fun onInklingPaletteRequested(requestId: String, data: String?) {
-        mainHandler.post {
-            val result = if (attached && InklingLink.isBoardSurface()) {
-                try {
-                    if (data == null) controller.inkling.paletteSelectionInfo()
-                    else controller.inkling.applyPaletteSelection(org.json.JSONObject(data))
-                } catch (error: Exception) {
-                    Log.w(TAG, "palette request failed", error)
-                    org.json.JSONObject().put("success", false).put("error", "apply_failed")
-                }
-            } else org.json.JSONObject().put("success", false).put("error", "surface_changed")
-            InklingLink.replyPalette(requestId, result)
-        }
-    }
-
-    override fun onInklingInboxReady() {
-        if (!attached) return
-        mainHandler.post {
-            if (!attached) return@post
-            controller.notes.preparePendingNoteImport()
-            if (!InklingLink.isBoardSurface()) {
-                Log.i(TAG, "inkling inbox notification deferred surface=${InklingLink.currentSurface()}")
-                return@post
-            }
-            reactContext
-                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-                .emit(INBOX_READY_EVENT, null)
-        }
-    }
-
-    override fun onInklingSurfaceChanged(surface: String, noteRef: String?) {
-        if (!attached) return
-        mainHandler.post {
-            if (!attached) return@post
-
-            val data = Arguments.createMap().apply {
-                putBoolean("visible", true)
-                putString("surface", surface)
-                noteRef?.let { putString("noteRef", it) } ?: putNull("noteRef")
-            }
-            reactContext
-                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-                .emit(BOARD_VISIBILITY_EVENT, data)
-            Log.i(TAG, "surface event surface=$surface noteRef=$noteRef")
-        }
     }
 
     private fun noteContentChanged(reason: String, moved: Boolean) {
@@ -1253,7 +1146,7 @@ class MosaicBoardView(
         }
     }
 
-    private fun rearmDrawPath(reason: String) {
+    internal fun rearmDrawPath(reason: String) {
         if (!configured) return
         val binder = drawPathBinder ?: return
         try {
