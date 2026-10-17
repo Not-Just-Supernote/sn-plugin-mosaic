@@ -165,7 +165,7 @@ class MosaicBoardView(
         }
 
         MosaicSession.savedViewport(context)?.let {
-            BoardEngine.setViewport(it.panX, it.panY, it.scale)
+            BoardViewport.set(it.panX, it.panY, it.scale)
             Log.i(TAG, "viewport restored pan=(${it.panX},${it.panY}) scale=${it.scale}")
         }
         controller.attach()

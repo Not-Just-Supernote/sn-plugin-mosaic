@@ -24,7 +24,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
     fun consumeStroke(s: PenSession.Write, wx: Float, wy: Float): Boolean {
         var candidate = s.frameCandidate
         if (candidate != null) {
-            val moved = hypot(wx - s.frameRecognizedX, wy - s.frameRecognizedY) * BoardEngine.scale
+            val moved = hypot(wx - s.frameRecognizedX, wy - s.frameRecognizedY) * BoardViewport.scale
             if (moved >= CARD_FRAME_PREVIEW_CANCEL_MOVE_DP) candidate = null
         }
         board.overlay.hideFramePreview()
@@ -51,7 +51,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
     }
 
     fun updateFrameGesture(s: PenSession.Write, wx: Float, wy: Float) {
-        val scale = max(0.01f, BoardEngine.scale)
+        val scale = max(0.01f, BoardViewport.scale)
         if (s.frameCandidate != null) {
             val moved = hypot(wx - s.frameRecognizedX, wy - s.frameRecognizedY) * scale
             if (moved < CARD_FRAME_PREVIEW_CANCEL_MOVE_DP) return
@@ -68,7 +68,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
             frameHoldTask = null
             if (!board.pen.penContact || board.pen.penSession !== s) return@Runnable
             s.frameEvaluations++
-            val evaluation = CardFrameRecognizer.evaluate(s.points.toArray(), CardFrameRecognizer.Options(viewportScale = BoardEngine.scale))
+            val evaluation = CardFrameRecognizer.evaluate(s.points.toArray(), CardFrameRecognizer.Options(viewportScale = BoardViewport.scale))
             val rect = evaluation.rect
             if (rect == null) {
                 Log.i(BoardInteractionController.TAG_PEN, "[CardFrame] hold rejected attempt=${s.frameEvaluations} reason=${evaluation.reason} ${evaluation.metrics?.format()}")
@@ -111,7 +111,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
             world[i + 1] += s.cardY
             i += 2
         }
-        val result = CardEdgeExtend.recognize(world, BoardEngine.cardsByZ.asReversed(), BoardEngine.scale)
+        val result = CardEdgeExtend.recognize(world, BoardEngine.cardsByZ.asReversed(), BoardViewport.scale)
         val match = result.match
         if (match == null) {
             result.note?.let { Log.i(BoardInteractionController.TAG_PEN, "[CardExtend] rejected $it") }

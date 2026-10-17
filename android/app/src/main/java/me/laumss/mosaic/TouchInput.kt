@@ -195,7 +195,7 @@ internal class TouchInput(private val board: BoardInteractionController) {
             fingerMoveSession?.let { board.transforms.cancelMoveSession(it); fingerMoveSession = null }
             if (fingerGesture is FingerGesture.SurfaceScroll) {
                 board.content.setGestureThrottle(false)
-                board.commitViewport(BoardEngine.panX, BoardEngine.panY, BoardEngine.scale)
+                board.commitViewport(BoardViewport.panX, BoardViewport.panY, BoardViewport.scale)
             }
 
             if (fingerGesture is FingerGesture.PanZoom || fingerGesture is FingerGesture.ScreenTool) return
@@ -244,7 +244,7 @@ internal class TouchInput(private val board: BoardInteractionController) {
         val wy = board.worldY(y)
 
         if (board.surface.singleFingerScrolls && board.selection.lasso == null) {
-            fingerGesture = FingerGesture.SurfaceScroll(id, y, BoardEngine.panY)
+            fingerGesture = FingerGesture.SurfaceScroll(id, y, BoardViewport.panY)
             board.content.setGestureThrottle(true)
             return
         }
@@ -361,8 +361,8 @@ internal class TouchInput(private val board: BoardInteractionController) {
             is FingerGesture.SurfaceScroll -> {
                 val f = fingers[g.fingerId] ?: return
                 val dy = (f.y - g.startY) / board.density
-                board.surface.constrainPan(BoardEngine.panX, g.startPanY + dy, BoardEngine.scale, board.viewportTmp)
-                BoardEngine.setViewport(board.viewportTmp[0], board.snapPanToPx(board.viewportTmp[1]), BoardEngine.scale)
+                board.surface.constrainPan(BoardViewport.panX, g.startPanY + dy, BoardViewport.scale, board.viewportTmp)
+                BoardViewport.set(board.viewportTmp[0], board.snapPanToPx(board.viewportTmp[1]), BoardViewport.scale)
             }
             is FingerGesture.EdgeSwipe -> {
                 val f = fingers[g.fingerId] ?: return
@@ -413,7 +413,7 @@ internal class TouchInput(private val board: BoardInteractionController) {
             is FingerGesture.SurfaceScroll -> if (g.fingerId == id) {
                 fingerGesture = FingerGesture.Idle
                 board.content.setGestureThrottle(false)
-                board.commitViewport(BoardEngine.panX, BoardEngine.panY, BoardEngine.scale)
+                board.commitViewport(BoardViewport.panX, BoardViewport.panY, BoardViewport.scale)
             }
             is FingerGesture.TwoCandidate -> {
                 if (id == g.a || id == g.b) {

@@ -208,7 +208,7 @@ class BoardInteractionController(
         inkling.exportLassoStrokes(null)
         notes.leaveOnDetach()
 
-        MosaicSession.saveViewport(host.context, BoardEngine.panX, BoardEngine.panY, BoardEngine.scale)
+        MosaicSession.saveViewport(host.context, BoardViewport.panX, BoardViewport.panY, BoardViewport.scale)
         SceneCache.save(host.context, BoardEngine.snapshotScene())
         surfaceSwitching = false
         if (InputRouter.sink === this) InputRouter.sink = null
@@ -271,21 +271,21 @@ class BoardInteractionController(
         val board = notes.suspendedBoard?.scene
         emitter.begin()
         if (board != null) emitter.viewport(board.panX, board.panY, board.scale)
-        else emitter.viewport(BoardEngine.panX, BoardEngine.panY, BoardEngine.scale)
+        else emitter.viewport(BoardViewport.panX, BoardViewport.panY, BoardViewport.scale)
         emitter.commit()
         notes.restoreSessionNote()
     }
 
-    internal fun worldX(px: Float): Float = (px / density - BoardEngine.panX) / BoardEngine.scale
+    internal fun worldX(px: Float): Float = (px / density - BoardViewport.panX) / BoardViewport.scale
 
-    internal fun worldY(px: Float): Float = (px / density - BoardEngine.panY) / BoardEngine.scale
+    internal fun worldY(px: Float): Float = (px / density - BoardViewport.panY) / BoardViewport.scale
 
     internal fun isOnDarkCard(wx: Float, wy: Float): Boolean =
         InkBackdrop.darkAt(wx, wy)
 
-    internal fun screenX(world: Float): Float = (world * BoardEngine.scale + BoardEngine.panX) * density
+    internal fun screenX(world: Float): Float = (world * BoardViewport.scale + BoardViewport.panX) * density
 
-    internal fun screenY(world: Float): Float = (world * BoardEngine.scale + BoardEngine.panY) * density
+    internal fun screenY(world: Float): Float = (world * BoardViewport.scale + BoardViewport.panY) * density
 
     internal fun worldRectToPx(r: RectF, out: RectF): RectF {
         out.set(screenX(r.left), screenY(r.top), screenX(r.right), screenY(r.bottom))
@@ -294,7 +294,7 @@ class BoardInteractionController(
 
     internal fun viewWorld(): RectF =
         SparseNavigation.viewportWorldRect(
-            BoardEngine.panX, BoardEngine.panY, BoardEngine.scale,
+            BoardViewport.panX, BoardViewport.panY, BoardViewport.scale,
             host.width / density, host.height / density, viewWorldRect,
         )
 
@@ -434,7 +434,7 @@ class BoardInteractionController(
     internal fun newId(prefix: String) = prefix + UUID.randomUUID().toString().replace("-", "").substring(0, 12)
 
     internal fun commitViewport(panX: Float, panY: Float, scale: Float) {
-        BoardEngine.setViewport(panX, panY, scale)
+        BoardViewport.set(panX, panY, scale)
         surface.onViewportCommitted(panX, panY, scale)
 
         if (surface.showsBoardChrome) MosaicSession.saveViewport(host.context, panX, panY, scale)
@@ -625,7 +625,7 @@ class BoardInteractionController(
 
     private fun updateChrome() {
         if (host.width == 0) return
-        chrome.setZoom(BoardEngine.scale)
+        chrome.setZoom(BoardViewport.scale)
         val view = viewWorld()
         val selected = selection.selectedCardId?.let { BoardEngine.cards[it] }
         val levels = if (selected == null) emptyList() else synchronized(BoardEngine.lock) {
@@ -767,9 +767,9 @@ class BoardInteractionController(
     }
 
     override fun onZoomStep(direction: Int) {
-        val index = BoardGeometry.nearestZoomIndex(BoardEngine.scale)
+        val index = BoardGeometry.nearestZoomIndex(BoardViewport.scale)
         val next = (index + direction).coerceIn(0, BoardGeometry.ZOOM_LEVELS.size - 1)
-        if (BoardGeometry.ZOOM_LEVELS[next] == BoardEngine.scale) return
+        if (BoardGeometry.ZOOM_LEVELS[next] == BoardViewport.scale) return
         zoomTo(BoardGeometry.ZOOM_LEVELS[next])
     }
 
@@ -792,8 +792,8 @@ class BoardInteractionController(
 
     override fun onJumpToRegion(region: SparseNavigation.Region) {
         touch.cancelFingerGestures("jump")
-        val centered = SparseNavigation.panToCenterRect(region.bounds, host.width / density, host.height / density, BoardEngine.scale)
-        commitViewport(centered[0], centered[1], BoardEngine.scale)
+        val centered = SparseNavigation.panToCenterRect(region.bounds, host.width / density, host.height / density, BoardViewport.scale)
+        commitViewport(centered[0], centered[1], BoardViewport.scale)
     }
 
     internal fun openSwitcher() {
@@ -829,7 +829,7 @@ class BoardInteractionController(
         val h = host.height / density
         val rect = card.rect()
         val fit = min(w / max(rect.width(), 1f), h / max(rect.height(), 1f))
-        val scale = BoardGeometry.clampZoom(min(BoardEngine.scale, fit))
+        val scale = BoardGeometry.clampZoom(min(BoardViewport.scale, fit))
         val centered = SparseNavigation.panToCenterRect(rect, w, h, scale)
         chrome.hideSwitcher()
         syncToolViews()

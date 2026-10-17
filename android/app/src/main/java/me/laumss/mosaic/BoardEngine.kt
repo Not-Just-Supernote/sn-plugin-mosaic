@@ -357,14 +357,14 @@ object BoardEngine {
                 val connection = connections[neck.id]
                 connection == null || (connection.fromId !in hiddenCards && connection.toId !in hiddenCards)
             },
-            scale = scale,
+            scale = BoardViewport.scale,
             threads = if (hiddenCards.isEmpty()) threadShapes.values.toList() else threadShapes.values.filter { thread ->
                 thread.fromId !in hiddenCards && thread.toId !in hiddenCards
             },
         )
     }
 
-    fun snapshotScene(): SceneSnapshot = synchronized(lock) { SceneSnapshot(strokes.values.toList(), cards.values.toList(), connections.values.toList(), necks.values.toList(), selectedCardIds.toList(), panX, panY, scale) }
+    fun snapshotScene(): SceneSnapshot = synchronized(lock) { SceneSnapshot(strokes.values.toList(), cards.values.toList(), connections.values.toList(), necks.values.toList(), selectedCardIds.toList(), BoardViewport.panX, BoardViewport.panY, BoardViewport.scale) }
     fun replaceScene(snapshot: SceneSnapshot) {
         val m = Mutation(); synchronized(lock) {
             strokes.clear(); cards.clear(); connections.clear(); necks.clear(); selectedCardIds.clear(); cardsByZ=emptyList(); canvasStrokeGrid.clear(); cardStrokes.clear(); threads.clear(); threadShapes.clear()
@@ -374,7 +374,7 @@ object BoardEngine {
         }
         hiddenCardIds = emptySet()
         hiddenStrokeIds = emptySet()
-        setViewport(snapshot.panX, snapshot.panY, snapshot.scale); m.invalidateAll(); m.dispatch()
+        BoardViewport.set(snapshot.panX, snapshot.panY, snapshot.scale); m.invalidateAll(); m.dispatch()
         listener?.onSelectionChanged()
     }
 
@@ -397,13 +397,6 @@ object BoardEngine {
     private val canvasStrokeGrid = HashMap<Long, MutableList<String>>()
     val cardStrokes = HashMap<String, MutableList<StrokeRec>>()
 
-    @Volatile var panX = 0f
-        private set
-    @Volatile var panY = 0f
-        private set
-    @Volatile var scale = 1f
-        private set
-
     @Volatile private var listener: Listener? = null
 
     fun attachListener(next: Listener) {
@@ -416,12 +409,7 @@ object BoardEngine {
         if (listener === current) listener = null
     }
 
-    fun setViewport(nextPanX: Float, nextPanY: Float, nextScale: Float) {
-        val s = if (nextScale > 0f) nextScale else 1f
-        if (panX == nextPanX && panY == nextPanY && scale == s) return
-        panX = nextPanX
-        panY = nextPanY
-        scale = s
+    internal fun onViewportChanged() {
         listener?.onViewportChanged()
     }
 

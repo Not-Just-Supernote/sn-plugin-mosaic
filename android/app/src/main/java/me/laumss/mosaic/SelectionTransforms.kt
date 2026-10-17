@@ -31,7 +31,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         val previewInk = ArrayList<InteractionOverlayView.PreviewInk>()
         collectSelectionPreview(LassoSelection(session.startRect, listOf(card.id), strokeIds),
             ArrayList(), ArrayList(), ArrayList(), inkPath, previewInk = previewInk)
-        board.overlay.beginMovePreview(null, emptyList(), inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardEngine.scale * board.density, ink = previewInk)
+        board.overlay.beginMovePreview(null, emptyList(), inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardViewport.scale * board.density, ink = previewInk)
         hideFromTiles(listOf(card.id))
         board.overlay.showCardPreview(board.worldRectToPx(session.preview, RectF()), card.kind, card.colored)
         board.presentation.acquire(BoardPresentation.Reason.TRANSFORM)
@@ -118,7 +118,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         val previewSelection = LassoSelection(sel.rect, sel.cardIds, strokes.map { it.id }, sel.fromLasso)
         val grayBridges = ArrayList<Path>()
         collectSelectionPreview(previewSelection, ArrayList(), ArrayList(), cardRects, inkPath, grayBridges, previewInk)
-        board.overlay.beginMovePreview(board.worldRectToPx(sel.rect, RectF()), cardRects, inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardEngine.scale * board.density, cards.map { !it.colored }, grayBridges, ink = previewInk)
+        board.overlay.beginMovePreview(board.worldRectToPx(sel.rect, RectF()), cardRects, inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardViewport.scale * board.density, cards.map { !it.colored }, grayBridges, ink = previewInk)
         hideFromTiles(sel.cardIds, sel.strokeIds)
         board.presentation.acquire(BoardPresentation.Reason.TRANSFORM)
         Log.i(BoardInteractionController.TAG_LASSO, "resize begin cards=${cards.size} strokes=${strokes.size} handle=$handle pen=$isPen")
@@ -131,8 +131,8 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         val fy = if (start.height() > 0f) m.preview.height() / start.height() else 1f
         val pivotX = if (m.handle.movesLeft) start.right else start.left
         val pivotY = if (m.handle.movesTop) start.bottom else start.top
-        val px = (pivotX * BoardEngine.scale + BoardEngine.panX) * board.density
-        val py = (pivotY * BoardEngine.scale + BoardEngine.panY) * board.density
+        val px = (pivotX * BoardViewport.scale + BoardViewport.panX) * board.density
+        val py = (pivotY * BoardViewport.scale + BoardViewport.panY) * board.density
         board.overlay.updateScalePreview(fx, fy, px, py)
     }
 
@@ -142,7 +142,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         val isEdge = handle == BoardGeometry.Handle.TOP || handle == BoardGeometry.Handle.BOTTOM ||
             handle == BoardGeometry.Handle.LEFT || handle == BoardGeometry.Handle.RIGHT
         if (isEdge) {
-            val minSize = BoardGeometry.LASSO_MIN_BOX_PX / BoardEngine.scale
+            val minSize = BoardGeometry.LASSO_MIN_BOX_PX / BoardViewport.scale
             val dx = wx - m.startWorldX
             val dy = wy - m.startWorldY
             var left = start.left; var top = start.top; var right = start.right; var bottom = start.bottom
@@ -195,7 +195,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
 
         collectSelectionPreview(sel, ArrayList(), strokes, ArrayList(), inkPath, previewInk = previewInk)
         val framePx = board.worldRectToPx(sel.rect, RectF())
-        board.overlay.beginMovePreview(framePx, emptyList(), inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardEngine.scale * board.density, ink = previewInk)
+        board.overlay.beginMovePreview(framePx, emptyList(), inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardViewport.scale * board.density, ink = previewInk)
         board.overlay.updateRotatePreview(0f, framePx.centerX(), framePx.centerY())
         hideFromTiles(sel.cardIds, sel.strokeIds)
         board.presentation.acquire(BoardPresentation.Reason.TRANSFORM)
@@ -224,9 +224,9 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         previewInk: MutableList<InteractionOverlayView.PreviewInk>? = null,
     ) {
         val m = android.graphics.Matrix()
-        val sPx = BoardEngine.scale * board.density
+        val sPx = BoardViewport.scale * board.density
         m.setScale(sPx, sPx)
-        m.postTranslate(BoardEngine.panX * board.density, BoardEngine.panY * board.density)
+        m.postTranslate(BoardViewport.panX * board.density, BoardViewport.panY * board.density)
         val toScreen = android.graphics.Matrix()
         synchronized(BoardEngine.lock) {
             for (id in sel.cardIds) BoardEngine.cards[id]?.let { cards.add(it); cardRects.add(board.worldRectToPx(it.rect(), RectF())) }
@@ -272,7 +272,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         collectSelectionPreview(sel, cards, strokes, cardRects, inkPath, grayBridges, previewInk)
         board.overlay.beginMovePreview(
             if (sel.cardIds.isEmpty()) board.worldRectToPx(sel.rect, RectF()) else null,
-            cardRects, inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardEngine.scale * board.density, cards.map { !it.colored }, grayBridges, ink = previewInk,
+            cardRects, inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardViewport.scale * board.density, cards.map { !it.colored }, grayBridges, ink = previewInk,
         )
         hideFromTiles(sel.cardIds, sel.strokeIds)
         board.presentation.acquire(BoardPresentation.Reason.TRANSFORM)
@@ -289,15 +289,15 @@ internal class SelectionTransforms(private val board: BoardInteractionController
             is MoveSession.CardResize -> {
                 computeResizePreview(m, wx, wy)
                 board.overlay.updateMovePreview(
-                    (m.preview.left - m.startRect.left) * BoardEngine.scale * board.density,
-                    (m.preview.top - m.startRect.top) * BoardEngine.scale * board.density,
+                    (m.preview.left - m.startRect.left) * BoardViewport.scale * board.density,
+                    (m.preview.top - m.startRect.top) * BoardViewport.scale * board.density,
                 )
                 board.overlay.showCardPreview(board.worldRectToPx(m.preview, RectF()), m.card.kind, m.card.colored)
             }
             is MoveSession.Selection -> {
                 m.dx = dx
                 m.dy = dy
-                board.overlay.updateMovePreview(dx * BoardEngine.scale * board.density, dy * BoardEngine.scale * board.density)
+                board.overlay.updateMovePreview(dx * BoardViewport.scale * board.density, dy * BoardViewport.scale * board.density)
             }
             is MoveSession.SelectionResize -> {
                 computeSelectionResizePreview(m, wx, wy)
@@ -305,8 +305,8 @@ internal class SelectionTransforms(private val board: BoardInteractionController
             }
             is MoveSession.SelectionRotate -> {
                 m.angle = rotateAngle(m, wx, wy)
-                val px = (m.pivotX * BoardEngine.scale + BoardEngine.panX) * board.density
-                val py = (m.pivotY * BoardEngine.scale + BoardEngine.panY) * board.density
+                val px = (m.pivotX * BoardViewport.scale + BoardViewport.panX) * board.density
+                val py = (m.pivotY * BoardViewport.scale + BoardViewport.panY) * board.density
                 board.overlay.updateRotatePreview(Math.toDegrees(m.angle.toDouble()).toFloat(), px, py)
             }
         }

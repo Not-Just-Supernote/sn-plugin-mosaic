@@ -57,7 +57,7 @@ class MosaicBoardEngineModule(
 
     @ReactMethod
     fun setViewport(panX: Double, panY: Double, scale: Double) {
-        enqueue { BoardEngine.setViewport(panX.toFloat(), panY.toFloat(), scale.toFloat()) }
+        enqueue { BoardViewport.set(panX.toFloat(), panY.toFloat(), scale.toFloat()) }
     }
 
     @ReactMethod
@@ -65,8 +65,8 @@ class MosaicBoardEngineModule(
         val ctx = reactApplicationContext
         if (MosaicSession.savedViewport(ctx) != null) return
         enqueue {
-            BoardEngine.setViewport(panX.toFloat(), panY.toFloat(), scale.toFloat())
-            MosaicSession.saveViewport(ctx, BoardEngine.panX, BoardEngine.panY, BoardEngine.scale)
+            BoardViewport.set(panX.toFloat(), panY.toFloat(), scale.toFloat())
+            MosaicSession.saveViewport(ctx, BoardViewport.panX, BoardViewport.panY, BoardViewport.scale)
         }
     }
 

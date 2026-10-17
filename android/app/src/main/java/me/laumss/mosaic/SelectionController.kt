@@ -139,7 +139,7 @@ internal class SelectionController(private val board: BoardInteractionController
     }
 
     // LASSO_BOUNDS_PAD is world units on the board; above 100% (an open note) it stays the same on screen.
-    fun lassoPadWorld(): Float = LASSO_BOUNDS_PAD / BoardEngine.scale.coerceAtLeast(1f)
+    fun lassoPadWorld(): Float = LASSO_BOUNDS_PAD / BoardViewport.scale.coerceAtLeast(1f)
 
     fun selectionFrame(sel: LassoSelection): RectF {
         val out = RectF()
@@ -469,7 +469,7 @@ internal class SelectionController(private val board: BoardInteractionController
     private fun copyLassoSelection() {
         val sel = lasso ?: return
         if (selectionCopyBusy || board.surfaceSwitching) return
-        val offset = 24f / BoardEngine.scale.coerceAtLeast(0.01f)
+        val offset = 24f / BoardViewport.scale.coerceAtLeast(0.01f)
         val plan = SelectionCopy.build(sel.cardIds, sel.strokeIds, BoardEngine.snapshotScene(), offset, board.notes.notesDirectory, board::newId)
         if (plan.change.isEmpty) return
         fun commit() {
@@ -521,19 +521,19 @@ internal class SelectionController(private val board: BoardInteractionController
     }
 
     fun singleCardFrameHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
-        val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardEngine.scale, 0.25f)
+        val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardViewport.scale, 0.25f)
         val kind = sel.cardIds.firstOrNull()?.let { BoardEngine.cards[it]?.kind }
         return ResizeHandles.hit(ResizeHandles.forCard(kind), sel.rect, wx, wy, radius)
     }
 
     fun shapeEdgeHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
-        val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardEngine.scale, 0.25f)
+        val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardViewport.scale, 0.25f)
         return ResizeHandles.hit(ResizeHandles.forSelection(false, true, false), sel.rect, wx, wy, radius)
     }
 
     fun selectionCornerHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
         if (isSingleCardSelection(sel)) return null
-        val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardEngine.scale, 0.25f)
+        val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardViewport.scale, 0.25f)
         return ResizeHandles.hit(ResizeHandles.forSelection(true, shapeKindOf(sel) != null, false), sel.rect, wx, wy, radius)
     }
 

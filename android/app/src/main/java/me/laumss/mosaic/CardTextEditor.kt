@@ -282,7 +282,7 @@ class CardTextEditor(
             params.width = w; params.height = h
             input.layoutParams = params
         }
-        val scale = BoardEngine.scale * d * contentScale
+        val scale = BoardViewport.scale * d * contentScale
         if (textScale != scale) { textScale = scale; if (headerMode) renderHeaderStyles() else renderStyles() }
         CardTextFormat.WEB.let { m ->
             input.setPadding((m.padX * scale).toInt(), (m.padTop * scale).toInt(), (m.padX * scale).toInt(), (m.padBottom * scale).toInt())

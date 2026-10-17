@@ -100,7 +100,7 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
         val want = wantPx / board.density
         if (want == keyboardShift) return
         Log.i(BoardInteractionController.TAG, "card editor keyboard shift ${keyboardShift}->$want obscuredTop=$obscuredTop")
-        BoardEngine.setViewport(BoardEngine.panX, BoardEngine.panY + keyboardShift - want, BoardEngine.scale)
+        BoardViewport.set(BoardViewport.panX, BoardViewport.panY + keyboardShift - want, BoardViewport.scale)
         keyboardShift = want
         board.scheduleChromeUpdate()
     }
@@ -195,8 +195,8 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
         board.notes.setPageNoteHeader(BoardContentView.noteHeaderOf(next))
         board.content.setNoteHeader(board.notes.currentNoteHeader, board.notes.currentNoteHeaderPlaceholder, board.notes.notePageScale)
 
-        val d = (board.notes.currentNoteHeaderHeight - oldH) * BoardEngine.scale
-        if (d != 0f) BoardEngine.setViewport(BoardEngine.panX, BoardEngine.panY + d, BoardEngine.scale)
+        val d = (board.notes.currentNoteHeaderHeight - oldH) * BoardViewport.scale
+        if (d != 0f) BoardViewport.set(BoardViewport.panX, BoardViewport.panY + d, BoardViewport.scale)
 
         board.emitter.begin()
         board.emitter.cardUpsert(next)
@@ -209,7 +209,7 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
         board.host.removeView(overlay)
         editorView = null
         if (keyboardShift != 0f) {
-            BoardEngine.setViewport(BoardEngine.panX, BoardEngine.panY + keyboardShift, BoardEngine.scale)
+            BoardViewport.set(BoardViewport.panX, BoardViewport.panY + keyboardShift, BoardViewport.scale)
             keyboardShift = 0f
             board.scheduleChromeUpdate()
         }

@@ -59,7 +59,7 @@ internal class CardTrailCleanup(private val board: BoardInteractionController) {
         queued = true
         val ticket = backlog.capture()
         val revision = driver.revision
-        val scale = BoardEngine.scale; val panX = BoardEngine.panX; val panY = BoardEngine.panY
+        val scale = BoardViewport.scale; val panX = BoardViewport.panX; val panY = BoardViewport.panY
         val trail = ticket.region
         Log.i(TAG, "queued owner=board-card reason=$reason bounds=${trail.bounds}")
         // Presentation restores the normal scene after its gesture linger. Wait
@@ -73,7 +73,7 @@ internal class CardTrailCleanup(private val board: BoardInteractionController) {
                 driver.schedule {
                     val exposed = Region(trail)
                     if (!board.surface.showsBoardChrome || board.chrome.blocksPen || board.pen.penContact ||
-                        board.touch.fingers.isNotEmpty() || board.sliderTwoDown || scale != BoardEngine.scale || panX != BoardEngine.panX || panY != BoardEngine.panY) {
+                        board.touch.fingers.isNotEmpty() || board.sliderTwoDown || scale != BoardViewport.scale || panX != BoardViewport.panX || panY != BoardViewport.panY) {
                         exposed.setEmpty()
                     } else {
                         val bounds = Rect()

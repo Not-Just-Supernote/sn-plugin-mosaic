@@ -257,7 +257,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private var fallbackScaleBits = 0
 
     private val rasterScale: Float
-        get() = rasterScaleOverride ?: BoardEngine.scale
+        get() = rasterScaleOverride ?: BoardViewport.scale
 
     @Volatile
     private var gestureFreezeTiles = false
@@ -316,11 +316,11 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     fun setZoomPreview(active: Boolean) {
         if (active) {
-            if (rasterScaleOverride == null) rasterScaleOverride = BoardEngine.scale
+            if (rasterScaleOverride == null) rasterScaleOverride = BoardViewport.scale
         } else {
             val locked = rasterScaleOverride ?: return
             rasterScaleOverride = null
-            val nextBits = BoardEngine.scale.toRawBits()
+            val nextBits = BoardViewport.scale.toRawBits()
             lastScaleBits = nextBits
             onScaleChanged(locked.toRawBits(), nextBits)
             postInvalidateOnAnimation()
@@ -359,10 +359,10 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     private fun tileOnScreen(ix: Int, iy: Int): Boolean {
         val densityValue = density
-        val scalePx = BoardEngine.scale * densityValue
+        val scalePx = BoardViewport.scale * densityValue
         val tilePx = TILE_WORLD * scalePx
-        val left = BoardEngine.panX * densityValue + ix * tilePx
-        val top = BoardEngine.panY * densityValue + iy * tilePx
+        val left = BoardViewport.panX * densityValue + ix * tilePx
+        val top = BoardViewport.panY * densityValue + iy * tilePx
         return left < width && top < height && left + tilePx > 0 && top + tilePx > 0
     }
 
@@ -607,9 +607,9 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     private inline fun forEachVisibleTileLocked(block: (TileKey) -> Unit) {
         val densityValue = density
-        val scalePx = BoardEngine.scale * densityValue
-        val panXPx = BoardEngine.panX * densityValue
-        val panYPx = BoardEngine.panY * densityValue
+        val scalePx = BoardViewport.scale * densityValue
+        val panXPx = BoardViewport.panX * densityValue
+        val panYPx = BoardViewport.panY * densityValue
         val tilePx = TILE_WORLD * scalePx
         if (width == 0 || height == 0 || tilePx <= 0f) return
         val scaleBits = rasterScale.toRawBits()
@@ -771,11 +771,11 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             removeCallbacks(lookTimeoutTask)
         }
         val holdView = lookPending
-        val scale = if (holdView) lookScale else BoardEngine.scale
+        val scale = if (holdView) lookScale else BoardViewport.scale
         val densityValue = density
         val scalePx = scale * densityValue
-        val panXPx = (if (holdView) lookPanX else BoardEngine.panX) * densityValue
-        val panYPx = (if (holdView) lookPanY else BoardEngine.panY) * densityValue
+        val panXPx = (if (holdView) lookPanX else BoardViewport.panX) * densityValue
+        val panYPx = (if (holdView) lookPanY else BoardViewport.panY) * densityValue
         val tilePx = TILE_WORLD * scalePx
         if (width == 0 || height == 0 || tilePx <= 0f) return
 
@@ -929,9 +929,9 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         gestureTemplateHidden = hideTemplate
         if (!geometryChanged) { postInvalidateOnAnimation(); return }
         removeCallbacks(lookTimeoutTask)
-        lookPanX = BoardEngine.panX
-        lookPanY = BoardEngine.panY
-        lookScale = BoardEngine.scale
+        lookPanX = BoardViewport.panX
+        lookPanY = BoardViewport.panY
+        lookScale = BoardViewport.scale
         lookDrained = false
         // 先置位：图块线程可能在 rerasterAllTiles 返回前就画完。
         lookPending = true

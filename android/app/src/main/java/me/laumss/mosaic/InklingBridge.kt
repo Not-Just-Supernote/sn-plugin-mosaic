@@ -147,7 +147,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
                     NoteSession.noteCardBoardSize(doc.contentHeight, NoteSession.NOTE_CARD_BOARD_WIDTH, size, BoardContentView.noteHeaderMarkdown(headerLines))
                     val view = board.viewWorld()
                     val top = if (size[1] < view.height()) view.centerY() - size[1] / 2f
-                        else view.top + board.toolbarHeightWorld() / BoardEngine.scale + SelectionController.LASSO_BOUNDS_PAD * 2f
+                        else view.top + board.toolbarHeightWorld() / BoardViewport.scale + SelectionController.LASSO_BOUNDS_PAD * 2f
                     val card = BoardEngine.CardRec(
                         board.newId("card-"), view.centerX() - size[0] / 2f, top, size[0], size[1],
                         BoardGeometry.nextZIndex(BoardEngine.cards.values), "note", header,
@@ -316,8 +316,8 @@ internal class InklingBridge(private val board: BoardInteractionController) {
         val file = File(InklingLink.PASTE_STROKES_FILE)
         val generation = pasteGeneration.incrementAndGet()
         pasteTask?.cancel(true)
-        val viewCx = (board.host.width / board.density / 2f - BoardEngine.panX) / BoardEngine.scale
-        val viewCy = (board.host.height / board.density / 2f - BoardEngine.panY) / BoardEngine.scale
+        val viewCx = (board.host.width / board.density / 2f - BoardViewport.panX) / BoardViewport.scale
+        val viewCy = (board.host.height / board.density / 2f - BoardViewport.panY) / BoardViewport.scale
         val d = board.density
 
         // Clipboard dimensions use the fixed board scale; note pages have their intrinsic view scale.
@@ -369,7 +369,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
                     BoardInteractionController.TAG_LASSO,
                     "pasted ${pastedIds.size} strokes at viewport center world=(${"%.0f".format(viewCx)},${"%.0f".format(viewCy)}) " +
                         "size=${"%.0f".format((batch.maxX - batch.minX) * worldScale * batch.pageScale)}x${"%.0f".format((batch.maxY - batch.minY) * worldScale * batch.pageScale)} " +
-                        "pan=(${BoardEngine.panX},${BoardEngine.panY}) scale=${BoardEngine.scale} pageScale=${batch.pageScale} pinnedWhite=$pinned",
+                        "pan=(${BoardViewport.panX},${BoardViewport.panY}) scale=${BoardViewport.scale} pageScale=${batch.pageScale} pinnedWhite=$pinned",
                 )
             }
         }

@@ -34,7 +34,7 @@ internal class NoteShots(private val board: BoardInteractionController) {
 
     fun linkAt(wx: Float, wy: Float): String? {
         if (!board.surface.showsBoardChrome) return null
-        val scale = BoardEngine.scale
+        val scale = BoardViewport.scale
         return NoteLinks.badgeAt(wx, wy, NOTE_LINK_TAP_SLOP_DP / scale, NOTE_LINK_MIN_HIT_DP / scale)
     }
 
@@ -62,7 +62,7 @@ internal class NoteShots(private val board: BoardInteractionController) {
         val w = board.host.width / board.density
         val h = max(1f, board.host.height / board.density - top)
         val fit = min(w / max(region.width(), 1f), h / max(region.height(), 1f))
-        val scale = BoardGeometry.clampZoom(min(BoardEngine.scale, fit))
+        val scale = BoardGeometry.clampZoom(min(BoardViewport.scale, fit))
         val centered = SparseNavigation.panToCenterRect(region, w, h, scale)
         board.chrome.hideSwitcher()
         board.syncToolViews()
@@ -96,7 +96,7 @@ internal class NoteShots(private val board: BoardInteractionController) {
         }
         val anchored = synchronized(BoardEngine.lock) { NoteShotExport.capture(sel.cardIds, sel.strokeIds) } ?: return
         val layout = NoteShotExport.layout(
-            anchored.region, BoardEngine.scale * board.density, board.density,
+            anchored.region, BoardViewport.scale * board.density, board.density,
             board.host.width * NOTE_SHOT_MAX_SCREEN_FRACTION, board.host.height * NOTE_SHOT_MAX_SCREEN_FRACTION,
         )
         val fingerprint = NoteShotExport.fingerprint(anchored.region)
@@ -159,7 +159,7 @@ internal class NoteShots(private val board: BoardInteractionController) {
         val w = board.host.width / board.density
         val h = max(1f, board.host.height / board.density - top)
         val fit = min(w / max(region.width(), 1f), h / max(region.height(), 1f))
-        val captured = if (shot.pxPerWorld > 0f) shot.pxPerWorld / board.density else BoardEngine.scale
+        val captured = if (shot.pxPerWorld > 0f) shot.pxPerWorld / board.density else BoardViewport.scale
         val scale = BoardGeometry.clampZoom(min(captured, fit))
         val centered = SparseNavigation.panToCenterRect(region, w, h, scale)
         board.commitViewport(centered[0], centered[1] + top, scale)
@@ -184,7 +184,7 @@ internal class NoteShots(private val board: BoardInteractionController) {
             done(Arguments.createMap().apply { putBoolean("unchanged", true) })
             return
         }
-        val pxPerWorld = if (shot.pxPerWorld > 0f) shot.pxPerWorld else BoardEngine.scale * board.density
+        val pxPerWorld = if (shot.pxPerWorld > 0f) shot.pxPerWorld else BoardViewport.scale * board.density
         val layout = NoteShotExport.layout(
             anchored.region, pxPerWorld, board.density,
             board.host.width * NOTE_SHOT_MAX_SCREEN_FRACTION, board.host.height * NOTE_SHOT_MAX_SCREEN_FRACTION,

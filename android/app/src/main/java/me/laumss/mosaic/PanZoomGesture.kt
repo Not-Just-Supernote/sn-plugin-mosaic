@@ -62,7 +62,7 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
         val neighbors = if (activeRegion == null) SparseNavigation.Neighbors.NONE else SparseNavigation.findNeighbors(board.currentRegions(), activeRegion)
         val g = FingerGesture.PanZoom(
             a.id, b.id,
-            BoardEngine.panX, BoardEngine.panY, BoardEngine.scale,
+            BoardViewport.panX, BoardViewport.panY, BoardViewport.scale,
             (a.x + b.x) / 2f, (a.y + b.y) / 2f, max(1f, hypot(b.x - a.x, b.y - a.y)),
             activeRegion, neighbors,
         )
@@ -100,9 +100,9 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
     private fun resnap(g: FingerGesture.PanZoom) {
         val a = board.touch.fingers[g.a] ?: return
         val b = board.touch.fingers[g.b] ?: return
-        g.startPanX = BoardEngine.panX
-        g.startPanY = BoardEngine.panY
-        g.startScale = BoardEngine.scale
+        g.startPanX = BoardViewport.panX
+        g.startPanY = BoardViewport.panY
+        g.startScale = BoardViewport.scale
         g.startCenterX = (a.x + b.x) / 2f
         g.startCenterY = (a.y + b.y) / 2f
         g.startDistance = max(1f, hypot(b.x - a.x, b.y - a.y))
@@ -145,11 +145,11 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
         val panY = board.snapPanToPx(board.viewportTmp[1])
 
         g.overscroll = null
-        if (panX != BoardEngine.panX || panY != BoardEngine.panY || nextScale != BoardEngine.scale) {
+        if (panX != BoardViewport.panX || panY != BoardViewport.panY || nextScale != BoardViewport.scale) {
             recordCleanupPosition(g)
         }
         g.frames++
-        BoardEngine.setViewport(panX, panY, nextScale)
+        BoardViewport.set(panX, panY, nextScale)
         if (g.frames % 10 == 0) {
             val centerX = (board.host.width / board.density / 2f - panX) / nextScale
             val centerY = (board.host.height / board.density / 2f - panY) / nextScale
@@ -164,9 +164,9 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
 
     fun end(g: FingerGesture.PanZoom, cleanOldPositions: Boolean = true) {
         if (cleanOldPositions && !g.cleanupTrail.isEmpty) recordCleanupPosition(g)
-        var panX = BoardEngine.panX
-        var panY = BoardEngine.panY
-        var scale = BoardEngine.scale
+        var panX = BoardViewport.panX
+        var panY = BoardViewport.panY
+        var scale = BoardViewport.scale
 
         val snapped = when {
             scale == g.startScale -> scale
@@ -182,7 +182,7 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
             board.surface.constrainPan(p[0], p[1], snapped, board.viewportTmp)
             panX = board.snapPanToPx(board.viewportTmp[0]); panY = board.snapPanToPx(board.viewportTmp[1]); scale = snapped
 
-            BoardEngine.setViewport(panX, panY, scale)
+            BoardViewport.set(panX, panY, scale)
             Log.i(TAG_PAN, "snap scale ${g.startScale}->$scale")
         }
         board.content.setZoomPreview(false)

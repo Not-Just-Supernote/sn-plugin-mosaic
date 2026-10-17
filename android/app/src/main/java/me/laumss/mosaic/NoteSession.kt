@@ -239,7 +239,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
 
     fun pageHeaderRegionWorld(): RectF = RectF(0f, -currentNoteHeaderHeight, ScrollingDocument.WIDTH, 0f)
 
-    private fun noteTopInsetWorld(): Float = board.toolbarHeightWorld() + currentNoteHeaderHeight * BoardEngine.scale
+    private fun noteTopInsetWorld(): Float = board.toolbarHeightWorld() + currentNoteHeaderHeight * BoardViewport.scale
 
     fun noteHeaderHit(x: Float, y: Float): Boolean =
         !board.surface.showsBoardChrome && currentNoteHeaderHeight > 0f && board.worldY(y) < 0f && !noteOffPageHit(x, y)
@@ -253,7 +253,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
     }
 
     private fun noteBelowPageEnd(wy: Float): Boolean =
-        wy > notePageBottom && (board.surface as? NoteSurface)?.zoomedOut(BoardEngine.scale) == true
+        wy > notePageBottom && (board.surface as? NoteSurface)?.zoomedOut(BoardViewport.scale) == true
 
     // Ink inside a note stays on the writable page: below the header, between the sides, above the zoomed-out end.
     fun noteInkOffPage(wx: Float, wy: Float): Boolean =
@@ -268,7 +268,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
         val left = board.screenX(0f).toInt().coerceIn(0, w)
         val right = kotlin.math.ceil(board.screenX(ScrollingDocument.WIDTH)).toInt().coerceIn(0, w)
         val top = board.screenY(-currentNoteHeaderHeight).toInt().coerceIn(0, h)
-        val zoomedOut = (board.surface as? NoteSurface)?.zoomedOut(BoardEngine.scale) == true
+        val zoomedOut = (board.surface as? NoteSurface)?.zoomedOut(BoardViewport.scale) == true
         val bottom = if (zoomedOut) kotlin.math.ceil(board.screenY(notePageBottom)).toInt().coerceIn(0, h) else h
         val out = ArrayList<Rect>(4)
         if (left > 0) out.add(Rect(0, 0, left, h))
@@ -340,11 +340,11 @@ internal class NoteSession(private val board: BoardInteractionController) {
         val before = noteToolbarInset
         noteToolbarInset = now
         if (board.surface.showsBoardChrome || now == before) return
-        val scale = BoardEngine.scale
+        val scale = BoardViewport.scale
         val restingTop = before + currentNoteHeaderHeight * scale
-        val panY = if (BoardEngine.panY >= restingTop - 0.5f) BoardEngine.panY + (now - before) else BoardEngine.panY
-        board.surface.constrainPan(BoardEngine.panX, panY, scale, board.viewportTmp)
+        val panY = if (BoardViewport.panY >= restingTop - 0.5f) BoardViewport.panY + (now - before) else BoardViewport.panY
+        board.surface.constrainPan(BoardViewport.panX, panY, scale, board.viewportTmp)
         board.commitViewport(board.snapPanToPx(board.viewportTmp[0]), board.snapPanToPx(board.viewportTmp[1]), scale)
-        Log.i(BoardInteractionController.TAG, "note toolbar inset $before->$now panY ${BoardEngine.panY}")
+        Log.i(BoardInteractionController.TAG, "note toolbar inset $before->$now panY ${BoardViewport.panY}")
     }
 }

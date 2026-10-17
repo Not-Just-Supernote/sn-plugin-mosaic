@@ -245,7 +245,7 @@ internal class PenInput(private val board: BoardInteractionController) {
             "DOWN px=($x,$y) raw=(${e.x},${e.y}) inkAlign=(${InkAlign.offsetX},${InkAlign.offsetY}) " +
                 "world=(${wx.toInt()},${wy.toInt()}) eraser=${board.eraserMode} lasso=${board.lassoMode} " +
                 "${board.arbiter.describe()} | ${InputReader.describePenRaw()} density=${board.density} " +
-                "pan=(${BoardEngine.panX},${BoardEngine.panY}) scale=${BoardEngine.scale}",
+                "pan=(${BoardViewport.panX},${BoardViewport.panY}) scale=${BoardViewport.scale}",
         )
 
         val downCard = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
@@ -420,7 +420,7 @@ internal class PenInput(private val board: BoardInteractionController) {
                 }
             }
             is PenSession.OpenNote -> {
-                if (hypot(board.worldX(penX(e)) - s.downX, board.worldY(penY(e)) - s.downY) > BoardGeometry.CARD_DRAG_THRESHOLD_PX / BoardEngine.scale) {
+                if (hypot(board.worldX(penX(e)) - s.downX, board.worldY(penY(e)) - s.downY) > BoardGeometry.CARD_DRAG_THRESHOLD_PX / BoardViewport.scale) {
                     s.moved = true
                     board.host.drawPath.setSuspended(false, "note-tap-cancel")
                     penSession = PenSession.Consumed
@@ -504,7 +504,7 @@ internal class PenInput(private val board: BoardInteractionController) {
                     if (!cancelled) {
                         val endX = board.worldX(penX(e)); val endY = board.worldY(penY(e))
                         val distance = hypot(endX - s.downX, endY - s.downY)
-                        if (!s.moved && distance <= BoardGeometry.CARD_DRAG_THRESHOLD_PX / BoardEngine.scale) {
+                        if (!s.moved && distance <= BoardGeometry.CARD_DRAG_THRESHOLD_PX / BoardViewport.scale) {
                             val shotId = s.shotId
                             if (shotId != null) board.noteShots.openLink(shotId) else board.notes.openNote(s.ref)
                         }
@@ -538,7 +538,7 @@ internal class PenInput(private val board: BoardInteractionController) {
             s.points.toArray(),
             s.pressures.toArray(),
             board.penStyle.objType,
-            board.density * BoardEngine.scale,
+            board.density * BoardViewport.scale,
             DrawPathClient.widthArgument(board.penStyle, board.penWidth),
             s.nibAngle,
         )
@@ -561,14 +561,14 @@ internal class PenInput(private val board: BoardInteractionController) {
             maxRasterWidth = maxOf(maxRasterWidth, run.maxWidth)
         }
         if (!minRasterWidth.isFinite()) minRasterWidth = 0f
-        val screenMin = minRasterWidth * board.density * BoardEngine.scale
-        val screenMax = maxRasterWidth * board.density * BoardEngine.scale
+        val screenMin = minRasterWidth * board.density * BoardViewport.scale
+        val screenMax = maxRasterWidth * board.density * BoardViewport.scale
         Log.i(BoardInteractionController.TAG_PEN, "UP committed stroke ${s.id} style=${board.penStyle.name} stdWidth=${board.penWidth} drawPathWidth=$committedDrawPathWidth pressureRange=$minPressure..$maxPressure rasterWorldRange=$minRasterWidth..$maxRasterWidth rasterScreenPxRange=$screenMin..$screenMax nibAngle=${rec.nibAngle} points=${s.points.size / 2} space=${s.space} ink=${Integer.toHexString(ink)}")
     }
 
     private fun eraseAt(session: PenSession.Erase, wx: Float, wy: Float) {
         hitBuffer.clear()
-                synchronized(BoardEngine.lock) { BoardEngine.hitTestStrokes(wx, wy, ERASER_HIT_RADIUS / BoardEngine.scale, hitBuffer) }
+                synchronized(BoardEngine.lock) { BoardEngine.hitTestStrokes(wx, wy, ERASER_HIT_RADIUS / BoardViewport.scale, hitBuffer) }
         if (hitBuffer.isEmpty()) return
         for (rec in hitBuffer) {
             if (session.pendingIds.add(rec.id)) session.pending.stroke(rec, null)
@@ -609,7 +609,7 @@ internal class PenInput(private val board: BoardInteractionController) {
         val rec = BoardEngine.StrokeRec(
             board.newId("shape-"), if (card != null) "card:${card.id}" else
                 BoardEngine.connectionAt(ax, ay)?.let { "connection:${it.id}" } ?: "canvas", board.penWidth, INK_BLACK,
-            shape, Shapes.pressures(shape.size / 2), board.penStyle.objType, board.density * BoardEngine.scale,
+            shape, Shapes.pressures(shape.size / 2), board.penStyle.objType, board.density * BoardViewport.scale,
             DrawPathClient.widthArgument(board.penStyle, board.penWidth),
         )
         board.applyChange(BoardHistory.Change("shape").stroke(null, rec), record = true)
