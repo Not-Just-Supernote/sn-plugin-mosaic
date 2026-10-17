@@ -213,6 +213,6 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
             keyboardShift = 0f
             board.scheduleChromeUpdate()
         }
-        board.refreshHostToolFlags()
+        board.syncToolViews()
     }
 }

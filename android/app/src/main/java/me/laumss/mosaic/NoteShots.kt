@@ -65,7 +65,7 @@ internal class NoteShots(private val board: BoardInteractionController) {
         val scale = BoardGeometry.clampZoom(min(BoardEngine.scale, fit))
         val centered = SparseNavigation.panToCenterRect(region, w, h, scale)
         board.chrome.hideSwitcher()
-        board.refreshHostToolFlags()
+        board.syncToolViews()
         board.commitViewport(centered[0], centered[1] + top, scale)
         Log.i(TAG_SHOT, "locate link id=$shotId region=$region scale=$scale")
     }
@@ -153,7 +153,7 @@ internal class NoteShots(private val board: BoardInteractionController) {
         board.touch.cancelFingerGestures("note-shot")
         board.selection.setLasso(null)
         board.chrome.hideSwitcher()
-        board.refreshHostToolFlags()
+        board.syncToolViews()
 
         val top = board.chrome.toolbarHeightPx() / board.density
         val w = board.host.width / board.density

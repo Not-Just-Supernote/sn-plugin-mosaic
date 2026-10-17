@@ -146,7 +146,7 @@ internal class CardCommands(private val board: BoardInteractionController) {
         val strokeIds = sel.strokeIds.toList()
         pendingRecognition = PendingRecognition(RectF(sel.rect), strokeIds)
         board.chrome.hideSwitcher()
-        board.refreshHostToolFlags()
+        board.syncToolViews()
         board.emitter.begin()
         board.emitter.action("recognizeLasso")
         board.emitter.commit()

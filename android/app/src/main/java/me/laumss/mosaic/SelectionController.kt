@@ -270,7 +270,7 @@ internal class SelectionController(private val board: BoardInteractionController
         board.inkling.exportLassoStrokes(next)
         BoardEngine.mutate { setSelection(selectionIds()) }
         updateLassoOverlay()
-        board.refreshHostToolFlags()
+        board.syncToolViews()
         board.scheduleChromeUpdate()
         if (next == null) {
             board.handler.postDelayed({
@@ -284,7 +284,7 @@ internal class SelectionController(private val board: BoardInteractionController
         if (next != null) {
             board.handler.post {
                 if (!board.pen.penContact) {
-                    board.refreshHostToolFlags()
+                    board.syncToolViews()
                     board.overlay.invalidate()
                     board.content.markSettleRequested()
                     board.content.postInvalidateOnAnimation()
@@ -543,7 +543,7 @@ internal class SelectionController(private val board: BoardInteractionController
         setLasso(null)
         selectBelowArmed = true
         board.chrome.setSelectBelowActive(true)
-        board.refreshHostToolFlags()
+        board.syncToolViews()
         Log.i(BoardInteractionController.TAG_LASSO, "select-below armed ${board.arbiter.describe()}")
     }
 
@@ -551,7 +551,7 @@ internal class SelectionController(private val board: BoardInteractionController
         if (!selectBelowArmed) return
         selectBelowArmed = false
         board.chrome.setSelectBelowActive(false)
-        board.refreshHostToolFlags()
+        board.syncToolViews()
         Log.i(BoardInteractionController.TAG_LASSO, "select-below cancelled reason=$reason")
     }
 
@@ -580,7 +580,7 @@ internal class SelectionController(private val board: BoardInteractionController
             setLasso(LassoSelection(selectionFrame(hits), hits.cardIds, hits.strokeIds))
             Log.i(BoardInteractionController.TAG_LASSO, "select-below hit cards=${hits.cardIds.size} strokes=${hits.strokeIds.size} y=$wy")
         } else {
-            board.refreshHostToolFlags()
+            board.syncToolViews()
             Log.i(BoardInteractionController.TAG_LASSO, "select-below nothing below y=$wy")
         }
     }

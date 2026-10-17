@@ -115,7 +115,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
         noteToolbarInset = board.toolbarHeightWorld()
         syncNotePageFrame()
         if (next.showsBoardChrome) setNoteHeaderHoverBlocked(false)
-        board.syncToolMirrors(board.arbiter.effective(), "surface:${next.name}")
+        board.syncToolViews()
 
         board.presentation.refresh("surface:${next.name}")
 

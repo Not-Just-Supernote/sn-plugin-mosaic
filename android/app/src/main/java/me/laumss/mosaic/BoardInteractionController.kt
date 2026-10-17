@@ -105,10 +105,12 @@ class BoardInteractionController(
 
     var touchEnabled = true
 
-    internal var eraserMode = false
-    internal var lassoMode = false
+    // The tool in force is kept only in the arbiter; these read it.
+    internal val eraserMode: Boolean get() = arbiter.effective().eraser
+    internal val lassoMode: Boolean get() = arbiter.effective().lasso
+    internal val shapeMode: Boolean get() = arbiter.effective().shape
 
-    internal var shapeMode = false
+    // The shape the shape tool draws, also while the tool is off.
     internal var shapeKind = Shapes.Kind.RECT
 
     internal var shapeSelectionPending = false
@@ -165,7 +167,7 @@ class BoardInteractionController(
             chrome.setTranslucentLevel(level)
         }
         arbiter.reset()
-        syncToolMirrors(arbiter.effective(), "attach")
+        syncToolViews()
         chrome.setTouchEnabled(touchEnabled)
 
         notes.applyTemplateForSurface(surface, if (surface.showsBoardChrome) null else notes.noteController.document?.ref)
@@ -447,33 +449,28 @@ class BoardInteractionController(
         val previous = pen.penSession
         val discardedWrite = pen.endSessionForToolChange()
         if (!t.after.lasso && !t.after.shape && !t.keepSelection) selection.setLasso(null)
-        syncToolMirrors(t.after, source)
+        syncToolViews()
         pen.resumeAfterToolChange(previous, discardedWrite, t.after, source)
     }
 
-    internal fun syncToolMirrors(state: ToolArbiter.State, source: String) {
-        eraserMode = state.eraser
-        lassoMode = state.lasso
-        shapeMode = state.shape
-
+    /**
+     * Shows the tool in force, the selection and open menus on the toolbar, the system ink service and the
+     * refresh mode. Tool changes run it through [applyTransition]; anything else that changes these inputs calls it.
+     */
+    internal fun syncToolViews() {
+        val state = arbiter.effective()
         val showLasso = selection.selectBelowPendingRestore || (selection.lasso != null && !state.eraser)
         chrome.setInkTool(state.eraser && !showLasso, state.lasso || showLasso, state.shape && !showLasso)
-        chrome.setCurrentShape(if (shapeMode) shapeKind else null)
-
-        host.toolLassoActive = lassoMode || shapeMode
-
-        host.inkEnabled = !eraserMode && !lassoMode && selection.lasso == null && !chrome.blocksPen && !selection.selectBelowArmed
-
-        host.shapeDrag = shapeMode
-
-        host.lassoEnabled = (lassoMode || shapeMode) && selection.lasso == null && !chrome.blocksPen && !selection.selectBelowArmed
-
-        presentation.set(BoardPresentation.Reason.TOOL, eraserMode)
+        chrome.setCurrentShape(if (state.shape) shapeKind else null)
+        host.toolLassoActive = state.lasso || state.shape
+        val selectionFree = selection.lasso == null && !chrome.blocksPen && !selection.selectBelowArmed
+        host.inkEnabled = !state.eraser && !state.lasso && selectionFree
+        host.shapeDrag = state.shape
+        host.lassoEnabled = (state.lasso || state.shape) && selectionFree
+        presentation.set(BoardPresentation.Reason.TOOL, state.eraser)
         // 只在套索工具下用 auto；选中后静止时交还宿主刷新，长按拖卡片和拖边改尺寸都只在拖动时切一次。
-        presentation.set(BoardPresentation.Reason.LASSO, lassoMode)
+        presentation.set(BoardPresentation.Reason.LASSO, state.lasso)
     }
-
-    internal fun refreshHostToolFlags() = syncToolMirrors(arbiter.effective(), "flags")
 
     internal fun gestureToolOf(tool: GestureSettings.GestureTool): ToolArbiter.Tool? = when (tool) {
         GestureSettings.GestureTool.ERASER -> ToolArbiter.Tool.ERASER
@@ -782,7 +779,7 @@ class BoardInteractionController(
 
     override fun onPenBlockChanged() {
         InklingLink.setChromeMenuOpen(chrome.blocksPen)
-        refreshHostToolFlags()
+        syncToolViews()
         notes.keepNoteTopOnToolbarChange()
     }
 
@@ -806,12 +803,12 @@ class BoardInteractionController(
 
         val links = NoteLinks.list().filter { NoteLinks.regionOf(it.id) != null }
         chrome.showSwitcher(notes, links)
-        refreshHostToolFlags()
+        syncToolViews()
     }
 
     override fun onSwitcherDismissed() {
         chrome.hideSwitcher()
-        refreshHostToolFlags()
+        syncToolViews()
     }
 
     fun setSyncState(enabled: Boolean, state: String, address: String) {
@@ -821,7 +818,7 @@ class BoardInteractionController(
     override fun onOpenNoteCard(cardId: String) {
         val card = BoardEngine.cards[cardId] ?: return
         chrome.hideSwitcher()
-        refreshHostToolFlags()
+        syncToolViews()
         notes.openNote(card.noteRef)
     }
 
@@ -835,7 +832,7 @@ class BoardInteractionController(
         val scale = BoardGeometry.clampZoom(min(BoardEngine.scale, fit))
         val centered = SparseNavigation.panToCenterRect(rect, w, h, scale)
         chrome.hideSwitcher()
-        refreshHostToolFlags()
+        syncToolViews()
         commitViewport(centered[0], centered[1], scale)
         Log.i(TAG, "locate note card=${card.id} at (${card.x},${card.y}) scale=$scale")
     }
