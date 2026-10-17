@@ -144,7 +144,7 @@ Notipal 浮动工具条所在区域不能书写。笔粗细、图形、模板二
 
 ## 改代码时
 
-新改动在 `BoardInteractionController` 里通过 `apply()` 提交，才能撤销和保存。JS 也要保存的，要在 `boardCommands.ts` 和 `App.tsx` 接上。
+新改动在 `BoardInteractionController` 里通过 `applyChange()` 提交，才能撤销和保存。JS 也要保存的，要在 `boardCommands.ts` 和 `App.tsx` 接上。
 
 切换工具后调用 `syncToolMirrors`，否则系统笔迹和界面状态会不一致。
 
