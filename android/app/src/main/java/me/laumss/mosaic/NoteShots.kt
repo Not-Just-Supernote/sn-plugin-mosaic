@@ -46,7 +46,7 @@ internal class NoteShots(private val board: BoardInteractionController) {
         val name = link.noteName.ifBlank { MosaicStrings.t(MosaicStrings.Key.noteLinkFallback) }
         Log.i(TAG_SHOT, "open note link id=$shotId note=${link.notePath} page=${link.page} current=$current same=$sameNote")
         MosaicNoteShotModule.logHostApisOnce()
-        board.cancelFingerGestures("note-link")
+        board.touch.cancelFingerGestures("note-link")
         if (!sameNote) {
             Toast.makeText(board.host.context, MosaicStrings.noteLinkElsewhere(name, link.page), Toast.LENGTH_LONG).show()
             return
@@ -57,7 +57,7 @@ internal class NoteShots(private val board: BoardInteractionController) {
 
     fun locateLink(shotId: String) {
         val region = NoteLinks.regionOf(shotId) ?: return
-        board.cancelFingerGestures("locate-note-link")
+        board.touch.cancelFingerGestures("locate-note-link")
         val top = board.chrome.toolbarHeightPx() / board.density
         val w = board.host.width / board.density
         val h = max(1f, board.host.height / board.density - top)
@@ -150,7 +150,7 @@ internal class NoteShots(private val board: BoardInteractionController) {
             return
         }
         val region = synchronized(BoardEngine.lock) { NoteShotExport.resolve(shot) }?.region ?: return
-        board.cancelFingerGestures("note-shot")
+        board.touch.cancelFingerGestures("note-shot")
         board.selection.setLasso(null)
         board.chrome.hideSwitcher()
         board.refreshHostToolFlags()

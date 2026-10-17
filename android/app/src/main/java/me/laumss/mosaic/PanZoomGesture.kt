@@ -66,7 +66,7 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
             (a.x + b.x) / 2f, (a.y + b.y) / 2f, max(1f, hypot(b.x - a.x, b.y - a.y)),
             activeRegion, neighbors,
         )
-        board.fingerGesture = g
+        board.touch.fingerGesture = g
         armed = false
 
         if (board.surface.showsBoardChrome) {
@@ -84,7 +84,7 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
     }
 
     private fun arm() {
-        val g = board.fingerGesture as? FingerGesture.PanZoom ?: return
+        val g = board.touch.fingerGesture as? FingerGesture.PanZoom ?: return
         resnap(g)
         if (!armed) {
             armed = true
@@ -98,8 +98,8 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
     }
 
     private fun resnap(g: FingerGesture.PanZoom) {
-        val a = board.fingers[g.a] ?: return
-        val b = board.fingers[g.b] ?: return
+        val a = board.touch.fingers[g.a] ?: return
+        val b = board.touch.fingers[g.b] ?: return
         g.startPanX = BoardEngine.panX
         g.startPanY = BoardEngine.panY
         g.startScale = BoardEngine.scale
@@ -110,8 +110,8 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
 
     internal fun update(g: FingerGesture.PanZoom) {
         if (!armed) return
-        val a = board.fingers[g.a] ?: return
-        val b = board.fingers[g.b] ?: return
+        val a = board.touch.fingers[g.a] ?: return
+        val b = board.touch.fingers[g.b] ?: return
         val d = board.density
         val cx = (a.x + b.x) / 2f
         val cy = (a.y + b.y) / 2f

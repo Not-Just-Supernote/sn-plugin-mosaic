@@ -210,12 +210,12 @@ internal class PenInput(private val board: BoardInteractionController) {
         penLastX = x
         penLastY = y
 
-        when (board.fingerGesture) {
+        when (board.touch.fingerGesture) {
             FingerGesture.ScreenTool -> {}
             is FingerGesture.TwoCandidate -> {
-                if (!board.settleTwoCandidate("pen-down")) board.cancelFingerGestures("pen-down")
+                if (!board.touch.settleTwoCandidate("pen-down")) board.touch.cancelFingerGestures("pen-down")
             }
-            else -> board.cancelFingerGestures("pen-down")
+            else -> board.touch.cancelFingerGestures("pen-down")
         }
         val waitingForJsScene = board.penHeldForJsScene && board.surface.showsBoardChrome
         if (board.surfaceSwitching || waitingForJsScene || board.chrome.consumesPoint(x, y) || board.inkling.toolbarHit(x, y) || board.notes.noteHeaderHit(x, y) || board.notes.noteOffPageHit(x, y)) {

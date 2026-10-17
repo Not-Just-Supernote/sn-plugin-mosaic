@@ -1,6 +1,5 @@
 package me.laumss.mosaic
 
-import android.content.Intent
 import android.graphics.RectF
 import android.graphics.Region
 import android.os.Handler
@@ -8,8 +7,6 @@ import android.os.Looper
 import android.util.Log
 import com.facebook.react.bridge.WritableMap
 import java.util.UUID
-import kotlin.math.abs
-import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
@@ -24,10 +21,8 @@ class BoardInteractionController(
     companion object {
         const val TAG = "MosaicInteraction"
         const val TAG_PEN = "MosaicPen"
-        private const val TAG_FINGER = "MosaicFinger"
         const val TAG_LASSO = "MosaicLasso"
         private const val TAG_TOOL = "MosaicTool"
-        private const val TAG_TWO = "MosaicTwoFinger"
 
         const val PEN_WIDTH_DP = 2f
 
@@ -39,34 +34,12 @@ class BoardInteractionController(
         const val ACCENT_BG_COLOR = "#FFF9E3"
         const val ACCENT_TEXT_COLOR = "#3f3b2e"
 
-        const val TWO_FINGER_CANDIDATE_HOLD_MS = 300L
-
-        const val TWO_FINGER_PAIR_WINDOW_MS = TwoFingerToolGuard.EVENT_TIME_DEV_MS
-
-        const val CARD_FINGER_MOVE_HOLD_MS = 600L
-
-        const val CARD_FINGER_MOVE_HOLD_FAST_MS = 400L
-
-        const val CARD_FINGER_MOVE_HOLD_SELECTION_MS = 100L
-
-        private const val NOTE_HEADER_PENDING = "#note-header"
-        private const val NOTE_LINK_PENDING = "#note-link:"
-
         const val LASSO_ACTION_TAP_SLOP_DP = 12f
-
-        const val TWO_FINGER_TAP_MAX_MS = 300L
-        const val TWO_FINGER_DOUBLE_TAP_GAP_MS = 400L
-        const val TWO_FINGER_TAP_MOVE_SLOP_DP = 24f
-        const val TWO_FINGER_DOUBLE_TAP_DIST_DP = 120f
 
         private const val EINK_OWNER = "gesture"
         const val NOTE_SCROLL_SETTLE_MS = 400L
 
         const val GESTURE_SETTLE_MS = 600L
-
-        private const val EDGE_SWIPE_START_DP = 32f
-
-        private const val EDGE_SWIPE_ZONE_DP = 72f
 
         private const val RECOGNIZE_CARD_MIN_DP = 120f
     }
@@ -75,9 +48,6 @@ class BoardInteractionController(
 
     internal val density: Float get() = host.resources.displayMetrics.density.coerceAtLeast(1f)
 
-    private val edgeSwipeStartPx: Float get() = EDGE_SWIPE_START_DP * density
-    private val edgeSwipeZonePx: Float get() = EDGE_SWIPE_ZONE_DP * density
-
     private class PendingRecognition(val rect: RectF, val strokeIds: List<String>)
 
     private var pendingRecognition: PendingRecognition? = null
@@ -85,7 +55,6 @@ class BoardInteractionController(
     internal val arbiter = ToolArbiter()
 
     var settings: GestureSettings.Resolved = GestureSettings.Resolved.DEFAULT
-        private set
 
     internal var history = BoardHistory()
 
@@ -144,7 +113,6 @@ class BoardInteractionController(
     }
 
     var touchEnabled = true
-        private set
 
     internal var eraserMode = false
     internal var lassoMode = false
@@ -176,30 +144,9 @@ class BoardInteractionController(
 
     internal var sliderTwoDown = false
 
-    internal val fingers = LinkedHashMap<Int, Finger>()
-
-    internal var fingerGesture: FingerGesture = FingerGesture.Idle
-    private var cardLongPressTask: Runnable? = null
-
-    private var tapEpisodeActive = false
-    private var tapEpisodeStartMs = 0L
-    private var tapEpisodeMaxFingers = 0
-    private var tapEpisodeMoved = false
-    private var tapEpisodeCx = 0f
-    private var tapEpisodeCy = 0f
-    private val tapDownX = HashMap<Int, Float>()
-    private val tapDownY = HashMap<Int, Float>()
-
-    private var lastTwoFingerTapMs = 0L
-    private var lastTwoFingerTapX = 0f
-    private var lastTwoFingerTapY = 0f
-
-    private var fingerMoveSession: MoveSession? = null
-
     private var regionsDirty = true
     private var regions: List<SparseNavigation.Region> = emptyList()
     private var chromeUpdatePosted = false
-    private var launcherPullStartY = Float.NaN
 
     internal val presentation by lazy {
         BoardPresentation(handler, content, { surface.showsBoardChrome }, EINK_OWNER, GESTURE_SETTLE_MS).also {
@@ -274,14 +221,14 @@ class BoardInteractionController(
         if (InputRouter.sink === this) InputRouter.sink = null
         chrome.listener = null
         InkAlign.stop()
-        cancelCardLongPress()
+        touch.cancelCardLongPress()
         cardGestures.cancelFrameHold()
         pen.reset()
-        fingerMoveSession = null
+        touch.fingerMoveSession = null
         BoardEngine.hiddenCardIds = emptySet()
         BoardEngine.hiddenStrokeIds = emptySet()
-        fingers.clear()
-        fingerGesture = FingerGesture.Idle
+        touch.fingers.clear()
+        touch.fingerGesture = FingerGesture.Idle
         sliderTwoDown = false
         content.setZoomPreview(false)
         content.setGestureFreezeTiles(false)
@@ -316,12 +263,9 @@ class BoardInteractionController(
     fun onSceneOrViewportChanged(reason: String) {
         if (reason == "scene") regionsDirty = true
 
-        if (reason == "viewport" && viewportGestureActive()) return
+        if (reason == "viewport" && touch.viewportGestureActive()) return
         scheduleChromeUpdate()
     }
-
-    private fun viewportGestureActive(): Boolean =
-        fingerGesture is FingerGesture.PanZoom || fingerGesture is FingerGesture.SurfaceScroll
 
     fun onDocumentReplaced() {
         history.clear()
@@ -540,7 +484,7 @@ class BoardInteractionController(
 
     internal fun refreshHostToolFlags() = syncToolMirrors(arbiter.effective(), "flags")
 
-    private fun gestureToolOf(tool: GestureSettings.GestureTool): ToolArbiter.Tool? = when (tool) {
+    internal fun gestureToolOf(tool: GestureSettings.GestureTool): ToolArbiter.Tool? = when (tool) {
         GestureSettings.GestureTool.ERASER -> ToolArbiter.Tool.ERASER
         GestureSettings.GestureTool.LASSO -> ToolArbiter.Tool.LASSO
         GestureSettings.GestureTool.OFF -> null
@@ -629,387 +573,6 @@ class BoardInteractionController(
         change.card(card, null)
     }
 
-    override fun onTouch(frame: InputRouter.TouchFrame) {
-        if (frame.action == InputRouter.ACTION_DOWN || frame.action == InputRouter.ACTION_POINTER_DOWN) trailCleanup.cancel("touch-down")
-        if (maybeCloseFromLauncherPull(frame)) return
-        trackToolbarToggleTap(frame)
-        // Count raw contacts even when another finger lands on chrome or is
-        // filtered out of the gesture's fingers map.
-        if (frame.count > 1 && fingerGesture is FingerGesture.CardPending) {
-            cancelCardLongPress()
-            fingerGesture = FingerGesture.Idle
-        }
-        when (frame.action) {
-            InputRouter.ACTION_DOWN, InputRouter.ACTION_POINTER_DOWN -> {
-                host.flushInkHandoff("touch")
-                if (frame.action == InputRouter.ACTION_DOWN) refreshViewOffset()
-                val i = frame.actionIndex
-                fingerDown(frame.ids[i], frame.xs[i] - viewOffsetX, frame.ys[i] - viewOffsetY, frame.penPriority, frame.uptimeMs)
-            }
-            InputRouter.ACTION_MOVE -> {
-                for (i in 0 until frame.count) {
-                    val f = fingers[frame.ids[i]] ?: continue
-                    f.x = frame.xs[i] - viewOffsetX
-                    f.y = frame.ys[i] - viewOffsetY
-                }
-                fingerMove(frame.uptimeMs)
-            }
-            InputRouter.ACTION_UP, InputRouter.ACTION_POINTER_UP -> {
-                val i = frame.actionIndex
-                val id = frame.ids[i]
-                fingers[id]?.let { it.x = frame.xs[i] - viewOffsetX; it.y = frame.ys[i] - viewOffsetY }
-                fingerUp(id, cancelled = false)
-            }
-            InputRouter.ACTION_CANCEL -> {
-                cancelFingerGestures("cancel")
-            }
-        }
-    }
-
-    private fun trackToolbarToggleTap(frame: InputRouter.TouchFrame) {
-        val moveSlop = TWO_FINGER_TAP_MOVE_SLOP_DP * density
-        when (frame.action) {
-            InputRouter.ACTION_DOWN -> {
-                tapEpisodeActive = true
-                tapEpisodeStartMs = frame.uptimeMs
-                tapEpisodeMaxFingers = frame.count
-                tapEpisodeMoved = pen.penContact || pen.penHovering || frame.penPriority
-                tapDownX.clear(); tapDownY.clear()
-                for (i in 0 until frame.count) { tapDownX[frame.ids[i]] = frame.xs[i]; tapDownY[frame.ids[i]] = frame.ys[i] }
-            }
-            InputRouter.ACTION_POINTER_DOWN -> {
-                if (!tapEpisodeActive) return
-                tapEpisodeMaxFingers = maxOf(tapEpisodeMaxFingers, frame.count)
-                if (pen.penContact || pen.penHovering || frame.penPriority) tapEpisodeMoved = true
-                val i = frame.actionIndex
-                tapDownX[frame.ids[i]] = frame.xs[i]; tapDownY[frame.ids[i]] = frame.ys[i]
-
-                if (frame.count == 2) {
-                    tapEpisodeCx = (frame.xs[0] + frame.xs[1]) / 2f
-                    tapEpisodeCy = (frame.ys[0] + frame.ys[1]) / 2f
-                }
-            }
-            InputRouter.ACTION_MOVE -> {
-                if (!tapEpisodeActive) return
-                for (i in 0 until frame.count) {
-                    val sx = tapDownX[frame.ids[i]] ?: continue
-                    val sy = tapDownY[frame.ids[i]] ?: continue
-                    if (abs(frame.xs[i] - sx) > moveSlop || abs(frame.ys[i] - sy) > moveSlop) { tapEpisodeMoved = true; break }
-                }
-            }
-            InputRouter.ACTION_POINTER_UP -> {
-            }
-            InputRouter.ACTION_UP -> {
-                if (tapEpisodeActive) {
-                    val dur = frame.uptimeMs - tapEpisodeStartMs
-                    val qualifies = tapEpisodeMaxFingers == 2 && !tapEpisodeMoved && dur <= TWO_FINGER_TAP_MAX_MS
-                    if (qualifies) onTwoFingerTap(frame.uptimeMs, tapEpisodeCx, tapEpisodeCy)
-                }
-                tapEpisodeActive = false
-                tapDownX.clear(); tapDownY.clear()
-            }
-            InputRouter.ACTION_CANCEL -> {
-                tapEpisodeActive = false
-                tapDownX.clear(); tapDownY.clear()
-            }
-        }
-    }
-
-    private fun onTwoFingerTap(now: Long, cx: Float, cy: Float) {
-        val gap = now - lastTwoFingerTapMs
-        val near = hypot(cx - lastTwoFingerTapX, cy - lastTwoFingerTapY) <= TWO_FINGER_DOUBLE_TAP_DIST_DP * density
-        if (lastTwoFingerTapMs != 0L && gap <= TWO_FINGER_DOUBLE_TAP_GAP_MS && near) {
-            Log.i(TAG_TWO, "double-tap → toggle toolbar")
-            chrome.toggleToolbar()
-            lastTwoFingerTapMs = 0L
-        } else {
-            lastTwoFingerTapMs = now
-            lastTwoFingerTapX = cx
-            lastTwoFingerTapY = cy
-        }
-    }
-
-    private fun fingerDown(id: Int, x: Float, y: Float, penPriority: Boolean, now: Long) {
-        if (surfaceSwitching) return
-        if (chrome.consumesPoint(x, y) && fingers.isEmpty()) {
-            Log.i(TAG_FINGER, "DOWN id=$id ignored: chrome")
-            return
-        }
-
-        if (inkling.toolbarHit(x, y)) {
-            Log.i(TAG_FINGER, "DOWN id=$id ignored: inkling-toolbar")
-            return
-        }
-
-        if (arbiter.hasOverride(ToolArbiter.Source.SLIDEBAR)) return
-
-        if (pen.penContact) {
-            Log.i(TAG_FINGER, "DOWN id=$id blocked: pen-session")
-            return
-        }
-        val finger = Finger(id, x, y, now, penPriority)
-        fingers[id] = finger
-        Log.i(TAG_FINGER, "DOWN id=$id px=($x,$y) count=${fingers.size} penPriority=$penPriority gesture=${fingerGesture::class.simpleName}")
-
-        if (fingers.size >= 2) {
-            val (a, b) = firstTwo()
-
-            cancelCardLongPress()
-            fingerMoveSession?.let { transforms.cancelMoveSession(it); fingerMoveSession = null }
-            if (fingerGesture is FingerGesture.SurfaceScroll) {
-                content.setGestureThrottle(false)
-                commitViewport(BoardEngine.panX, BoardEngine.panY, BoardEngine.scale)
-            }
-
-            if (fingerGesture is FingerGesture.PanZoom || fingerGesture is FingerGesture.ScreenTool) return
-            if (fingers.size > 2) { fingerGesture = FingerGesture.Idle; return }
-            if (!touchEnabled && gestureToolOf(settings.screenGesture) == null) { fingerGesture = FingerGesture.Idle; return }
-            if (abs(a.downAt - b.downAt) > TWO_FINGER_PAIR_WINDOW_MS || gestureToolOf(settings.screenGesture) == null) {
-                panZoom.begin(a, b)
-            } else {
-                fingerGesture = FingerGesture.TwoCandidate(a.id, b.id, now)
-                handler.postDelayed(twoCandidateTimeout, TWO_FINGER_CANDIDATE_HOLD_MS)
-                Log.i(TAG_TWO, "candidate a=${a.id} b=${b.id}")
-            }
-            return
-        }
-
-        if (penPriority) {
-            fingerGesture = FingerGesture.Idle
-            Log.i(TAG_FINGER, "single finger idle id=$id reason=pen-priority")
-            return
-        }
-
-        if (selection.lasso == null && !selection.selectBelowArmed && surface.showsBoardChrome) {
-            if (!chrome.switcherOpen && x <= edgeSwipeStartPx) {
-                fingerGesture = FingerGesture.EdgeSwipe(id, x, y)
-                Log.i(TAG_FINGER, "edge-swipe(open) armed id=$id x=$x")
-                return
-            }
-        }
-
-        if (notes.noteHeaderHit(x, y) && selection.lasso == null && !selection.selectBelowArmed) {
-            fingerGesture = FingerGesture.CardPending(id, NOTE_HEADER_PENDING)
-            cancelCardLongPress()
-            val task = Runnable {
-                cardLongPressTask = null
-                val pending = fingerGesture as? FingerGesture.CardPending ?: return@Runnable
-                if (pending.fingerId != id || pending.cardId != NOTE_HEADER_PENDING) return@Runnable
-                fingerGesture = FingerGesture.Idle
-                textEditing.editPageHeader()
-            }
-            cardLongPressTask = task
-            handler.postDelayed(task, CARD_FINGER_MOVE_HOLD_MS)
-            return
-        }
-        if (!touchEnabled) { fingerGesture = FingerGesture.Idle; return }
-        val wx = worldX(x)
-        val wy = worldY(y)
-
-        if (surface.singleFingerScrolls && selection.lasso == null) {
-            fingerGesture = FingerGesture.SurfaceScroll(id, y, BoardEngine.panY)
-            content.setGestureThrottle(true)
-            return
-        }
-
-        val currentLasso = selection.lasso
-
-        val hadSelection = currentLasso != null
-        if (currentLasso != null) {
-            val single = if (selection.isSingleCardSelection(currentLasso)) BoardEngine.cards[currentLasso.cardIds[0]] else null
-            if (single != null) {
-                val handle = selection.singleCardFrameHandle(currentLasso, wx, wy)
-                if (handle != null) {
-                    fingerMoveSession = transforms.beginResize(false, id, wx, wy, single, handle)
-                    fingerGesture = FingerGesture.Move(id)
-                    return
-                }
-            }
-            if (overlay.rotateHandleHit(x, y, LASSO_ACTION_TAP_SLOP_DP * density) && selection.selectionRotatable(currentLasso)) {
-                fingerMoveSession = transforms.beginSelectionRotate(false, id, wx, wy, currentLasso)
-                fingerGesture = FingerGesture.Move(id)
-                return
-            }
-
-            val cornerHandle = selection.selectionCornerHandle(currentLasso, wx, wy)
-                ?: (if (selection.shapeKindOf(currentLasso) != null) selection.shapeEdgeHandle(currentLasso, wx, wy) else null)
-            if (cornerHandle != null) {
-                fingerMoveSession = transforms.beginSelectionResize(false, id, wx, wy, currentLasso, cornerHandle)
-                fingerGesture = FingerGesture.Move(id)
-                return
-            }
-            val action = overlay.lassoActionHit(x, y, LASSO_ACTION_TAP_SLOP_DP * density)
-            if (action != null) {
-                selection.handleLassoAction(action)
-                fingerGesture = FingerGesture.Idle
-                return
-            }
-            if (selection.selectionHit(currentLasso, wx, wy) || overlay.moveHandleHit(x, y, LASSO_ACTION_TAP_SLOP_DP * density)) {
-                fingerMoveSession = transforms.beginSelectionMove(false, id, wx, wy, currentLasso)
-                fingerGesture = FingerGesture.Move(id)
-                return
-            }
-            selection.setLasso(null)
-        }
-
-        val linkId = noteShots.linkAt(wx, wy)
-        if (linkId != null) {
-            fingerGesture = FingerGesture.CardPending(id, NOTE_LINK_PENDING + linkId)
-            cancelCardLongPress()
-            return
-        }
-        val card = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
-        if (card == null) {
-            fingerGesture = FingerGesture.Idle
-            return
-        }
-
-        fingerGesture = FingerGesture.CardPending(id, card.id)
-        cancelCardLongPress()
-        val holdMs = when {
-            hadSelection -> CARD_FINGER_MOVE_HOLD_SELECTION_MS
-            presentation.isFlatActive -> CARD_FINGER_MOVE_HOLD_FAST_MS
-            else -> CARD_FINGER_MOVE_HOLD_MS
-        }
-        val task = Runnable {
-            cardLongPressTask = null
-            val pending = fingerGesture as? FingerGesture.CardPending ?: return@Runnable
-            if (pending.fingerId != id) return@Runnable
-            val f = fingers[id] ?: return@Runnable
-            val current = BoardEngine.cards[pending.cardId]
-            if (current == null) { fingerGesture = FingerGesture.Idle; return@Runnable }
-
-            selection.selectConnectedComponent(current)
-            val sel = selection.lasso ?: return@Runnable
-            fingerMoveSession = transforms.beginSelectionMove(false, id, worldX(f.x), worldY(f.y), sel)
-            fingerGesture = FingerGesture.Move(id)
-            Log.i(TAG_FINGER, "card hold → lasso move id=${current.id} holdMs=$holdMs")
-        }
-        cardLongPressTask = task
-        handler.postDelayed(task, holdMs)
-    }
-
-    private fun cancelCardLongPress() {
-        cardLongPressTask?.let { handler.removeCallbacks(it) }
-        cardLongPressTask = null
-    }
-
-    private fun fingerMove(now: Long) {
-        when (val g = fingerGesture) {
-            is FingerGesture.Move -> {
-                val m = fingerMoveSession ?: return
-                val f = fingers[m.pointerId] ?: return
-                m.rawMoves++
-                transforms.updateMoveSession(m, worldX(f.x), worldY(f.y))
-            }
-            is FingerGesture.CardPending -> {
-                val f = fingers[g.fingerId] ?: return
-
-                if (hypot(f.x - f.downX, f.y - f.downY) >= BoardGeometry.CARD_DRAG_THRESHOLD_PX * density) {
-                    cancelCardLongPress()
-                    fingerGesture = FingerGesture.Idle
-                }
-            }
-            is FingerGesture.TwoCandidate -> {
-                val a = fingers[g.a] ?: return
-                val b = fingers[g.b] ?: return
-                if (TwoFingerToolGuard.moved(a.downX, a.downY, a.x, a.y) || TwoFingerToolGuard.moved(b.downX, b.downY, b.x, b.y)) {
-                    handler.removeCallbacks(twoCandidateTimeout)
-                    Log.i(TAG_TWO, "candidate moved → pinch")
-
-                    fallbackFromTwoCandidate(a, b, "moved")
-                }
-            }
-            is FingerGesture.PanZoom -> panZoom.update(g)
-            is FingerGesture.SurfaceScroll -> {
-                val f = fingers[g.fingerId] ?: return
-                val dy = (f.y - g.startY) / density
-                surface.constrainPan(BoardEngine.panX, g.startPanY + dy, BoardEngine.scale, viewportTmp)
-                BoardEngine.setViewport(viewportTmp[0], snapPanToPx(viewportTmp[1]), BoardEngine.scale)
-            }
-            is FingerGesture.EdgeSwipe -> {
-                val f = fingers[g.fingerId] ?: return
-                val dx = f.x - g.downX
-                val dy = f.y - g.downY
-
-                if (abs(dy) > abs(dx)) return
-                if (dx >= edgeSwipeZonePx) {
-                    fingerGesture = FingerGesture.Idle
-                    Log.i(TAG_FINGER, "edge-swipe(open) fired dx=$dx")
-                    openSwitcher()
-                }
-            }
-            else -> {}
-        }
-    }
-
-    private fun fingerUp(id: Int, cancelled: Boolean) {
-        val finger = fingers.remove(id)
-        if (finger == null) return
-        Log.i(TAG_FINGER, "UP id=$id remaining=${fingers.size} gesture=${fingerGesture::class.simpleName}")
-        when (val g = fingerGesture) {
-            is FingerGesture.Move -> {
-                if (g.fingerId == id) {
-                    cancelCardLongPress()
-                    val m = fingerMoveSession
-                    fingerMoveSession = null
-                    fingerGesture = FingerGesture.Idle
-                    if (m != null) {
-                        if (cancelled) transforms.cancelMoveSession(m) else transforms.endMoveSession(m, worldX(finger.x), worldY(finger.y))
-                    }
-                }
-            }
-            is FingerGesture.CardPending -> {
-                if (g.fingerId == id) {
-                    cancelCardLongPress()
-                    fingerGesture = FingerGesture.Idle
-                    val card = BoardEngine.cards[g.cardId]
-                    val singleFingerTap = !cancelled && tapEpisodeMaxFingers == 1 && fingers.isEmpty() &&
-                        hypot(finger.x - finger.downX, finger.y - finger.downY) < BoardGeometry.CARD_DRAG_THRESHOLD_PX * density
-                    if (singleFingerTap && g.cardId.startsWith(NOTE_LINK_PENDING)) {
-                        noteShots.openLink(g.cardId.removePrefix(NOTE_LINK_PENDING))
-                    } else if (singleFingerTap && card?.kind == "note" && card.noteRef.isNotEmpty()) {
-                        notes.openNote(card.noteRef)
-                    }
-                }
-            }
-            is FingerGesture.SurfaceScroll -> if (g.fingerId == id) {
-                fingerGesture = FingerGesture.Idle
-                content.setGestureThrottle(false)
-                commitViewport(BoardEngine.panX, BoardEngine.panY, BoardEngine.scale)
-            }
-            is FingerGesture.TwoCandidate -> {
-                if (id == g.a || id == g.b) {
-                    handler.removeCallbacks(twoCandidateTimeout)
-                    fingerGesture = FingerGesture.Idle
-                }
-            }
-            is FingerGesture.PanZoom -> {
-                if (id == g.a || id == g.b) {
-                    panZoom.end(g, cleanOldPositions = !cancelled)
-
-                    if (fingers.size >= 2) {
-                        val (a, b) = firstTwo()
-                        panZoom.begin(a, b)
-                    } else fingerGesture = FingerGesture.Idle
-                }
-            }
-            FingerGesture.ScreenTool -> {
-                if (fingers.isEmpty()) {
-                    fingerGesture = FingerGesture.Idle
-                    applyTransition(arbiter.releaseOverride(ToolArbiter.Source.SCREEN), "screen-release")
-                    presentation.release(BoardPresentation.Reason.SCREEN_TOOL, linger = false)
-                }
-            }
-            is FingerGesture.EdgeSwipe -> if (g.fingerId == id) fingerGesture = FingerGesture.Idle
-            FingerGesture.Idle -> {}
-        }
-        if (fingers.isEmpty()) {
-            fingerGesture = FingerGesture.Idle
-            trailCleanup.resume("touch-up")
-        }
-    }
-
     internal fun dp(value: Float): Float = value * density
 
     internal fun cardsBelow(anchor: BoardEngine.CardRec): List<BoardEngine.CardRec> {
@@ -1037,80 +600,9 @@ class BoardInteractionController(
         }
     }
 
-    private fun firstTwo(): Pair<Finger, Finger> {
-        val it = fingers.values.iterator()
-        return Pair(it.next(), it.next())
-    }
-
-    internal fun cancelFingerGestures(reason: String) {
-        cancelCardLongPress()
-        handler.removeCallbacks(twoCandidateTimeout)
-        fingerMoveSession?.let { transforms.cancelMoveSession(it) }
-        fingerMoveSession = null
-        (fingerGesture as? FingerGesture.PanZoom)?.let { panZoom.end(it, cleanOldPositions = false) }
-        if (fingerGesture === FingerGesture.ScreenTool) {
-            applyTransition(arbiter.releaseOverride(ToolArbiter.Source.SCREEN), "screen-cancel")
-            presentation.release(BoardPresentation.Reason.SCREEN_TOOL, linger = false)
-        }
-        fingerGesture = FingerGesture.Idle
-        fingers.clear()
-        Log.i(TAG_FINGER, "gestures cancelled reason=$reason")
-    }
-
     internal fun cancelActiveInteractions(reason: String) {
-        cancelFingerGestures(reason)
+        touch.cancelFingerGestures(reason)
         pen.cancel(reason)
-    }
-
-    private val twoCandidateTimeout = Runnable { settleTwoCandidate("hold") }
-
-    private fun fallbackFromTwoCandidate(a: Finger, b: Finger, reason: String) {
-        if (pen.penContact || pen.penHovering || a.penPriority || b.penPriority) {
-            fingerGesture = FingerGesture.Idle
-            Log.i(TAG_TWO, "candidate $reason → blocked by pen proximity")
-            return
-        }
-        if (touchEnabled) panZoom.begin(a, b) else fingerGesture = FingerGesture.Idle
-    }
-
-    private fun adoptScreenTool(a: Finger, b: Finger, reason: String): Boolean {
-        val tool = gestureToolOf(settings.screenGesture) ?: return false
-        val decision = TwoFingerToolGuard.evaluate(
-            a.x + viewOffsetX, a.y + viewOffsetY, b.x + viewOffsetX, b.y + viewOffsetY,
-            if (pen.penHovering) pen.penHoverX + viewOffsetX else null,
-            if (pen.penHovering) pen.penHoverY + viewOffsetY else null,
-            if (pen.penHovering) InputReader.penTiltDirection else null,
-            settings.leftHand,
-            host.resources.displayMetrics.widthPixels.toFloat(),
-            host.resources.displayMetrics.heightPixels.toFloat(),
-        )
-        Log.i(TAG_TWO, "decision accept=${decision.accept} reason=${decision.reason} tool=$tool route=${if (decision.accept) "tool" else "pinch"} source=$reason")
-        if (!decision.accept) return false
-        fingerGesture = FingerGesture.ScreenTool
-        presentation.acquire(BoardPresentation.Reason.SCREEN_TOOL)
-        applyTransition(arbiter.pushOverride(ToolArbiter.Source.SCREEN, tool, ToolArbiter.Settle.ON_PEN_UP), "screen-tool")
-        return true
-    }
-
-    internal fun settleTwoCandidate(reason: String): Boolean {
-        val g = fingerGesture as? FingerGesture.TwoCandidate ?: return false
-        handler.removeCallbacks(twoCandidateTimeout)
-        val a = fingers[g.a] ?: return false
-        val b = fingers[g.b] ?: return false
-        if (!adoptScreenTool(a, b, reason)) fallbackFromTwoCandidate(a, b, reason)
-        return true
-    }
-
-    private fun yieldPanZoomToPen(reason: String) {
-        val g = fingerGesture as? FingerGesture.PanZoom ?: return
-        val a = fingers[g.a]
-        val b = fingers[g.b]
-        panZoom.end(g, cleanOldPositions = false)
-        fingerGesture = FingerGesture.Idle
-        if (a == null || b == null) return
-        if (!adoptScreenTool(a, b, reason)) {
-            Log.i(PanZoomGesture.TAG_PAN, "panzoom yielded to pen: no screen tool reason=$reason")
-        }
     }
 
     internal fun toolbarHeightWorld(): Float = chrome.toolbarHeightPx() / density
@@ -1122,10 +614,10 @@ class BoardInteractionController(
             InputRouter.PenState.HOVER -> {
                 pen.penHovering = value
                 if (!value && !pen.penContact)
-                else when (fingerGesture) {
-                    is FingerGesture.TwoCandidate -> settleTwoCandidate("hover-enter")
+                else when (touch.fingerGesture) {
+                    is FingerGesture.TwoCandidate -> touch.settleTwoCandidate("hover-enter")
 
-                    is FingerGesture.PanZoom -> yieldPanZoomToPen("hover-enter")
+                    is FingerGesture.PanZoom -> touch.yieldPanZoomToPen("hover-enter")
                     else -> {}
                 }
             }
@@ -1249,14 +741,14 @@ class BoardInteractionController(
 
             lassoCards = selected == null && selection.lasso?.cardIds?.isNotEmpty() == true,
         )
-        val jumps = if (fingerGesture is FingerGesture.PanZoom) emptyList()
+        val jumps = if (touch.fingerGesture is FingerGesture.PanZoom) emptyList()
         else SparseNavigation.findRegionJumps(currentRegions(), view, SparseNavigation.PAN_MARGIN)
         chrome.setRegionJumps(jumps)
         selection.updateLassoOverlay()
     }
 
     private fun zoomTo(nextScale: Float) {
-        cancelFingerGestures("zoom")
+        touch.cancelFingerGestures("zoom")
         val view = viewWorld()
         val cx = view.centerX()
         val cy = view.centerY()
@@ -1505,36 +997,13 @@ class BoardInteractionController(
         surface.onCloseRequested(BoardSurface.CloseSource.TOOLBAR)
     }
 
-    private fun maybeCloseFromLauncherPull(frame: InputRouter.TouchFrame): Boolean {
-        if (frame.count != 1) { launcherPullStartY = Float.NaN; return false }
-        val y = frame.ys[0]
-        when (frame.action) {
-            InputRouter.ACTION_DOWN -> if (y < 120f) {
-                chrome.cancelTransientPresses()
-                launcherPullStartY = y
-                host.context.sendBroadcast(Intent("com.ratta.supernote.launcher.BroadcastReceiver.slidebarstatusbar").putExtra("lockStatusbar", true))
-            }
-            InputRouter.ACTION_UP -> {
-                val start = launcherPullStartY
-                launcherPullStartY = Float.NaN
-                if (!start.isNaN() && y - start > 180f) {
-                    Log.i(TAG, "launcher top-pull close distance=${y - start} surface=${surface.name}")
-
-                    if (!surfaceSwitching) surface.onCloseRequested(BoardSurface.CloseSource.LAUNCHER_PULL)
-                    return true
-                }
-            }
-        }
-        return false
-    }
-
     override fun onJumpToRegion(region: SparseNavigation.Region) {
-        cancelFingerGestures("jump")
+        touch.cancelFingerGestures("jump")
         val centered = SparseNavigation.panToCenterRect(region.bounds, host.width / density, host.height / density, BoardEngine.scale)
         commitViewport(centered[0], centered[1], BoardEngine.scale)
     }
 
-    private fun openSwitcher() {
+    internal fun openSwitcher() {
         val notes = synchronized(BoardEngine.lock) {
             BoardEngine.cardsByZ.filter { it.kind == "note" }
         }
@@ -1562,7 +1031,7 @@ class BoardInteractionController(
 
     override fun onLocateNoteCard(cardId: String) {
         val card = BoardEngine.cards[cardId] ?: return
-        cancelFingerGestures("locate-note")
+        touch.cancelFingerGestures("locate-note")
         val w = host.width / density
         val h = host.height / density
         val rect = card.rect()
@@ -1606,4 +1075,8 @@ class BoardInteractionController(
     internal val pen = PenInput(this)
 
     internal val panZoom = PanZoomGesture(this)
+
+    internal val touch = TouchInput(this)
+
+    override fun onTouch(frame: InputRouter.TouchFrame) = touch.handle(frame)
 }
