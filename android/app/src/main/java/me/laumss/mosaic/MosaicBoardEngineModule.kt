@@ -74,7 +74,7 @@ class MosaicBoardEngineModule(
     fun selectCards(viewTag: Int, ids: ReadableArray) {
         val list = ArrayList<String>()
         for (i in 0 until ids.size()) ids.getString(i)?.let { list.add(it) }
-        withView(viewTag) { it.controller.selectCards(list) }
+        withView(viewTag) { it.controller.selection.selectCards(list) }
     }
 
     @ReactMethod

@@ -25,6 +25,13 @@ internal class NoteShots(private val board: BoardInteractionController) {
         private const val NOTE_SHOT_MAX_SCREEN_FRACTION = 0.9f
     }
 
+    private var busy = false
+
+    private var focusToken = 0
+
+    var sessionActive = false
+        private set
+
     fun linkAt(wx: Float, wy: Float): String? {
         if (!board.surface.showsBoardChrome) return null
         val scale = BoardEngine.scale
@@ -69,12 +76,6 @@ internal class NoteShots(private val board: BoardInteractionController) {
         board.emitter.commit()
     }
 
-    private var busy = false
-    private var focusToken = 0
-
-    var sessionActive = false
-        private set
-
     private class NoteShotPng(val path: String, val width: Int, val height: Int, val hotspot: NoteShotExport.Hotspot)
 
     fun canInsert(sel: LassoSelection): Boolean =
@@ -84,7 +85,7 @@ internal class NoteShots(private val board: BoardInteractionController) {
             }
 
     fun insertSelection() {
-        val sel = board.lasso ?: return
+        val sel = board.selection.lasso ?: return
         if (!canInsert(sel)) {
             Log.i(TAG_SHOT, "insert requires a lasso region containing handwriting and a host note; surface=${board.surface.name}")
             return
@@ -109,7 +110,7 @@ internal class NoteShots(private val board: BoardInteractionController) {
         renderPng(shotId, layout) { png ->
             if (png == null) return@renderPng
 
-            board.setLasso(null)
+            board.selection.setLasso(null)
             board.emitter.begin()
             board.emitter.action("noteShotReady") {
                 putString("shotId", shotId)
@@ -150,7 +151,7 @@ internal class NoteShots(private val board: BoardInteractionController) {
         }
         val region = synchronized(BoardEngine.lock) { NoteShotExport.resolve(shot) }?.region ?: return
         board.cancelFingerGestures("note-shot")
-        board.setLasso(null)
+        board.selection.setLasso(null)
         board.chrome.hideSwitcher()
         board.refreshHostToolFlags()
 

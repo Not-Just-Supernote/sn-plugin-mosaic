@@ -80,16 +80,16 @@ internal class InklingBridge(private val board: BoardInteractionController) {
             Log.i(BoardInteractionController.TAG_LASSO, "inkling clear-selection deferred surface=${InklingLink.currentSurface()} delete=$delete")
             return
         }
-        val sel = board.lasso
+        val sel = board.selection.lasso
         if (sel == null) {
             exportLassoStrokes(null)
             Log.i(BoardInteractionController.TAG_LASSO, "inkling clear-selection: no selection, file removed")
             return
         }
         if (delete) {
-            board.deleteLassoSelection()
+            board.selection.deleteLassoSelection()
         } else {
-            board.setLasso(null)
+            board.selection.setLasso(null)
         }
         Log.i(BoardInteractionController.TAG_LASSO, "inkling clear-selection delete=$delete strokes=${sel.strokeIds.size} cards=${sel.cardIds.size}")
     }
@@ -147,14 +147,14 @@ internal class InklingBridge(private val board: BoardInteractionController) {
                     BoardInteractionController.noteCardBoardSize(doc.contentHeight, BoardInteractionController.NOTE_CARD_BOARD_WIDTH, size, BoardContentView.noteHeaderMarkdown(headerLines))
                     val view = board.viewWorld()
                     val top = if (size[1] < view.height()) view.centerY() - size[1] / 2f
-                        else view.top + board.toolbarHeightWorld() / BoardEngine.scale + BoardInteractionController.LASSO_BOUNDS_PAD * 2f
+                        else view.top + board.toolbarHeightWorld() / BoardEngine.scale + SelectionController.LASSO_BOUNDS_PAD * 2f
                     val card = BoardEngine.CardRec(
                         board.newId("card-"), view.centerX() - size[0] / 2f, top, size[0], size[1],
                         BoardGeometry.nextZIndex(BoardEngine.cards.values), "note", header,
                         File(directory, ref).absolutePath, ref, "", "", headerLines.firstOrNull().orEmpty(),
                     )
                     board.applyChange(BoardHistory.Change("import-note").card(null, card), record = true)
-                    board.selectSingleCard(card); board.scheduleChromeUpdate()
+                    board.selection.selectSingleCard(card); board.scheduleChromeUpdate()
                     Log.i(BoardInteractionController.TAG, "imported note card=${card.id} ref=$ref pages=${imported.pageCount} strokes=${doc.strokes.size} size=${size[0]}x${size[1]}")
                     done(Result.success(true))
                 }
@@ -193,7 +193,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
     }
 
     private fun paletteStrokes(): List<BoardEngine.StrokeRec> = synchronized(BoardEngine.lock) {
-        val selected = board.lasso ?: return@synchronized emptyList()
+        val selected = board.selection.lasso ?: return@synchronized emptyList()
         val records = LinkedHashMap<String, BoardEngine.StrokeRec>()
         selected.strokeIds.forEach { id -> BoardEngine.strokes[id]?.let { records[id] = it } }
         selected.cardIds.forEach { id -> BoardEngine.cardStrokes[id]?.forEach { records[it.id] = it } }
@@ -238,7 +238,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
         }
         val changed = change.diffs.size
         board.applyChange(change, record = true)
-        board.setLasso(board.lasso)
+        board.selection.setLasso(board.selection.lasso)
         board.content.markSettleRequested()
         board.content.postInvalidateOnAnimation()
         board.host.invalidate()
@@ -387,8 +387,8 @@ internal class InklingBridge(private val board: BoardInteractionController) {
             }
         }
         if (!any) return
-        val pad = board.lassoPadWorld()
+        val pad = board.selection.lassoPadWorld()
         frame.inset(-pad, -pad)
-        board.setLasso(LassoSelection(frame, emptyList(), ids.toList()))
+        board.selection.setLasso(LassoSelection(frame, emptyList(), ids.toList()))
     }
 }
