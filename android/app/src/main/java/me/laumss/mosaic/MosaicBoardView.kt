@@ -79,7 +79,7 @@ class MosaicBoardView(
 
     var deviceType: Int = -1
     var notesDirectory: String = ""
-        set(value) { field = value; controller.setNotesDirectory(value) }
+        set(value) { field = value; controller.notes.setNotesDirectory(value) }
 
     private var stylusCalibX = 0
     private var stylusCalibY = 0
@@ -556,7 +556,7 @@ class MosaicBoardView(
 
         areas.addAll(InklingLink.overlayDisableAreas())
         // Around a zoomed-out note page; refreshed by the hover rearm before every stroke.
-        for (r in controller.noteOffPageRectsPx()) {
+        for (r in controller.notes.noteOffPageRectsPx()) {
             areas.add(DrawPathClient.DisableArea(loc[0] + r.left, loc[1] + r.top, r.width(), r.height()))
         }
         return areas
@@ -582,7 +582,7 @@ class MosaicBoardView(
         if (!attached) return
         handler.post {
             if (!attached) return@post
-            controller.closeForInkling()
+            controller.notes.closeForInkling()
         }
     }
 
@@ -641,7 +641,7 @@ class MosaicBoardView(
         if (!attached) return
         handler.post {
             if (!attached) return@post
-            controller.preparePendingNoteImport()
+            controller.notes.preparePendingNoteImport()
             if (!InklingLink.isBoardSurface()) {
                 Log.i(TAG, "inkling inbox notification deferred surface=${InklingLink.currentSurface()}")
                 return@post

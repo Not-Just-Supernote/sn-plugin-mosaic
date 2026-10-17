@@ -115,12 +115,12 @@ internal class InklingBridge(private val board: BoardInteractionController) {
     }
 
     fun importNoteCard(path: String, title: String, done: (Result<Boolean>) -> Unit) {
-        if (!board.surface.showsBoardChrome || board.suspendedBoard != null || board.surfaceSwitching || board.notesDirectory.isBlank()) {
+        if (!board.surface.showsBoardChrome || board.notes.suspendedBoard != null || board.surfaceSwitching || board.notes.notesDirectory.isBlank()) {
             Log.i(BoardInteractionController.TAG, "note import deferred surface=${board.surface.name}")
             done(Result.success(false))
             return
         }
-        val directory = board.notesDirectory
+        val directory = board.notes.notesDirectory
         val ref = "note-" + UUID.randomUUID().toString().replace("-", "").take(12)
         clipboardIo.submitNoteImport(File(path)) { parsed ->
             board.handler.post {
@@ -129,13 +129,13 @@ internal class InklingBridge(private val board: BoardInteractionController) {
                     done(Result.failure(it))
                     return@post
                 }
-                board.noteController.create(directory, ScrollingDocument(ref, imported.strokes, 0f), imported.preparedPreview) { written ->
+                board.notes.noteController.create(directory, ScrollingDocument(ref, imported.strokes, 0f), imported.preparedPreview) { written ->
                     val doc = written.getOrElse {
                         Log.e(BoardInteractionController.TAG, "note import write failed ref=$ref", it)
                         done(Result.failure(it))
                         return@create
                     }
-                    if (!board.surface.showsBoardChrome || board.suspendedBoard != null || board.surfaceSwitching) {
+                    if (!board.surface.showsBoardChrome || board.notes.suspendedBoard != null || board.surfaceSwitching) {
                         File(directory, "$ref.mnote").delete(); File(directory, ref).deleteRecursively()
                         Log.i(BoardInteractionController.TAG, "note import deferred after write surface=${board.surface.name}")
                         done(Result.success(false))
@@ -144,7 +144,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
                     val header = BoardContentView.noteHeaderFromText(title)
                     val headerLines = if (header.isEmpty()) emptyList() else header.split('\n')
                     val size = FloatArray(2)
-                    BoardInteractionController.noteCardBoardSize(doc.contentHeight, BoardInteractionController.NOTE_CARD_BOARD_WIDTH, size, BoardContentView.noteHeaderMarkdown(headerLines))
+                    NoteSession.noteCardBoardSize(doc.contentHeight, NoteSession.NOTE_CARD_BOARD_WIDTH, size, BoardContentView.noteHeaderMarkdown(headerLines))
                     val view = board.viewWorld()
                     val top = if (size[1] < view.height()) view.centerY() - size[1] / 2f
                         else view.top + board.toolbarHeightWorld() / BoardEngine.scale + SelectionController.LASSO_BOUNDS_PAD * 2f
@@ -298,7 +298,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
         clipboardIo.submitExport(
             target = file,
             strokes = out.values.toList(),
-            density = board.density * if (board.surface.showsBoardChrome) 1f else board.notePageScale,
+            density = board.density * if (board.surface.showsBoardChrome) 1f else board.notes.notePageScale,
             screenShortPx = board.host.resources.displayMetrics.let { minOf(it.widthPixels, it.heightPixels).toFloat() },
             isCurrent = { exportGeneration.get() == sequence },
         ) { result ->
@@ -321,7 +321,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
         val d = board.density
 
         // Clipboard dimensions use the fixed board scale; note pages have their intrinsic view scale.
-        val worldScale = 1f / (d * if (board.surface.showsBoardChrome) 1f else board.notePageScale)
+        val worldScale = 1f / (d * if (board.surface.showsBoardChrome) 1f else board.notes.notePageScale)
 
         val metrics = board.host.resources.displayMetrics
         val transform = ClipboardStrokeIo.PasteTransform(

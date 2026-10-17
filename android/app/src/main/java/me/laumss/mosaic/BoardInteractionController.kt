@@ -10,7 +10,6 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
-import android.view.View
 import com.facebook.react.bridge.WritableMap
 import java.util.UUID
 import kotlin.math.abs
@@ -98,15 +97,6 @@ class BoardInteractionController(
         private const val EDGE_SWIPE_ZONE_DP = 72f
 
         private const val RECOGNIZE_CARD_MIN_DP = 120f
-
-        const val NOTE_CARD_BOARD_WIDTH = 450f
-
-        fun noteCardBoardSize(contentHeight: Float, cardWidth: Float = NOTE_CARD_BOARD_WIDTH, out: FloatArray, header: String = "") {
-            val width = cardWidth.coerceAtLeast(BoardGeometry.MIN_CARD_SIZE)
-            val headerH = BoardContentView.noteHeaderHeight(header) * width / ScrollingDocument.WIDTH
-            out[0] = width
-            out[1] = (contentHeight * width / ScrollingDocument.WIDTH + headerH).coerceAtLeast(BoardGeometry.MIN_CARD_SIZE)
-        }
     }
 
     internal val handler = Handler(Looper.getMainLooper())
@@ -125,39 +115,21 @@ class BoardInteractionController(
     var settings: GestureSettings.Resolved = GestureSettings.Resolved.DEFAULT
         private set
 
-    private var history = BoardHistory()
+    internal var history = BoardHistory()
 
-    private val whiteboard = WhiteboardSurface(emitter) { host.armCloseWatchdog("board-close", noteShots.sessionActive) }
+    internal val whiteboard = WhiteboardSurface(emitter) { host.armCloseWatchdog("board-close", noteShots.sessionActive) }
 
     internal var surface: BoardSurface = whiteboard
 
     internal var surfaceSwitching = false
-    internal val noteController = NoteController()
-    internal var notesDirectory: String = ""
 
-    internal class SuspendedBoard(val scene: BoardEngine.SceneSnapshot, val history: BoardHistory, val lasso: LassoSelection?)
-
-    internal var suspendedBoard: SuspendedBoard? = null
-
-    internal var currentNoteHeader: String? = null
-    internal var currentNoteHeaderPlaceholder = false
-    internal var currentNoteHeaderHeight = 0f
-    // View scale of the open note page; the header is laid out at screen size inside it.
-    internal var notePageScale = 1f
-
-    private var noteEntryCard: BoardEngine.CardRec? = null
-
-    private var noteHeaderHoverBlocked = false
-    // Bottom of the zoomed-out note page in page units; infinite on the board.
-    private var notePageBottom = Float.POSITIVE_INFINITY
-
-    private val viewportTmp = FloatArray(2)
+    internal val viewportTmp = FloatArray(2)
 
     private val noteScrollResetTask = Runnable {
         MosaicEinkRefreshModule.resetNative(NOTE_SCROLL_EINK_OWNER)
     }
 
-    private fun resetNoteScrollMode() {
+    internal fun resetNoteScrollMode() {
         handler.removeCallbacks(noteScrollResetTask)
         MosaicEinkRefreshModule.resetNative(NOTE_SCROLL_EINK_OWNER)
     }
@@ -165,48 +137,6 @@ class BoardInteractionController(
     // ── Notipal 浮窗拖动 ──
     // 与双指平移一致：白板上走 PAN_ZOOM 同款显示（A2 + 灰卡临时白底 + flat），
     // 笔记卡片里只切 A2 刷新、不改卡片显示；松手后按各自的 settle 恢复。
-
-    fun setNotesDirectory(path: String) {
-        notesDirectory = path
-        if (path.isNotBlank()) MosaicSession.saveNotesDirectory(host.context, path)
-        restoreSessionNote()
-    }
-
-    // Reopens the note the plugin was closed in, as soon as its card is in the scene (from the scene cache or JS).
-    fun preparePendingNoteImport(): Boolean {
-        if (!PreparedNoteImport.hasPendingRequest()) return false
-        MosaicSession.saveNoteRef(host.context, null)
-        if (!surfaceSwitching && suspendedBoard != null) closeNote()
-        releasePaintHold("pending-note-import")
-        return true
-    }
-
-    private fun restoreSessionNote() {
-        if (preparePendingNoteImport()) return
-        if (suspendedBoard != null || surfaceSwitching) return
-        val ref = MosaicSession.savedNoteRef(host.context) ?: return
-        val hasCard = synchronized(BoardEngine.lock) { BoardEngine.cards.values.any { it.noteRef == ref } }
-        if (!hasCard) {
-            // JS's own scene has no such card: the note is gone, so the board shows normally.
-            if (SceneCache.jsSceneArrived) {
-                MosaicSession.saveNoteRef(host.context, null)
-                releasePaintHold("session-note-missing")
-            }
-            return
-        }
-        whenLaidOut { openNote(ref) }
-    }
-
-    private fun whenLaidOut(action: () -> Unit) {
-        if (host.width > 0 && host.height > 0) { host.post(action); return }
-        host.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
-            override fun onLayoutChange(v: View, left: Int, top: Int, right: Int, bottom: Int, oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int) {
-                if (v.width <= 0 || v.height <= 0) return
-                v.removeOnLayoutChangeListener(this)
-                v.post(action)
-            }
-        })
-    }
 
     // At launch the board draws Kotlin's cached scene until JS has read board.mosaic, then reopens a saved note
     // from it at once. Nothing is loaded when the scene is already in memory.
@@ -218,7 +148,7 @@ class BoardInteractionController(
         SceneCache.load(context) { bytes ->
             WhiteboardSceneGate.dispatch {
                 if (SceneCache.jsGeneration != generation || SceneCache.jsSceneArrived) return@dispatch
-                if (InputRouter.sink !== this || surfaceSwitching || suspendedBoard != null) return@dispatch
+                if (InputRouter.sink !== this || surfaceSwitching || notes.suspendedBoard != null) return@dispatch
                 val stillEmpty = synchronized(BoardEngine.lock) { BoardEngine.cards.isEmpty() && BoardEngine.strokes.isEmpty() }
                 if (!stillEmpty) return@dispatch
                 val ops = BoardEngine.applyOpsBytes(bytes)
@@ -226,7 +156,7 @@ class BoardInteractionController(
                 content.requestInitialRaster()
                 regionsDirty = true
                 scheduleChromeUpdate()
-                if (MosaicSession.savedNoteRef(context) != null) restoreSessionNote() else holdPenForJsScene()
+                if (MosaicSession.savedNoteRef(context) != null) notes.restoreSessionNote() else holdPenForJsScene()
             }
         }
     }
@@ -235,7 +165,7 @@ class BoardInteractionController(
     private var penHeldForJsScene = false
     private val releasePenForJsSceneTask = Runnable { releasePenForJsScene("timeout") }
 
-    private fun holdPenForJsScene() {
+    internal fun holdPenForJsScene() {
         if (penHeldForJsScene) return
         penHeldForJsScene = true
         host.setDrawPathSuspended(true, "scene-cache")
@@ -248,108 +178,6 @@ class BoardInteractionController(
         penHeldForJsScene = false
         if (notifyHost) host.setDrawPathSuspended(false, "scene-cache:$reason")
         Log.i(TAG, "pen released after scene cache reason=$reason")
-    }
-
-    private fun enterSurface(next: BoardSurface, scene: BoardEngine.SceneSnapshot) {
-        trailCleanup.cancel("surface-change")
-        if (surface !== next) resetNoteScrollMode()
-        if (surface !== next) inkling.invalidateClipboardWork("surface:${next.name}")
-        surface = next
-
-        NoteLinks.setActive(next.showsBoardChrome)
-        BoardEngine.replaceScene(scene)
-        chrome.setNoteMode(!next.showsBoardChrome)
-        content.setNoteHeader(if (next.showsBoardChrome) null else currentNoteHeader, currentNoteHeaderPlaceholder, notePageScale)
-        noteToolbarInset = toolbarHeightWorld()
-        syncNotePageFrame()
-        if (next.showsBoardChrome) setNoteHeaderHoverBlocked(false)
-        syncToolMirrors(arbiter.effective(), "surface:${next.name}")
-
-        presentation.refresh("surface:${next.name}")
-
-        val noteRef = if (next.showsBoardChrome) null else noteController.document?.ref
-        InklingLink.setSurface(next.name, noteRef, "surface-switch")
-        host.onInklingSurfaceChanged(next.name, noteRef)
-        MosaicSession.saveNoteRef(host.context, noteRef)
-        applyTemplateForSurface(next, noteRef)
-        Log.i(TAG, "surface entered name=${next.name}")
-    }
-
-    private fun applyTemplateForSurface(next: BoardSurface, noteRef: String?) {
-        val template = TemplateStore.board(host.context)
-        val pageWidth = if (next.showsBoardChrome) 0f else ScrollingDocument.WIDTH
-        content.setBackgroundTemplate(template, pageWidth)
-        chrome.setCurrentTemplate(template)
-    }
-
-    private fun openNote(ref: String?) {
-        if (suspendedBoard != null || surfaceSwitching || ref.isNullOrBlank() || !ref.matches(Regex("note-[a-zA-Z0-9-]+")) || notesDirectory.isBlank()) return
-        val sourceCard = synchronized(BoardEngine.lock) { BoardEngine.cards.values.firstOrNull { it.noteRef == ref } } ?: return
-        inkling.invalidateClipboardWork("open-note")
-        val suspended = SuspendedBoard(BoardEngine.snapshotScene(), history, selection.lasso)
-        surfaceSwitching = true
-        WhiteboardSceneGate.hold()
-        noteController.open(notesDirectory, ref, create = false) { result ->
-            surfaceSwitching = false
-            result.onFailure { WhiteboardSceneGate.release(); releasePaintHold("note-open-failed"); Log.e(TAG, "note open failed", it) }
-            result.onSuccess { doc ->
-                suspendedBoard = suspended
-                history = BoardHistory(); selection.lasso = null
-                noteEntryCard = sourceCard
-                // The page always spans the view width, whatever the screen resolution.
-                val scale = ScrollingDocument.viewScale(host.width / density)
-                notePageScale = scale
-                setPageNoteHeader(BoardContentView.noteHeaderOf(sourceCard))
-                val note = NoteSurface(noteController, host.context, { host.height / density }, { host.width / density }, { notePageScale }, ::noteTopInsetWorld, ::closeNote) { exitFromNote("launcher-pull") }
-                val panY = toolbarHeightWorld() + currentNoteHeaderHeight * scale - doc.clampScroll(doc.scrollY, host.height / density / scale) * scale
-                val scene = BoardEngine.SceneSnapshot(doc.strokes, emptyList(), emptyList(), emptyList(), emptyList(), 0f, panY, scale)
-                enterSurface(note, scene)
-                releasePaintHold("note-opened")
-                Log.i(TAG, "note opened ref=$ref height=${doc.contentHeight} scrollY=${doc.scrollY}")
-                preparePendingNoteImport()
-            }
-        }
-    }
-
-    private fun closeNote() {
-        val suspended = suspendedBoard ?: return
-        if (surfaceSwitching) return
-        inkling.invalidateClipboardWork("close-note")
-        surfaceSwitching = true
-        textEditing.close()
-        cancelActiveInteractions("note-close")
-
-        val liveStrokes = synchronized(BoardEngine.lock) { BoardEngine.strokes.values.toList() }
-        val compacted = ScrollingDocument.compact(liveStrokes)
-        if (compacted.isNotEmpty() || noteController.document?.strokes?.isEmpty() != false) {
-            noteController.changed(compacted)
-        }
-        noteController.flush(true) { result ->
-            surfaceSwitching = false
-            result.onFailure { Log.e(TAG, "note save failed; keeping note open", it) }
-            result.onSuccess { doc ->
-                suspendedBoard = null
-                history = suspended.history
-                enterSurface(whiteboard, suspended.scene)
-                selection.setLasso(suspended.lasso)
-                WhiteboardSceneGate.release()
-                // A note reopened from the scene cache can close before JS has loaded the board.
-                if (!SceneCache.jsSceneArrived) holdPenForJsScene()
-                val card = synchronized(BoardEngine.lock) { BoardEngine.cards.values.firstOrNull { it.noteRef == doc.ref } }
-                if (card != null) {
-                    val size = FloatArray(2); noteCardBoardSize(doc.contentHeight, card.width, size, BoardContentView.noteHeaderOf(card))
-                    val resized = card.withRect(RectF(card.x, card.y, card.x + size[0], card.y + size[1]))
-
-                    val entry = noteEntryCard?.takeIf { it.id == card.id } ?: card
-                    val change = BoardHistory.Change("note-resize").card(card, resized)
-                    pushCardsBelow(change, cardsBelow(entry), resized.height - entry.height)
-                    applyChange(change, record = false)
-                    BoardEngine.mutate { invalidateAll() }
-                }
-                noteEntryCard = null
-                scheduleChromeUpdate(); Log.i(TAG, "note closed ref=${doc.ref} height=${doc.contentHeight}")
-            }
-        }
     }
 
     var touchEnabled = true
@@ -556,7 +384,7 @@ class BoardInteractionController(
         syncToolMirrors(arbiter.effective(), "attach")
         chrome.setTouchEnabled(touchEnabled)
 
-        applyTemplateForSurface(surface, if (surface.showsBoardChrome) null else noteController.document?.ref)
+        notes.applyTemplateForSurface(surface, if (surface.showsBoardChrome) null else notes.noteController.document?.ref)
 
         inkling.exportLassoStrokes(null)
 
@@ -564,16 +392,16 @@ class BoardInteractionController(
             content.setHoldPaint(true)
             host.postDelayed(releasePaintHoldTask, NOTE_RESTORE_PAINT_HOLD_MS)
         }
-        if (notesDirectory.isBlank()) MosaicSession.savedNotesDirectory(host.context)?.let { notesDirectory = it }
+        if (notes.notesDirectory.isBlank()) MosaicSession.savedNotesDirectory(host.context)?.let { notes.notesDirectory = it }
         SceneCache.onJsSceneApplied = { releasePenForJsScene("js-scene") }
         loadSceneCache()
-        restoreSessionNote()
+        notes.restoreSessionNote()
         scheduleChromeUpdate()
     }
 
     private val releasePaintHoldTask = Runnable { releasePaintHold("timeout") }
 
-    private fun releasePaintHold(reason: String) {
+    internal fun releasePaintHold(reason: String) {
         host.removeCallbacks(releasePaintHoldTask)
         if (content.holdPaint) {
             content.setHoldPaint(false)
@@ -592,18 +420,7 @@ class BoardInteractionController(
         noteShots.reset()
 
         inkling.exportLassoStrokes(null)
-        suspendedBoard?.let { suspended ->
-
-            noteController.flush(false) { result -> result.onFailure { Log.e(TAG, "note detach save failed", it) } }
-            suspendedBoard = null
-            history = suspended.history
-            selection.lasso = null
-
-            surface = whiteboard
-            BoardEngine.replaceScene(suspended.scene)
-            chrome.setNoteMode(false)
-            WhiteboardSceneGate.release(); noteController.clear()
-        }
+        notes.leaveOnDetach()
 
         MosaicSession.saveViewport(host.context, BoardEngine.panX, BoardEngine.panY, BoardEngine.scale)
         SceneCache.save(host.context, BoardEngine.snapshotScene())
@@ -669,12 +486,12 @@ class BoardInteractionController(
         regionsDirty = true
         scheduleChromeUpdate()
 
-        val board = suspendedBoard?.scene
+        val board = notes.suspendedBoard?.scene
         emitter.begin()
         if (board != null) emitter.viewport(board.panX, board.panY, board.scale)
         else emitter.viewport(BoardEngine.panX, BoardEngine.panY, BoardEngine.scale)
         emitter.commit()
-        restoreSessionNote()
+        notes.restoreSessionNote()
     }
 
     internal fun worldX(px: Float): Float = (px / density - BoardEngine.panX) / BoardEngine.scale
@@ -713,33 +530,6 @@ class BoardInteractionController(
         viewOffsetY = tmpLoc[1]
     }
 
-    fun closeForInkling() {
-        if (surfaceSwitching) return
-        if (suspendedBoard == null) {
-            surface.onCloseRequested(BoardSurface.CloseSource.TOOLBAR)
-            return
-        }
-        exitFromNote("inkling-close")
-    }
-
-    // Saves the open note and closes the plugin without leaving the note, so the next launch reopens it.
-    private fun exitFromNote(reason: String) {
-        if (surfaceSwitching || suspendedBoard == null) return
-        surfaceSwitching = true
-        cancelActiveInteractions(reason)
-        val liveStrokes = synchronized(BoardEngine.lock) { BoardEngine.strokes.values.toList() }
-        val compacted = ScrollingDocument.compact(liveStrokes)
-        if (compacted.isNotEmpty() || noteController.document?.strokes?.isEmpty() != false) {
-            noteController.changed(compacted)
-        }
-        noteController.flush(true) { result ->
-            surfaceSwitching = false
-            result.onFailure { Log.e(TAG, "note save failed on exit reason=$reason", it) }
-            Log.i(TAG, "exit from note reason=$reason")
-            whiteboard.onCloseRequested(BoardSurface.CloseSource.TOOLBAR)
-        }
-    }
-
     internal fun applyChange(change: BoardHistory.Change, record: Boolean, forward: Boolean = true, reconcileInk: Boolean = forward) {
         if (change.isEmpty) return
         val emitCommands = surface.emitsCommands
@@ -761,7 +551,7 @@ class BoardInteractionController(
         if (record) history.push(change)
         selection.lasso?.let { selection.setLasso(it) }
         surface.onSceneMutated()
-        syncNotePageFrame()
+        notes.syncNotePageFrame()
         regionsDirty = true
         scheduleChromeUpdate()
 
@@ -962,7 +752,7 @@ class BoardInteractionController(
         host.onPenTrailDiscarded(reason)
     }
 
-    private fun syncToolMirrors(state: ToolArbiter.State, source: String) {
+    internal fun syncToolMirrors(state: ToolArbiter.State, source: String) {
         eraserMode = state.eraser
         lassoMode = state.lasso
         shapeMode = state.shape
@@ -1030,7 +820,7 @@ class BoardInteractionController(
             return
         }
         if (penContact) return
-        setNoteHeaderHoverBlocked(noteHeaderHit(penHoverX, penHoverY) || noteOffPageHit(penHoverX, penHoverY))
+        notes.setNoteHeaderHoverBlocked(notes.noteHeaderHit(penHoverX, penHoverY) || notes.noteOffPageHit(penHoverX, penHoverY))
         if (eraserMode) {
         }
 
@@ -1074,15 +864,15 @@ class BoardInteractionController(
             else -> cancelFingerGestures("pen-down")
         }
         val waitingForJsScene = penHeldForJsScene && surface.showsBoardChrome
-        if (surfaceSwitching || waitingForJsScene || chrome.consumesPoint(x, y) || inkling.toolbarHit(x, y) || noteHeaderHit(x, y) || noteOffPageHit(x, y)) {
+        if (surfaceSwitching || waitingForJsScene || chrome.consumesPoint(x, y) || inkling.toolbarHit(x, y) || notes.noteHeaderHit(x, y) || notes.noteOffPageHit(x, y)) {
             Log.i(
                 TAG_PEN,
                 "DOWN rejected: ${when {
                     surfaceSwitching -> "surface-switching"
                     waitingForJsScene -> "scene-cache"
                     inkling.toolbarHit(x, y) -> "inkling-toolbar"
-                    noteHeaderHit(x, y) -> "note-header"
-                    noteOffPageHit(x, y) -> "note-off-page"
+                    notes.noteHeaderHit(x, y) -> "note-header"
+                    notes.noteOffPageHit(x, y) -> "note-off-page"
                     else -> "chrome"
                 }}",
             )
@@ -1238,7 +1028,7 @@ class BoardInteractionController(
         if (pressure == null || !pressure.isFinite() || pressure !in 0f..1f) return false
         if (s.clipped) return false
         // A stroke that runs off a note page ends at the edge; the system ink is blocked there too.
-        if (noteInkOffPage(wx, wy)) { s.clipped = true; return false }
+        if (notes.noteInkOffPage(wx, wy)) { s.clipped = true; return false }
         s.points.add(wx - s.cardX)
         s.points.add(wy - s.cardY)
         s.pressures.add(pressure)
@@ -1381,7 +1171,7 @@ class BoardInteractionController(
                         val distance = hypot(endX - s.downX, endY - s.downY)
                         if (!s.moved && distance <= BoardGeometry.CARD_DRAG_THRESHOLD_PX / BoardEngine.scale) {
                             val shotId = s.shotId
-                            if (shotId != null) noteShots.openLink(shotId) else openNote(s.ref)
+                            if (shotId != null) noteShots.openLink(shotId) else notes.openNote(s.ref)
                         }
                     }
                 }
@@ -1706,7 +1496,7 @@ class BoardInteractionController(
         return true
     }
 
-    private fun normalizeColoredCardToDefault(card: BoardEngine.CardRec): BoardHistory.Change? {
+    internal fun normalizeColoredCardToDefault(card: BoardEngine.CardRec): BoardHistory.Change? {
         if (!card.colored) return null
         val next = card.withColors("", "")
         val change = BoardHistory.Change("card-normalize")
@@ -1955,7 +1745,7 @@ class BoardInteractionController(
             }
         }
 
-        if (noteHeaderHit(x, y) && selection.lasso == null && !selection.selectBelowArmed) {
+        if (notes.noteHeaderHit(x, y) && selection.lasso == null && !selection.selectBelowArmed) {
             fingerGesture = FingerGesture.CardPending(id, NOTE_HEADER_PENDING)
             cancelCardLongPress()
             val task = Runnable {
@@ -2136,7 +1926,7 @@ class BoardInteractionController(
                     if (singleFingerTap && g.cardId.startsWith(NOTE_LINK_PENDING)) {
                         noteShots.openLink(g.cardId.removePrefix(NOTE_LINK_PENDING))
                     } else if (singleFingerTap && card?.kind == "note" && card.noteRef.isNotEmpty()) {
-                        openNote(card.noteRef)
+                        notes.openNote(card.noteRef)
                     }
                 }
             }
@@ -2204,14 +1994,6 @@ class BoardInteractionController(
         }
     }
 
-    internal fun setPageNoteHeader(markdown: String) {
-        currentNoteHeaderPlaceholder = markdown.isBlank()
-        currentNoteHeader = if (currentNoteHeaderPlaceholder) MosaicStrings.t(MosaicStrings.Key.noteHeaderPlaceholder) else markdown
-        currentNoteHeaderHeight = BoardContentView.noteHeaderHeight(currentNoteHeader.orEmpty(), notePageScale)
-    }
-
-    internal fun pageHeaderRegionWorld(): RectF = RectF(0f, -currentNoteHeaderHeight, ScrollingDocument.WIDTH, 0f)
-
     private fun firstTwo(): Pair<Finger, Finger> {
         val it = fingers.values.iterator()
         return Pair(it.next(), it.next())
@@ -2232,7 +2014,7 @@ class BoardInteractionController(
         Log.i(TAG_FINGER, "gestures cancelled reason=$reason")
     }
 
-    private fun cancelActiveInteractions(reason: String) {
+    internal fun cancelActiveInteractions(reason: String) {
         cancelFingerGestures(reason)
         penMoveSession?.let { transforms.cancelMoveSession(it) }
         penMoveSession = null
@@ -2403,59 +2185,7 @@ class BoardInteractionController(
 
     internal fun toolbarHeightWorld(): Float = chrome.toolbarHeightPx() / density
 
-    private fun noteTopInsetWorld(): Float = toolbarHeightWorld() + currentNoteHeaderHeight * BoardEngine.scale
-
-    private fun noteHeaderHit(x: Float, y: Float): Boolean =
-        !surface.showsBoardChrome && currentNoteHeaderHeight > 0f && worldY(y) < 0f && !noteOffPageHit(x, y)
-
-    // Zoomed out, the white around the note page cannot be written on.
-    private fun noteOffPageHit(x: Float, y: Float): Boolean {
-        if (surface.showsBoardChrome) return false
-        val wx = worldX(x)
-        val wy = worldY(y)
-        return wx < 0f || wx > ScrollingDocument.WIDTH || wy < -currentNoteHeaderHeight || noteBelowPageEnd(wy)
-    }
-
-    private fun noteBelowPageEnd(wy: Float): Boolean =
-        wy > notePageBottom && (surface as? NoteSurface)?.zoomedOut(BoardEngine.scale) == true
-
-    // Ink inside a note stays on the writable page: below the header, between the sides, above the zoomed-out end.
-    private fun noteInkOffPage(wx: Float, wy: Float): Boolean =
-        !surface.showsBoardChrome && (wx < 0f || wx > ScrollingDocument.WIDTH || wy < 0f || noteBelowPageEnd(wy))
-
-    // Off-page parts of the view in view pixels, handed to the system ink service so it never draws there.
-    fun noteOffPageRectsPx(): List<Rect> {
-        if (surface.showsBoardChrome || surfaceSwitching) return emptyList()
-        val w = host.width
-        val h = host.height
-        if (w <= 0 || h <= 0) return emptyList()
-        val left = screenX(0f).toInt().coerceIn(0, w)
-        val right = kotlin.math.ceil(screenX(ScrollingDocument.WIDTH)).toInt().coerceIn(0, w)
-        val top = screenY(-currentNoteHeaderHeight).toInt().coerceIn(0, h)
-        val zoomedOut = (surface as? NoteSurface)?.zoomedOut(BoardEngine.scale) == true
-        val bottom = if (zoomedOut) kotlin.math.ceil(screenY(notePageBottom)).toInt().coerceIn(0, h) else h
-        val out = ArrayList<Rect>(4)
-        if (left > 0) out.add(Rect(0, 0, left, h))
-        if (right < w) out.add(Rect(right, 0, w, h))
-        if (right > left && top > 0) out.add(Rect(left, 0, right, top))
-        if (right > left && bottom < h) out.add(Rect(left, bottom, right, h))
-        return out
-    }
-
-    // Zoomed out, the note page ends where the ink ends; the content view frames it there and the pen stops at it.
-    private fun syncNotePageFrame() {
-        val note = surface as? NoteSurface
-        notePageBottom = note?.zoomedOutPageBottom() ?: Float.POSITIVE_INFINITY
-        content.setNotePageFrame(if (note != null) notePageScale else 0f, notePageBottom)
-    }
-
-    private fun setNoteHeaderHoverBlocked(blocked: Boolean) {
-        if (noteHeaderHoverBlocked == blocked) return
-        noteHeaderHoverBlocked = blocked
-        host.setDrawPathRegionBlocked(blocked, "note-header")
-    }
-
-    private fun snapPanToPx(panDp: Float): Float = Math.round(panDp * density) / density
+    internal fun snapPanToPx(panDp: Float): Float = Math.round(panDp * density) / density
 
     private fun magneticZoom(scale: Float): Float {
         val level = BoardGeometry.ZOOM_LEVELS[BoardGeometry.nearestZoomIndex(scale)]
@@ -2471,7 +2201,7 @@ class BoardInteractionController(
         val snapped = when {
             scale == g.startScale -> scale
             surface.showsBoardChrome -> magneticZoom(scale)
-            abs(scale - notePageScale) <= notePageScale * NOTE_ZOOM_SNAP_RATIO -> notePageScale
+            abs(scale - notes.notePageScale) <= notes.notePageScale * NOTE_ZOOM_SNAP_RATIO -> notes.notePageScale
             else -> scale
         }
         if (snapped != scale) {
@@ -2764,48 +2494,6 @@ class BoardInteractionController(
         emitter.commit()
     }
 
-    override fun onConvertCardToNote() {
-        if (suspendedBoard != null || surfaceSwitching || notesDirectory.isBlank()) return
-        var source = selection.selectedCardId?.let { BoardEngine.cards[it] } ?: return
-        if (source.kind == "note" || source.kind == "image") return
-        normalizeColoredCardToDefault(source)?.let { pre ->
-            applyChange(pre, record = true)
-            source = BoardEngine.cards[source.id] ?: return
-        }
-        // The note is a 480-wide column; ink from a wider card is scaled to fit, otherwise its right side is cut off.
-        val fit = (ScrollingDocument.WIDTH / source.width).coerceAtMost(1f)
-        val moved = synchronized(BoardEngine.lock) {
-            BoardEngine.cardStrokes[source.id]?.map {
-                if (fit < 1f) it.scaled(fit, fit, 0f, 0f, null, null) else it.translated(0f, 0f, null, null)
-            } ?: emptyList()
-        }
-        val ref = "note-" + UUID.randomUUID().toString().replace("-", "").take(12)
-        noteController.open(notesDirectory, ref, create = true) { result ->
-            result.onFailure { Log.e(TAG, "convert-to-note create failed", it) }
-            result.onSuccess {
-                noteController.changed(moved)
-                noteController.flush(preview = true) { flushed ->
-                    flushed.onFailure { Log.e(TAG, "convert-to-note flush failed", it) }
-                    val contentHeight = flushed.getOrNull()?.contentHeight ?: ScrollingDocument.WIDTH
-                    noteController.clear()
-                    val size = FloatArray(2)
-
-                    val header = BoardContentView.noteHeaderFromText(source.content)
-                    val headerLines = if (header.isEmpty()) emptyList() else header.split('\n')
-                    noteCardBoardSize(contentHeight, source.width, size, BoardContentView.noteHeaderMarkdown(headerLines))
-
-                    val note = BoardEngine.CardRec(source.id, source.x, source.y, size[0], size[1], source.zIndex, "note", header, noteController.previewPath(ref), ref, "", "", headerLines.firstOrNull().orEmpty())
-                    val change = BoardHistory.Change("card-to-note")
-                    synchronized(BoardEngine.lock) { BoardEngine.cardStrokes[source.id]?.forEach { change.stroke(it, null) } }
-                    change.card(source, note)
-                    pushCardsBelow(change, cardsBelow(source), note.height - source.height)
-                    applyChange(change, record = true)
-                    selection.selectSingleCard(note); scheduleChromeUpdate()
-                }
-            }
-        }
-    }
-
     private var boardTranslucent = false
 
     override fun onToggleTranslucent() {
@@ -2834,25 +2522,7 @@ class BoardInteractionController(
     override fun onPenBlockChanged() {
         InklingLink.setChromeMenuOpen(chrome.blocksPen)
         refreshHostToolFlags()
-        keepNoteTopOnToolbarChange()
-    }
-
-    // Toolbar height the note's top inset was last laid out with.
-    private var noteToolbarInset = 0f
-
-    // When the toolbar hides or shows in a note, a page resting at its top follows the toolbar edge,
-    // so hiding it leaves no blank band and showing it does not cover the header.
-    private fun keepNoteTopOnToolbarChange() {
-        val now = toolbarHeightWorld()
-        val before = noteToolbarInset
-        noteToolbarInset = now
-        if (surface.showsBoardChrome || now == before) return
-        val scale = BoardEngine.scale
-        val restingTop = before + currentNoteHeaderHeight * scale
-        val panY = if (BoardEngine.panY >= restingTop - 0.5f) BoardEngine.panY + (now - before) else BoardEngine.panY
-        surface.constrainPan(BoardEngine.panX, panY, scale, viewportTmp)
-        commitViewport(snapPanToPx(viewportTmp[0]), snapPanToPx(viewportTmp[1]), scale)
-        Log.i(TAG, "note toolbar inset $before->$now panY ${BoardEngine.panY}")
+        notes.keepNoteTopOnToolbarChange()
     }
 
     override fun onDeleteSelectedCard() {
@@ -3019,7 +2689,7 @@ class BoardInteractionController(
         val card = BoardEngine.cards[cardId] ?: return
         chrome.hideSwitcher()
         refreshHostToolFlags()
-        openNote(card.noteRef)
+        notes.openNote(card.noteRef)
     }
 
     override fun onLocateNoteCard(cardId: String) {
@@ -3058,4 +2728,8 @@ class BoardInteractionController(
     override fun onSelectBelow() = selection.toggleSelectBelow()
 
     internal val transforms = SelectionTransforms(this)
+
+    internal val notes = NoteSession(this)
+
+    override fun onConvertCardToNote() = notes.convertCardToNote()
 }

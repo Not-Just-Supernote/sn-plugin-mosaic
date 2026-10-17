@@ -136,8 +136,8 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
 
     internal fun editPageHeader(recognized: String? = null) {
         if (board.surface.showsBoardChrome) return
-        val ref = board.noteController.document?.ref ?: return
-        val source = board.suspendedBoard?.scene?.cards?.firstOrNull { it.noteRef == ref } ?: return
+        val ref = board.notes.noteController.document?.ref ?: return
+        val source = board.notes.suspendedBoard?.scene?.cards?.firstOrNull { it.noteRef == ref } ?: return
         close()
         board.host.inkEnabled = false
         val header = BoardContentView.noteHeaderText(source)
@@ -166,9 +166,9 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
             initialDirty = recognized != null,
             fill = Color.WHITE,
             headerMode = true,
-            onKeyboard = { obscuredTop -> avoidKeyboard(board.pageHeaderRegionWorld(), obscuredTop) },
+            onKeyboard = { obscuredTop -> avoidKeyboard(board.notes.pageHeaderRegionWorld(), obscuredTop) },
             cardFrame = { availableBottom ->
-                val r = board.pageHeaderRegionWorld()
+                val r = board.notes.pageHeaderRegionWorld()
                 val top = board.screenY(r.top)
                 val bottom = board.screenY(r.bottom).coerceAtMost(availableBottom.toFloat())
                 RectF(board.screenX(r.left), top, board.screenX(r.right), bottom.coerceAtLeast(top + board.dp(72f)))
@@ -183,19 +183,19 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
     }
 
     private fun updatePageHeader(ref: String, plain: String) {
-        val suspended = board.suspendedBoard ?: return
+        val suspended = board.notes.suspendedBoard ?: return
         val card = suspended.scene.cards.firstOrNull { it.noteRef == ref } ?: return
         val next = withNoteHeader(card, plain)
         if (next.sameGeometry(card)) return
-        board.suspendedBoard = BoardInteractionController.SuspendedBoard(
+        board.notes.suspendedBoard = NoteSession.SuspendedBoard(
             suspended.scene.copy(cards = suspended.scene.cards.map { if (it.id == card.id) next else it }),
             suspended.history, suspended.lasso,
         )
-        val oldH = board.currentNoteHeaderHeight
-        board.setPageNoteHeader(BoardContentView.noteHeaderOf(next))
-        board.content.setNoteHeader(board.currentNoteHeader, board.currentNoteHeaderPlaceholder, board.notePageScale)
+        val oldH = board.notes.currentNoteHeaderHeight
+        board.notes.setPageNoteHeader(BoardContentView.noteHeaderOf(next))
+        board.content.setNoteHeader(board.notes.currentNoteHeader, board.notes.currentNoteHeaderPlaceholder, board.notes.notePageScale)
 
-        val d = (board.currentNoteHeaderHeight - oldH) * BoardEngine.scale
+        val d = (board.notes.currentNoteHeaderHeight - oldH) * BoardEngine.scale
         if (d != 0f) BoardEngine.setViewport(BoardEngine.panX, BoardEngine.panY + d, BoardEngine.scale)
 
         board.emitter.begin()

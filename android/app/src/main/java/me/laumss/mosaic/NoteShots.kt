@@ -40,7 +40,7 @@ internal class NoteShots(private val board: BoardInteractionController) {
 
     fun openLink(shotId: String) {
         val link = NoteLinks.list().firstOrNull { it.id == shotId } ?: return
-        if (board.surfaceSwitching || board.suspendedBoard != null) return
+        if (board.surfaceSwitching || board.notes.suspendedBoard != null) return
         val current = MosaicNoteShotModule.currentHostNotePath()
         val sameNote = current != null && current == link.notePath
         val name = link.noteName.ifBlank { MosaicStrings.t(MosaicStrings.Key.noteLinkFallback) }

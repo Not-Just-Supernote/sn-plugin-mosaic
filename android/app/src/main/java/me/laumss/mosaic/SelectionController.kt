@@ -418,7 +418,7 @@ internal class SelectionController(private val board: BoardInteractionController
         when (action) {
             "trash" -> deleteLassoSelection()
             "copy" -> copyLassoSelection()
-            "note" -> board.onConvertCardToNote()
+            "note" -> board.notes.convertCardToNote()
             "black" -> board.toggleSelectedCardBlack()
             "recognize" -> board.onRecognizeLasso()
             "shot" -> board.noteShots.insertSelection()
@@ -470,7 +470,7 @@ internal class SelectionController(private val board: BoardInteractionController
         val sel = lasso ?: return
         if (selectionCopyBusy || board.surfaceSwitching) return
         val offset = 24f / BoardEngine.scale.coerceAtLeast(0.01f)
-        val plan = SelectionCopy.build(sel.cardIds, sel.strokeIds, BoardEngine.snapshotScene(), offset, board.notesDirectory, board::newId)
+        val plan = SelectionCopy.build(sel.cardIds, sel.strokeIds, BoardEngine.snapshotScene(), offset, board.notes.notesDirectory, board::newId)
         if (plan.change.isEmpty) return
         fun commit() {
             board.applyChange(plan.change, record = true)
@@ -480,16 +480,16 @@ internal class SelectionController(private val board: BoardInteractionController
             Log.i(BoardInteractionController.TAG_LASSO, "copy cards=${plan.cardIds.size} strokes=${plan.strokeIds.size} offset=$offset")
         }
         if (plan.noteRefs.isEmpty()) { commit(); return }
-        if (board.notesDirectory.isBlank()) return
+        if (board.notes.notesDirectory.isBlank()) return
         selectionCopyBusy = true
-        val directory = board.notesDirectory
+        val directory = board.notes.notesDirectory
         val generation = board.inkling.pasteGeneration.get()
-        board.noteController.copyAssets(directory, plan.noteRefs) { result ->
+        board.notes.noteController.copyAssets(directory, plan.noteRefs) { result ->
             selectionCopyBusy = false
             result.onFailure { Log.e(BoardInteractionController.TAG_LASSO, "copy note assets failed", it) }
             if (result.isFailure) return@copyAssets
             if (lasso !== sel || generation != board.inkling.pasteGeneration.get() || !board.surface.showsBoardChrome || board.surfaceSwitching) {
-                board.noteController.discardCopiedAssets(directory, plan.noteRefs.values)
+                board.notes.noteController.discardCopiedAssets(directory, plan.noteRefs.values)
                 return@copyAssets
             }
             commit()
