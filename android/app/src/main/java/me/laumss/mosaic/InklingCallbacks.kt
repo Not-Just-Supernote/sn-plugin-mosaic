@@ -14,7 +14,7 @@ internal class InklingCallbacks(private val view: MosaicBoardView) : InklingLink
         if (!view.attached) return
         view.mainHandler.post {
             if (!view.attached) return@post
-            view.rearmDrawPath("inkling-toolbar-rect")
+            view.drawPath.rearmDrawPath("inkling-toolbar-rect")
         }
     }
 

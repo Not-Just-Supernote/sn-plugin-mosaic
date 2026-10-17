@@ -288,7 +288,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
     internal fun setNoteHeaderHoverBlocked(blocked: Boolean) {
         if (noteHeaderHoverBlocked == blocked) return
         noteHeaderHoverBlocked = blocked
-        board.host.setDrawPathRegionBlocked(blocked, "note-header")
+        board.host.drawPath.setRegionBlocked(blocked, "note-header")
     }
 
     fun convertCardToNote() {

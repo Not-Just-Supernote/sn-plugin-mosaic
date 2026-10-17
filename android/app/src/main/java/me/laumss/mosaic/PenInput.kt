@@ -189,7 +189,7 @@ internal class PenInput(private val board: BoardInteractionController) {
         val want = trailWantsWhite(board.worldX(penHoverX), board.worldY(penHoverY))
         if (want == trailWhite) return
         trailWhite = want
-        board.host.setTrailWhite(want, "$reason:$trailCause")
+        board.host.drawPath.setTrailWhite(want, "$reason:$trailCause")
     }
 
     private fun trailWantsWhite(wx: Float, wy: Float): Boolean {
@@ -339,7 +339,7 @@ internal class PenInput(private val board: BoardInteractionController) {
 
         val linkId = board.noteShots.linkAt(wx, wy)
         if (linkId != null) {
-            board.host.setDrawPathSuspended(true, "note-link-tap")
+            board.host.drawPath.setSuspended(true, "note-link-tap")
             penSession = PenSession.OpenNote("", wx, wy, linkId)
             Log.i(BoardInteractionController.TAG_PEN, "DOWN on note link badge: open on tap id=$linkId")
             return
@@ -423,7 +423,7 @@ internal class PenInput(private val board: BoardInteractionController) {
             is PenSession.OpenNote -> {
                 if (hypot(board.worldX(penX(e)) - s.downX, board.worldY(penY(e)) - s.downY) > BoardGeometry.CARD_DRAG_THRESHOLD_PX / BoardEngine.scale) {
                     s.moved = true
-                    board.host.setDrawPathSuspended(false, "note-tap-cancel")
+                    board.host.drawPath.setSuspended(false, "note-tap-cancel")
                     penSession = PenSession.Consumed
                 }
             }
@@ -501,7 +501,7 @@ internal class PenInput(private val board: BoardInteractionController) {
                     }
                 }
                 is PenSession.OpenNote -> {
-                    board.host.setDrawPathSuspended(false, "note-tap-end")
+                    board.host.drawPath.setSuspended(false, "note-tap-end")
                     if (!cancelled) {
                         val endX = board.worldX(penX(e)); val endY = board.worldY(penY(e))
                         val distance = hypot(endX - s.downX, endY - s.downY)

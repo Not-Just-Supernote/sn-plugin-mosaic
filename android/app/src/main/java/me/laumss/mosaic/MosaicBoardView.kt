@@ -1,14 +1,9 @@
 package me.laumss.mosaic
 
 import android.annotation.SuppressLint
-import android.content.ComponentCallbacks
-import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
-import android.graphics.Point
-import android.hardware.display.DisplayManager
 import android.os.Handler
-import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
@@ -17,27 +12,18 @@ import android.widget.FrameLayout
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReactContext
 import com.facebook.react.modules.core.DeviceEventManagerModule
-import com.ratta.supernote.pluginlib.api.HostDataCacheAPI
-import java.util.concurrent.atomic.AtomicLong
 
 @SuppressLint("ViewConstructor")
 class MosaicBoardView(
     internal val reactContext: ReactContext,
 ) : FrameLayout(reactContext) {
     companion object {
-        private val PEN_BLOCK_REASSERT_MS = longArrayOf(0L, 60L, 200L, 500L)
         const val TAG = "MosaicBoardView"
         private const val NATIVE_BUILD_TAG = "pressure-clock-20260928a"
 
-        private const val RETRY_INTERVAL_MS = 500L
-        private const val SLOW_RETRY_INTERVAL_MS = 2000L
-        private const val FAST_MAX_ATTEMPTS = 20
         const val BOARD_VISIBILITY_EVENT = "MosaicBoardVisibility"
 
-        private val REARM_DELAYS_MS = longArrayOf(400L, 900L, 1700L)
-
         private const val HOVER_REARM_MIN_INTERVAL_MS = 1000L
-        private const val WRITE_INFO_REFRESH_MIN_INTERVAL_MS = 1000L
 
         private const val BACKGROUND_SYNC_PROMPT_DELAY_MS = 120L
 
@@ -55,36 +41,10 @@ class MosaicBoardView(
         private const val DEVICE_TYPE_A6X2 = 4
     }
 
-    private var penWidth: Int = (PenPopup.WIDTHS[PenPopup.DEFAULT_INDEX] * 100f).toInt()
-
-    private var penStyle: PenStyle = PenStyle.PEN
-
-    @Volatile private var penConfigDirty = true
-
-    fun setPenStyle(style: PenStyle, width: Float) {
-        penStyle = style
-        penWidth = (width * 100f).toInt().coerceIn(50, 4000)
-        penConfigDirty = true
-        Log.i(TAG, "pen style requested type=${style.objType} stdWidth=$width sent=${drawPathPenWidth()} configured=$configured suspended=$drawPathSuspended")
-        if (configured && !drawPathSuspended) rearmDrawPath("pen-style")
-    }
-
     var deviceType: Int = -1
 
     var notesDirectory: String = ""
         set(value) { field = value; controller.notes.setNotesDirectory(value) }
-
-    private var stylusCalibX = 0
-    private var stylusCalibY = 0
-    private var stylusLeftHand = false
-
-    fun setStylusCalibration(diffX: Int, diffY: Int, leftHand: Boolean) {
-        val changed = diffX != stylusCalibX || diffY != stylusCalibY || leftHand != stylusLeftHand
-        stylusCalibX = diffX
-        stylusCalibY = diffY
-        stylusLeftHand = leftHand
-        if (changed && configured) rearmDrawPath("calibration")
-    }
 
     var touchEnabled: Boolean
         get() = controller.touchEnabled
@@ -110,9 +70,9 @@ class MosaicBoardView(
                 inkAbort()
                 transientStrokeActive = false
                 releaseInkDefer()
-                if (configured) disableDrawPath("ink-disabled")
-            } else if (configured && !lassoEnabled && !toolLassoActive && !drawPathSuspended) {
-                enableDrawPath("ink-enabled")
+                if (drawPath.configured) drawPath.disableDrawPath("ink-disabled")
+            } else if (drawPath.configured && !lassoEnabled && !toolLassoActive && !drawPath.drawPathSuspended) {
+                drawPath.enableDrawPath("ink-enabled")
             } else if (stylusContact && lassoEnabled && !shapeDrag) {
                 transientStrokeActive = true
                 inkBegin(lastStylusX, lastStylusY)
@@ -133,9 +93,9 @@ class MosaicBoardView(
             transientStrokeActive = false
             if (value) {
                 releaseInkDefer()
-                if (configured) disableDrawPath("lasso-enabled")
-            } else if (configured && inkEnabled && !toolLassoActive && !drawPathSuspended) {
-                enableDrawPath("lasso-disabled")
+                if (drawPath.configured) drawPath.disableDrawPath("lasso-enabled")
+            } else if (drawPath.configured && inkEnabled && !toolLassoActive && !drawPath.drawPathSuspended) {
+                drawPath.enableDrawPath("lasso-disabled")
             }
             if (value && stylusContact && !shapeDrag) {
                 transientStrokeActive = true
@@ -153,7 +113,7 @@ class MosaicBoardView(
 
     private val inkView = TransientInkView(reactContext)
     private val overlayView = InteractionOverlayView(reactContext)
-    private val chromeView = BoardChromeView(reactContext)
+    internal val chromeView = BoardChromeView(reactContext)
 
     private val commandEmitter = BoardCommandEmitter(reactContext).also { emitter ->
         emitter.viewMetricsDp = {
@@ -165,8 +125,9 @@ class MosaicBoardView(
     val controller = BoardInteractionController(this, contentView, inkView, overlayView, chromeView, commandEmitter)
     internal val closeWatchdog = CloseWatchdog(this)
     internal val inklingCallbacks = InklingCallbacks(this)
+    internal val drawPath = DrawPathSession(this)
     private var sceneChangeCounter = 0
-    private var stylusContact = false
+    internal var stylusContact = false
 
     private var penModeApplied = false
     private var lastStylusX = 0f
@@ -174,7 +135,7 @@ class MosaicBoardView(
 
     private var transientStrokeActive = false
 
-    private var awaitingStrokeCommit = false
+    internal var awaitingStrokeCommit = false
     private var fullRefreshPending = false
     private var inkHandoffPending = false
     private var plainStrokeCommit = false
@@ -201,7 +162,7 @@ class MosaicBoardView(
     private var trailDiscardedDuringContact = false
     private var strokeSceneChangedDuringContact = false
 
-    private var hoverRearmDeferred = false
+    internal var hoverRearmDeferred = false
 
     private var holdPenRefreshUntilSettle = false
 
@@ -215,19 +176,7 @@ class MosaicBoardView(
     }
 
     internal val mainHandler = Handler(Looper.getMainLooper())
-    private var configureGeneration = 0
-    private var rotationReconfigureToken = 0
     @Volatile internal var attached = false
-    private var configured = false
-
-    private var drawPathActive = false
-        set(value) {
-            field = value
-            DrawPathGate.inkExpected = value
-        }
-
-    private var drawPathGateHeld = false
-    private var drawPathBinder: IBinder? = null
 
     private enum class SyncUrgency { NONE, IDLE, PROMPT }
 
@@ -237,91 +186,6 @@ class MosaicBoardView(
     private var discardSyncPending = false
     // 在这之前不同步背景，见 onPenTrailDiscarded。
     private var syncHoldUntil = 0L
-
-    private var suspendRequested = false
-
-    private var regionBlocked = false
-
-    private val drawPathSuspended: Boolean get() = suspendRequested || regionBlocked
-
-    private data class WriteContext(
-        val notePath: String,
-        val sdkPage: Int,
-        val hostPage: Int,
-        val layerId: Int,
-    )
-
-    @Volatile private var writeContext: WriteContext? = null
-    private val writeInfoRequestId = AtomicLong(0L)
-    private var lastWriteInfoSent: WriteContext? = null
-
-    private val drawPathAppName: String = DrawPathClient.MOSAIC_APP_NAME
-
-    private var trailWhite = false
-
-    private var markerInk = MarkerInk.BLACK
-
-    private val drawPathPenColor: Int
-        get() = when {
-            penStyle == PenStyle.MARKER -> markerInk.drawPathColor
-            trailWhite -> DrawPathClient.PEN_COLOR_WHITE
-            else -> DrawPathClient.PEN_COLOR_BLACK
-        }
-
-    private var lastWriteInfoRefreshAt = 0L
-    private var lastObservedRotation = -1
-
-    private val displayManager by lazy {
-        context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-    }
-
-    private val displayListener = object : DisplayManager.DisplayListener {
-        override fun onDisplayAdded(displayId: Int) = Unit
-
-        override fun onDisplayRemoved(displayId: Int) = Unit
-
-        override fun onDisplayChanged(displayId: Int) {
-            if (!attached || displayId != display?.displayId) return
-
-            mainHandler.post {
-                if (!attached) return@post
-                Log.i(TAG, "display changed: rotation=${display?.rotation}")
-                requestRotationReconfigure("displayChanged")
-            }
-        }
-    }
-
-    private val writeContextWatch = object : Runnable {
-        override fun run() {
-            if (!attached) return
-            refreshWriteInfo("contextWatch")
-            mainHandler.postDelayed(this, 1500L)
-        }
-    }
-
-    private val orientationWatch = object : Runnable {
-        override fun run() {
-            if (!attached) return
-            val rotation = display?.rotation ?: 0
-            if (rotation != lastObservedRotation) {
-                Log.i(TAG, "orientation watcher: $lastObservedRotation -> $rotation")
-                requestRotationReconfigure("orientationWatcher")
-            }
-            mainHandler.postDelayed(this, 250L)
-        }
-    }
-
-    private val configurationCallback = object : ComponentCallbacks {
-        override fun onConfigurationChanged(newConfig: Configuration) {
-            if (!attached) return
-
-            mainHandler.postDelayed({
-                requestRotationReconfigure("applicationConfigurationChanged")
-            }, 100L)
-        }
-
-        override fun onLowMemory() = Unit
-    }
 
     init {
         addView(
@@ -380,14 +244,7 @@ class MosaicBoardView(
         mainHandler.postDelayed({
             if (attached) contentView.requestInitialRaster()
         }, 250L)
-        context.applicationContext.registerComponentCallbacks(configurationCallback)
-        displayManager.registerDisplayListener(displayListener, mainHandler)
-        publishHostRotation()
-        lastObservedRotation = display?.rotation ?: 0
-        mainHandler.post(orientationWatch)
-        mainHandler.postDelayed(writeContextWatch, 1500L)
-        refreshWriteInfo("attach", force = true)
-        scheduleConfigure("attach")
+        drawPath.attach()
     }
 
     override fun onDetachedFromWindow() {
@@ -396,33 +253,10 @@ class MosaicBoardView(
         publishBoardVisibility(false)
         InklingLink.detach(inklingCallbacks)
         controller.detach()
-        context.applicationContext.unregisterComponentCallbacks(configurationCallback)
-        displayManager.unregisterDisplayListener(displayListener)
-        configureGeneration++
-        writeInfoRequestId.incrementAndGet()
-        writeContext = null
-        lastWriteInfoSent = null
+        drawPath.stopWatching()
         mainHandler.removeCallbacksAndMessages(null)
         inkView.release()
-        DrawPathGate.detach()
-        val releaseBinder = drawPathBinder ?: DrawPathClient.getBinder()
-        releaseBinder?.let { binder ->
-            synchronized(DrawPathGate.writeLock) {
-                DrawPathClient.restoreDefaultPressureCurve(binder, drawPathAppName)
-            }
-            try {
-                val settings = GestureSettings.readCached() ?: GestureSettings.read(context)
-                synchronized(DrawPathGate.writeLock) {
-                    DrawPathClient.restoreHostPenButtonStyle(binder, drawPathAppName, settings.raw["lamy_button"] == "1")
-                    DrawPathClient.release(binder, drawPathAppName)
-                }
-            } catch (e: Throwable) { Log.w(TAG, "drawPath release on detach failed", e) }
-        }
-        drawPathActive = false
-        configured = false
-        // A suspend asked for in this session (scene cache, note tap) must not outlive it.
-        suspendRequested = false
-        drawPathBinder = null
+        drawPath.release()
         stylusContact = false
         awaitingStrokeCommit = false
         fullRefreshPending = false
@@ -484,14 +318,14 @@ class MosaicBoardView(
         controller.trailCleanup.cancel("size-change")
         Log.i(TAG, "onSizeChanged ${oldw}x$oldh -> ${w}x$h, reconfigure drawPath")
         contentView.requestInitialRaster()
-        requestRotationReconfigure("sizeChanged")
+        drawPath.requestRotationReconfigure("sizeChanged")
     }
 
     override fun onConfigurationChanged(newConfig: Configuration?) {
         super.onConfigurationChanged(newConfig)
         if (!attached) return
         mainHandler.postDelayed({
-            requestRotationReconfigure("viewConfigurationChanged")
+            drawPath.requestRotationReconfigure("viewConfigurationChanged")
         }, 100L)
     }
 
@@ -500,13 +334,13 @@ class MosaicBoardView(
         Log.i(TAG, "window focus changed: hasFocus=$hasWindowFocus rotation=${display?.rotation}")
         if (attached && !hasWindowFocus) {
             controller.trailCleanup.cancel("focus-lost")
-            restoreDrawPathPressureCurve()
+            drawPath.restoreDrawPathPressureCurve()
         }
         if (!attached || !hasWindowFocus) return
         controller.trailCleanup.resume("focus-gained")
         mainHandler.postDelayed({
             if (attached && hasWindowFocus) {
-                requestRotationReconfigure("windowFocusGained")
+                drawPath.requestRotationReconfigure("windowFocusGained")
             }
         }, 200L)
     }
@@ -516,61 +350,12 @@ class MosaicBoardView(
         if (!attached) return
         if (visibility != VISIBLE) controller.trailCleanup.cancel("hidden")
         else controller.trailCleanup.resume("visible")
-        if (visibility != VISIBLE) restoreDrawPathPressureCurve()
-        else if (hasWindowFocus()) scheduleConfigure("window-visible")
-    }
-
-    private fun restoreDrawPathPressureCurve() {
-        val binder = drawPathBinder ?: return
-        synchronized(DrawPathGate.writeLock) {
-            DrawPathClient.restoreDefaultPressureCurve(binder, drawPathAppName)
-        }
-    }
-
-    private fun publishHostRotation() {
-        val currentDisplay = display
-        val realSize = Point()
-        currentDisplay?.getRealSize(realSize)
-        val screenWidth = realSize.x.takeIf { it > 0 } ?: width
-        val screenHeight = realSize.y.takeIf { it > 0 } ?: height
-        lastObservedRotation = currentDisplay?.rotation ?: 0
-        InputReader.updateHostDisplay(lastObservedRotation, screenWidth, screenHeight)
+        if (visibility != VISIBLE) drawPath.restoreDrawPathPressureCurve()
+        else if (hasWindowFocus()) drawPath.scheduleConfigure("window-visible")
     }
 
     fun onPropsChanged() {
-        if (attached) scheduleConfigure("propsChanged")
-    }
-
-    private fun drawPathPenType(): Int = when (penStyle) {
-        PenStyle.PEN -> DrawPathClient.PEN_TYPE_CALLIGRAPHY
-        PenStyle.FILLED_SHAPE -> DrawPathClient.PEN_TYPE_PRESSURE
-        PenStyle.BRUSH -> DrawPathClient.PEN_TYPE_NEEDLE
-        else -> penStyle.objType
-    }
-
-    private fun drawPathPenWidth(): Int =
-        DrawPathClient.liveWidthArgumentFromStdHundredths(penWidth, penStyle)
-
-    private fun drawPathDisableAreas(): List<DrawPathClient.DisableArea> {
-        val areas = mutableListOf<DrawPathClient.DisableArea>()
-        val loc = IntArray(2)
-        getLocationOnScreen(loc)
-        val toolbarHeight = chromeView.toolbarHeightPx()
-        if (toolbarHeight > 0 && width > 0) {
-            areas.add(DrawPathClient.DisableArea(loc[0], loc[1], width, toolbarHeight))
-        }
-
-        chromeView.touchToggleBounds()?.let { r ->
-            areas.add(DrawPathClient.DisableArea(loc[0] + r.left, loc[1] + r.top, r.width(), r.height()))
-        }
-        InklingLink.toolbarDisableArea()?.let(areas::add)
-
-        areas.addAll(InklingLink.overlayDisableAreas())
-        // Around a zoomed-out note page; refreshed by the hover rearm before every stroke.
-        for (r in controller.notes.noteOffPageRectsPx()) {
-            areas.add(DrawPathClient.DisableArea(loc[0] + r.left, loc[1] + r.top, r.width(), r.height()))
-        }
-        return areas
+        if (attached) drawPath.scheduleConfigure("propsChanged")
     }
 
     private fun noteContentChanged(reason: String, moved: Boolean) {
@@ -601,11 +386,11 @@ class MosaicBoardView(
         }
         if (hoverRearmDeferred && !stylusContact && !awaitingStrokeCommit) {
             hoverRearmDeferred = false
-            lastHoverRearmAt = System.currentTimeMillis()
-            rearmDrawPath("hoverEnter:settled")
+            drawPath.lastHoverRearmAt = System.currentTimeMillis()
+            drawPath.rearmDrawPath("hoverEnter:settled")
         }
 
-        if (backgroundSyncUrgency == SyncUrgency.NONE || (stylusContact && drawPathActive)) return
+        if (backgroundSyncUrgency == SyncUrgency.NONE || (stylusContact && drawPath.drawPathActive)) return
         if (discardSyncPending) {
             cancelBackgroundSync()
             sendBackgroundSync()
@@ -641,20 +426,20 @@ class MosaicBoardView(
     }
 
     private fun sendBackgroundSync(force: Boolean = false) {
-        if (!attached || !configured || (!force && stylusContact && drawPathActive)) return
+        if (!attached || !drawPath.configured || (!force && stylusContact && drawPath.drawPathActive)) return
         val held = syncHoldUntil - SystemClock.uptimeMillis()
         if (held > 0) {
             if (backgroundSyncUrgency == SyncUrgency.NONE) backgroundSyncUrgency = SyncUrgency.PROMPT
             scheduleBackgroundSync(held)
             return
         }
-        val binder = drawPathBinder ?: return
+        val binder = drawPath.drawPathBinder ?: return
         val urgency = backgroundSyncUrgency
         val discard = discardSyncPending
         try {
             DrawPathClient.syncBackground(
                 binder = binder,
-                appName = drawPathAppName,
+                appName = drawPath.drawPathAppName,
                 isA6X2 = deviceType == DEVICE_TYPE_A6X2,
             )
             backgroundSyncUrgency = SyncUrgency.NONE
@@ -662,7 +447,7 @@ class MosaicBoardView(
             Log.i(TAG, "drawPath background sync: urgency=$urgency discard=$discard")
         } catch (error: Throwable) {
             Log.w(TAG, "drawPath background sync failed: urgency=$urgency", error)
-            drawPathBinder = null
+            drawPath.drawPathBinder = null
         }
     }
 
@@ -685,7 +470,7 @@ class MosaicBoardView(
             syncHoldUntil = SystemClock.uptimeMillis() + SYNC_HOLD_FOR_REFRESH_MAX_MS
             mainHandler.postDelayed({ if (attached) requestFullRefreshWhenSettled(reason) }, TRAIL_CLEAR_REFRESH_DELAY_MS)
         }
-        Log.i(TAG, "pen trail discarded: reason=$reason sync=${if (stylusContact) "now" else "deferred"} fullRefresh=$fullRefresh stylus=$stylusContact active=$drawPathActive")
+        Log.i(TAG, "pen trail discarded: reason=$reason sync=${if (stylusContact) "now" else "deferred"} fullRefresh=$fullRefresh stylus=$stylusContact active=${drawPath.drawPathActive}")
     }
 
     private fun requestFullRefreshWhenSettled(reason: String) {
@@ -703,246 +488,6 @@ class MosaicBoardView(
         MosaicEinkRefreshModule.requestFullRefresh(contentView, reason)
         syncHoldUntil = SystemClock.uptimeMillis() + SYNC_AFTER_FULL_REFRESH_MS
         if (backgroundSyncUrgency != SyncUrgency.NONE) scheduleBackgroundSync(SYNC_AFTER_FULL_REFRESH_MS)
-    }
-
-    fun setTrailWhite(white: Boolean, reason: String) {
-        val previous = drawPathPenColor
-        trailWhite = white
-        sendPenColorIfChanged(previous, reason)
-    }
-
-    fun setMarkerInk(ink: MarkerInk, reason: String) {
-        val previous = drawPathPenColor
-        markerInk = ink
-        sendPenColorIfChanged(previous, reason)
-    }
-
-    private fun sendPenColorIfChanged(previous: Int, reason: String) {
-        val color = drawPathPenColor
-        if (color == previous) return
-        penConfigDirty = true
-        if (!configured || !drawPathActive) {
-            Log.i(TAG, "[MosaicTrail] color=$color stored reason=$reason configured=$configured active=$drawPathActive")
-            return
-        }
-        if (stylusContact || awaitingStrokeCommit) {
-            hoverRearmDeferred = true
-            Log.i(TAG, "[MosaicTrail] color=$color deferred reason=$reason contact=$stylusContact awaitingCommit=$awaitingStrokeCommit")
-            return
-        }
-        val binder = drawPathBinder ?: return
-        try {
-            synchronized(DrawPathGate.writeLock) {
-                DrawPathClient.sendPenInfo(binder, drawPathAppName, drawPathPenType(), drawPathPenWidth(), color,
-                    pressureCurveEnabled = hasWindowFocus() && isShown)
-                DrawPathClient.sendPenButtonOverride(binder, drawPathAppName, drawPathPenType(), drawPathPenWidth(), color)
-            }
-            penConfigDirty = false
-            Log.i(TAG, "[MosaicTrail] color=$color sent reason=$reason")
-        } catch (error: Throwable) {
-            drawPathBinder = null
-            Log.w(TAG, "[MosaicTrail] sendPenInfo failed reason=$reason", error)
-        }
-    }
-
-    fun setDrawPathSuspended(suspended: Boolean, reason: String) {
-        if (suspendRequested == suspended) return
-        val was = drawPathSuspended
-        suspendRequested = suspended
-        applyDrawPathSuspension(was, reason)
-    }
-
-    fun setDrawPathRegionBlocked(blocked: Boolean, reason: String) {
-        if (regionBlocked == blocked) return
-        val was = drawPathSuspended
-        regionBlocked = blocked
-        applyDrawPathSuspension(was, "region:$reason")
-    }
-
-    private fun applyDrawPathSuspension(was: Boolean, reason: String) {
-        val suspended = drawPathSuspended
-        if (was == suspended) return
-        Log.i(TAG, "drawPath suspended=$suspended reason=$reason requested=$suspendRequested region=$regionBlocked configured=$configured active=$drawPathActive")
-        if (!configured) return
-        if (suspended) {
-            if (drawPathActive) disableDrawPath("suspend:$reason")
-        } else if (inkEnabled && !lassoEnabled && !drawPathActive) {
-            enableDrawPath("resume:$reason")
-        } else if (penConfigDirty && inkEnabled && !lassoEnabled) {
-            rearmDrawPath("resume-pen-style:$reason")
-        }
-    }
-
-    private fun refreshWriteInfo(reason: String, force: Boolean = false) {
-        if (!attached) return
-        val now = android.os.SystemClock.uptimeMillis()
-        if (!force && now - lastWriteInfoRefreshAt < WRITE_INFO_REFRESH_MIN_INTERVAL_MS) return
-        lastWriteInfoRefreshAt = now
-        val requestId = writeInfoRequestId.incrementAndGet()
-        Log.i(TAG, "drawPath context refresh queued reason=$reason request=$requestId")
-        DrawPathContextClient.refresh(reactContext) { snapshot ->
-            mainHandler.post {
-                if (!attached || requestId != writeInfoRequestId.get()) return@post
-                if (snapshot == null) {
-                    Log.i(TAG, "drawPath context unavailable reason=$reason request=$requestId")
-                    return@post
-                }
-                val currentPath = try {
-                    HostDataCacheAPI.getInstance()?.currentFilePath
-                } catch (_: Throwable) {
-                    null
-                }
-                if (currentPath != null && currentPath != snapshot.notePath) {
-                    Log.i(
-                        TAG,
-                        "drawPath context changed during query reason=$reason " +
-                            "${snapshot.notePath}->$currentPath",
-                    )
-                    return@post
-                }
-                val context = WriteContext(
-                    notePath = snapshot.notePath,
-                    sdkPage = snapshot.sdkPage,
-                    hostPage = snapshot.hostPage,
-                    layerId = snapshot.layerId,
-                )
-                writeContext = context
-                val binder = drawPathBinder ?: ensureBinder()
-                if (binder == null) {
-                    Log.i(TAG, "drawPath context cached without binder reason=$reason")
-                    return@post
-                }
-                if (lastWriteInfoSent == context) return@post
-                try {
-                    DrawPathClient.sendWriteInfo(
-                        binder = binder,
-                        appName = drawPathAppName,
-                        pageNum = context.hostPage,
-                        layer = context.layerId,
-                    )
-                    lastWriteInfoSent = context
-                    Log.i(
-                        TAG,
-                        "drawPath context applied reason=$reason " +
-                            "sdkPage=${snapshot.sdkPage} hostPage=${snapshot.hostPage} " +
-                            "layer=${snapshot.layerId}",
-                    )
-                } catch (error: Throwable) {
-                    Log.w(TAG, "drawPath context apply failed reason=$reason", error)
-                    drawPathBinder = null
-                }
-            }
-        }
-    }
-
-    private fun reassertCachedWriteInfo(binder: IBinder, reason: String): Boolean {
-        val context = writeContext ?: return false
-        return try {
-            DrawPathClient.sendWriteInfo(
-                binder = binder,
-                appName = drawPathAppName,
-                pageNum = context.hostPage,
-                layer = context.layerId,
-            )
-            lastWriteInfoSent = context
-            Log.i(
-                TAG,
-                "drawPath context reasserted reason=$reason " +
-                    "sdkPage=${context.sdkPage} hostPage=${context.hostPage} " +
-                    "layer=${context.layerId}",
-            )
-            true
-        } catch (error: Throwable) {
-            Log.w(TAG, "drawPath context reassert failed reason=$reason", error)
-            drawPathBinder = null
-            false
-        }
-    }
-
-    private fun enableDrawPath(reason: String) {
-        val binder = ensureBinder()
-        if (binder == null) {
-            Log.w(TAG, "drawPath enable pending: reason=$reason binder=null")
-            drawPathActive = false
-            return
-        }
-        try {
-            configureDrawPath(binder, true, "$reason:enabled")
-            drawPathActive = true
-            penConfigDirty = false
-            Log.i(
-                TAG,
-                "drawPath direct enabled: reason=$reason app=$drawPathAppName " +
-                    "type=${drawPathPenType()} style=${penStyle.name} " +
-                    "width=${drawPathPenWidth()} color=$drawPathPenColor",
-            )
-        } catch (error: Throwable) {
-            drawPathActive = false
-            drawPathBinder = null
-            Log.w(TAG, "drawPath enable failed: reason=$reason", error)
-        }
-    }
-
-    fun reassertPenBlock(reason: String) {
-        Log.i(TAG, "[MosaicPenButton] block reason=$reason ink=$inkEnabled lasso=$lassoEnabled active=$drawPathActive configured=$configured contact=$stylusContact")
-        if (!attached || !configured || inkEnabled || drawPathActive) return
-
-        DrawPathGate.reblock("pen-block:$reason", PEN_BLOCK_REASSERT_MS)
-    }
-
-    private fun disableDrawPath(reason: String) {
-        drawPathActive = false
-        val binder = drawPathBinder ?: return
-        try {
-            synchronized(DrawPathGate.writeLock) { DrawPathClient.disableAll(binder, drawPathAppName) }
-            Log.i(TAG, "drawPath disabled: reason=$reason")
-        } catch (error: Throwable) {
-            drawPathBinder = null
-            Log.w(TAG, "drawPath disable failed: reason=$reason", error)
-        }
-    }
-
-    private fun attachDrawPathGate(binder: IBinder) {
-        DrawPathGate.attach(binder, drawPathAppName)
-        DrawPathGate.inkExpected = drawPathActive
-        DrawPathGate.onReleased = {
-            if (attached && configured && drawPathActive && drawPathGateHeld) rearmDrawPath("pen-gate-release")
-        }
-    }
-
-    private fun ensureBinder(): IBinder? {
-        drawPathBinder?.let { return it }
-        val binder = DrawPathClient.getBinder()
-        drawPathBinder = binder
-        return binder
-    }
-
-    private fun configureDrawPath(binder: IBinder, active: Boolean, reason: String) {
-        lastWriteInfoSent = null
-        attachDrawPathGate(binder)
-        synchronized(DrawPathGate.writeLock) {
-            val held = active && DrawPathGate.blocked()
-            drawPathGateHeld = held
-            if (active && !held) {
-                DrawPathClient.configure(
-                    binder = binder,
-                    appName = drawPathAppName,
-                    penType = drawPathPenType(),
-                    penWidth = drawPathPenWidth(),
-                    penColor = drawPathPenColor,
-                    areas = drawPathDisableAreas(),
-                    pressureCurveEnabled = hasWindowFocus() && isShown,
-                )
-                DrawPathClient.sendStylusCalibration(binder, drawPathAppName, stylusCalibX, stylusCalibY, stylusLeftHand)
-            } else {
-                DrawPathClient.disableAll(binder, drawPathAppName)
-                if (held) Log.i(TAG, "drawPath enable held by pen gate reason=$reason ${DrawPathGate.describe()}")
-            }
-
-            DrawPathClient.sendPenButtonOverride(binder, drawPathAppName, drawPathPenType(), drawPathPenWidth(), drawPathPenColor)
-        }
-        reassertCachedWriteInfo(binder, reason)
-        refreshWriteInfo(reason, force = true)
     }
 
     private fun inkBegin(x: Float, y: Float) = inkView.beginStroke(x, y)
@@ -1023,152 +568,6 @@ class MosaicBoardView(
         }
     }
 
-    private fun requestRotationReconfigure(source: String) {
-        publishHostRotation()
-        refreshWriteInfo(source)
-        val expectedRotation = display?.rotation ?: -1
-        val token = ++rotationReconfigureToken
-        val realSize = Point()
-        display?.getRealSize(realSize)
-        Log.i(
-            TAG,
-            "drawPath reconfigure requested: source=$source token=$token " +
-                "rotation=$expectedRotation display=${realSize.x}x${realSize.y}",
-        )
-        scheduleConfigure("$source:immediate")
-
-        listOf(350L, 900L, 1600L, 2800L).forEach { delay ->
-            mainHandler.postDelayed({
-                if (!attached) {
-                    Log.i(TAG, "drawPath settle skipped: source=$source delay=$delay detached")
-                    return@postDelayed
-                }
-                if (token != rotationReconfigureToken) {
-                    Log.i(TAG, "drawPath settle skipped: source=$source delay=$delay superseded")
-                    return@postDelayed
-                }
-                val actualRotation = display?.rotation ?: -1
-                if (actualRotation != expectedRotation) {
-                    Log.i(
-                        TAG,
-                        "drawPath settle skipped: source=$source delay=$delay " +
-                            "rotationChanged=$expectedRotation->$actualRotation",
-                    )
-                    return@postDelayed
-                }
-                Log.i(
-                    TAG,
-                    "drawPath settle reconfigure: source=$source token=$token " +
-                        "delay=$delay rotation=$actualRotation",
-                )
-                publishHostRotation()
-                scheduleConfigure("$source:settle-$delay")
-            }, delay)
-        }
-    }
-
-    private fun scheduleConfigure(reason: String) {
-        configured = false
-        val generation = ++configureGeneration
-        Log.i(
-            TAG,
-            "drawPath configure queued: reason=$reason generation=$generation " +
-                "rotation=${display?.rotation} attached=$attached",
-        )
-        mainHandler.post {
-            Log.i(
-                TAG,
-                "drawPath configure dispatch: reason=$reason generation=$generation " +
-                    "currentGeneration=$configureGeneration",
-            )
-            configureWithRetry(generation, 1, reason)
-        }
-    }
-
-    private fun configureWithRetry(generation: Int, attempt: Int, reason: String) {
-        if (!attached) {
-            Log.i(TAG, "drawPath configure cancelled: reason=$reason generation=$generation detached")
-            return
-        }
-        if (generation != configureGeneration) {
-            Log.i(
-                TAG,
-                "drawPath configure cancelled: reason=$reason generation=$generation " +
-                    "supersededBy=$configureGeneration",
-            )
-            return
-        }
-        if (configured) {
-            Log.i(TAG, "drawPath configure skipped: reason=$reason generation=$generation alreadyConfigured")
-            return
-        }
-
-        Log.i(
-            TAG,
-            "drawPath configure enter: reason=$reason generation=$generation " +
-                "attempt=$attempt rotation=${display?.rotation}",
-        )
-        try {
-            publishHostRotation()
-            val binder = ensureBinder()
-            if (binder == null) {
-                Log.w(TAG, "drawPath binder unavailable: reason=$reason attempt=$attempt")
-                scheduleRetry(generation, attempt, reason)
-                return
-            }
-            val drawPathWidth = drawPathPenWidth()
-            val shouldRender = inkEnabled && !lassoEnabled && !drawPathSuspended
-            configureDrawPath(binder, shouldRender, "$reason:configured")
-            configured = true
-            drawPathActive = shouldRender
-            Log.i(
-                TAG,
-                "drawPath direct configured: reason=$reason generation=$generation " +
-                    "rotation=${display?.rotation} attempt=$attempt " +
-                    "active=$drawPathActive width=$drawPathWidth color=$drawPathPenColor",
-            )
-
-            REARM_DELAYS_MS.forEach { delay ->
-                mainHandler.postDelayed({
-                    if (!attached) return@postDelayed
-                    if (generation != configureGeneration) return@postDelayed
-                    rearmDrawPath("rearm+$delay")
-                }, delay)
-            }
-        } catch (error: Throwable) {
-            Log.w(
-                TAG,
-                "drawPath configure failed: reason=$reason generation=$generation attempt=$attempt",
-                error,
-            )
-            drawPathBinder = null
-            scheduleRetry(generation, attempt, reason)
-        }
-    }
-
-    internal fun rearmDrawPath(reason: String) {
-        if (!configured) return
-        val binder = drawPathBinder ?: return
-        try {
-            configureDrawPath(binder, drawPathActive, reason)
-            penConfigDirty = false
-            Log.i(TAG, "drawPath rearm: reason=$reason active=$drawPathActive")
-        } catch (e: Throwable) {
-            Log.w(TAG, "drawPath rearm failed: reason=$reason", e)
-            drawPathBinder = null
-        }
-    }
-
-    private fun scheduleRetry(generation: Int, attempt: Int, reason: String) {
-        val delay = if (attempt < FAST_MAX_ATTEMPTS) RETRY_INTERVAL_MS else SLOW_RETRY_INTERVAL_MS
-        Log.i(
-            TAG,
-            "drawPath retry queued: reason=$reason generation=$generation " +
-                "nextAttempt=${attempt + 1} delay=$delay",
-        )
-        mainHandler.postDelayed({ configureWithRetry(generation, attempt + 1, reason) }, delay)
-    }
-
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
             controller.trailCleanup.cancel("view-input")
@@ -1199,7 +598,7 @@ class MosaicBoardView(
 
             feedInkView(event)
 
-            if (toolLassoActive && !inkEnabled) reassertPenBlock("lasso-down")
+            if (toolLassoActive && !inkEnabled) drawPath.reassertPenBlock("lasso-down")
         } else {
             val counterBefore = sceneChangeCounter
             feedInkView(event)
@@ -1210,9 +609,9 @@ class MosaicBoardView(
                 finalizeInkSession("no-commit")
             }
         }
-        if (event.actionMasked == MotionEvent.ACTION_DOWN && !configured) {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && !drawPath.configured) {
             Log.i(TAG, "stylus DOWN before drawPath configured, immediate configure attempt")
-            scheduleConfigure("stylusDown")
+            drawPath.scheduleConfigure("stylusDown")
         }
 
         return true
@@ -1308,17 +707,17 @@ class MosaicBoardView(
                     if (awaitingStrokeCommit) {
                         hoverRearmDeferred = true
                     } else {
-                        lastHoverRearmAt = now
-                        rearmDrawPath("hoverEnter")
+                        drawPath.lastHoverRearmAt = now
+                        drawPath.rearmDrawPath("hoverEnter")
                     }
                 }
                 MotionEvent.ACTION_HOVER_MOVE -> {
-                    if (now - lastHoverRearmAt > HOVER_REARM_MIN_INTERVAL_MS || penConfigDirty) {
+                    if (now - drawPath.lastHoverRearmAt > HOVER_REARM_MIN_INTERVAL_MS || drawPath.penConfigDirty) {
                         if (awaitingStrokeCommit) {
                             hoverRearmDeferred = true
                         } else {
-                            lastHoverRearmAt = now
-                            rearmDrawPath("hoverHold")
+                            drawPath.lastHoverRearmAt = now
+                            drawPath.rearmDrawPath("hoverHold")
                         }
                     }
                 }
@@ -1327,11 +726,9 @@ class MosaicBoardView(
         return false
     }
 
-    private var lastHoverRearmAt = 0L
-
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
-        if (changed && attached && configured) rearmDrawPath("layout")
+        if (changed && attached && drawPath.configured) drawPath.rearmDrawPath("layout")
     }
 
     private var layoutPassPosted = false

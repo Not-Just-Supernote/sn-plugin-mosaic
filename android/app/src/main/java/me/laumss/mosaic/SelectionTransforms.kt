@@ -19,7 +19,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
 
     internal fun beginResize(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, card: BoardEngine.CardRec, handle: BoardGeometry.Handle): MoveSession.CardResize {
         // 与套索拖动笔迹相同：拖动期间停掉系统笔迹服务，只由 Mosaic 画预览。
-        board.host.setDrawPathSuspended(true, "card-resize")
+        board.host.drawPath.setSuspended(true, "card-resize")
         val session = MoveSession.CardResize(isPen, pointerId, wx, wy, card, handle)
         card.rect(session.preview)
         card.rect(session.startRect)
@@ -99,7 +99,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
     }
 
     internal fun beginSelectionResize(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, sel: LassoSelection, handle: BoardGeometry.Handle): MoveSession.SelectionResize {
-        board.host.setDrawPathSuspended(true, "lasso-selection-resize")
+        board.host.drawPath.setSuspended(true, "lasso-selection-resize")
         val cards = ArrayList<BoardEngine.CardRec>()
         val strokes = ArrayList<BoardEngine.StrokeRec>()
         synchronized(BoardEngine.lock) {
@@ -188,7 +188,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
     }
 
     internal fun beginSelectionRotate(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, sel: LassoSelection): MoveSession.SelectionRotate {
-        board.host.setDrawPathSuspended(true, "lasso-selection-rotate")
+        board.host.drawPath.setSuspended(true, "lasso-selection-rotate")
         val strokes = ArrayList<BoardEngine.StrokeRec>()
         val inkPath = Path()
         val previewInk = ArrayList<InteractionOverlayView.PreviewInk>()
@@ -262,7 +262,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
     }
 
     internal fun beginSelectionMove(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, sel: LassoSelection): MoveSession.Selection {
-        board.host.setDrawPathSuspended(true, "lasso-selection-move")
+        board.host.drawPath.setSuspended(true, "lasso-selection-move")
         val cards = ArrayList<BoardEngine.CardRec>()
         val strokes = ArrayList<BoardEngine.StrokeRec>()
         val cardRects = ArrayList<RectF>()
@@ -321,7 +321,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
             is MoveSession.CardResize -> {
                 board.overlay.hideCardPreview()
                 board.overlay.endMovePreview()
-                board.host.setDrawPathSuspended(false, "card-resize-end")
+                board.host.drawPath.setSuspended(false, "card-resize-end")
                 computeResizePreview(m, wx, wy)
                 unhideFromTiles()
                 val start = m.startRect
@@ -339,7 +339,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
             is MoveSession.Selection -> {
                 board.overlay.endMovePreview()
                 unhideFromTiles()
-                board.host.setDrawPathSuspended(false, "lasso-selection-move-end")
+                board.host.drawPath.setSuspended(false, "lasso-selection-move-end")
                 val single = m.liftZ?.let { z -> m.cards.singleOrNull()?.let { it to z } }
                 if (single != null && (abs(dx) > 0.01f || abs(dy) > 0.01f)) {
                     val (card, z) = single
@@ -383,7 +383,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
             is MoveSession.SelectionResize -> {
                 board.overlay.endMovePreview()
                 unhideFromTiles()
-                board.host.setDrawPathSuspended(false, "lasso-selection-resize-end")
+                board.host.drawPath.setSuspended(false, "lasso-selection-resize-end")
                 computeSelectionResizePreview(m, wx, wy)
                 val start = m.startRect
                 val fx = m.preview.width() / start.width()
@@ -421,7 +421,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
             is MoveSession.SelectionRotate -> {
                 board.overlay.endMovePreview()
                 unhideFromTiles()
-                board.host.setDrawPathSuspended(false, "lasso-selection-rotate-end")
+                board.host.drawPath.setSuspended(false, "lasso-selection-rotate-end")
                 m.angle = rotateAngle(m, wx, wy)
                 if (abs(m.angle) > 0.001f) {
                     val change = BoardHistory.Change("selection-rotate")
@@ -476,11 +476,11 @@ internal class SelectionTransforms(private val board: BoardInteractionController
                 board.overlay.hideCardPreview()
                 board.overlay.endMovePreview()
                 unhideFromTiles()
-                board.host.setDrawPathSuspended(false, "card-resize-cancel")
+                board.host.drawPath.setSuspended(false, "card-resize-cancel")
             }
-            is MoveSession.Selection -> { board.overlay.endMovePreview(); unhideFromTiles(); board.host.setDrawPathSuspended(false, "lasso-selection-move-cancel"); board.selection.updateLassoOverlay() }
-            is MoveSession.SelectionResize -> { board.overlay.endMovePreview(); unhideFromTiles(); board.host.setDrawPathSuspended(false, "lasso-selection-resize-cancel"); board.selection.updateLassoOverlay() }
-            is MoveSession.SelectionRotate -> { board.overlay.endMovePreview(); unhideFromTiles(); board.host.setDrawPathSuspended(false, "lasso-selection-rotate-cancel"); board.selection.updateLassoOverlay() }
+            is MoveSession.Selection -> { board.overlay.endMovePreview(); unhideFromTiles(); board.host.drawPath.setSuspended(false, "lasso-selection-move-cancel"); board.selection.updateLassoOverlay() }
+            is MoveSession.SelectionResize -> { board.overlay.endMovePreview(); unhideFromTiles(); board.host.drawPath.setSuspended(false, "lasso-selection-resize-cancel"); board.selection.updateLassoOverlay() }
+            is MoveSession.SelectionRotate -> { board.overlay.endMovePreview(); unhideFromTiles(); board.host.drawPath.setSuspended(false, "lasso-selection-rotate-cancel"); board.selection.updateLassoOverlay() }
         }
         board.presentation.release(BoardPresentation.Reason.TRANSFORM)
     }

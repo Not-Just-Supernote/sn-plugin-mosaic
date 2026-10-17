@@ -91,7 +91,7 @@ class BoardInteractionController(
     internal fun holdPenForJsScene() {
         if (penHeldForJsScene) return
         penHeldForJsScene = true
-        host.setDrawPathSuspended(true, "scene-cache")
+        host.drawPath.setSuspended(true, "scene-cache")
         host.postDelayed(releasePenForJsSceneTask, SCENE_CACHE_PEN_HOLD_MS)
     }
 
@@ -99,7 +99,7 @@ class BoardInteractionController(
         host.removeCallbacks(releasePenForJsSceneTask)
         if (!penHeldForJsScene) return
         penHeldForJsScene = false
-        if (notifyHost) host.setDrawPathSuspended(false, "scene-cache:$reason")
+        if (notifyHost) host.drawPath.setSuspended(false, "scene-cache:$reason")
         Log.i(TAG, "pen released after scene cache reason=$reason")
     }
 
@@ -125,14 +125,14 @@ class BoardInteractionController(
         penStyle = style
         penWidth = width.coerceIn(1f, 40f)
         Log.i(TAG_PEN, "style=${style.name} stdWidth=$penWidth")
-        host.setPenStyle(style, penWidth)
+        host.drawPath.setPenStyle(style, penWidth)
         pen.reevaluateTrailColor("pen-style")
     }
 
     fun setMarkerInk(ink: MarkerInk) {
         markerInk = ink
         Log.i(TAG_PEN, "marker ink=${ink.name}")
-        host.setMarkerInk(ink, "marker-ink")
+        host.drawPath.setMarkerInk(ink, "marker-ink")
     }
 
     internal var sliderTwoDown = false
@@ -160,8 +160,8 @@ class BoardInteractionController(
         GestureSettings.dumpCalibrationHints(host.context)
         InkAlign.start(host.context)
         applyStylusCalibration()
-        host.setPenStyle(penStyle, penWidth)
-        host.setMarkerInk(markerInk, "attach")
+        host.drawPath.setPenStyle(penStyle, penWidth)
+        host.drawPath.setMarkerInk(markerInk, "attach")
         TranslucentStore.level(host.context).let { level ->
             content.setTranslucentLevel(level)
             chrome.setTranslucentLevel(level)
@@ -242,7 +242,7 @@ class BoardInteractionController(
     private fun applyStylusCalibration() {
         DrawPathGate.stylusNearBlocks = gestureToolOf(settings.penButton) != null
         DrawPathGate.sliderToolSide = if (gestureToolOf(settings.slidebarGesture) != null) settings.sliderSide else 0
-        host.setStylusCalibration(settings.calibX, settings.calibY, settings.leftHand)
+        host.drawPath.setStylusCalibration(settings.calibX, settings.calibY, settings.leftHand)
         InkAlign.setBaseline(0f, 0f)
     }
 
@@ -547,7 +547,7 @@ class BoardInteractionController(
                         "pen-button-down",
                     )
                     Log.i(TAG_TOOL, "pen-button down physical=$physical tool=$tool near=$near hover=${pen.penHovering} contact=${pen.penContact} armed=$armed")
-                    host.reassertPenBlock("pen-button:$tool")
+                    host.drawPath.reassertPenBlock("pen-button:$tool")
                 } else {
                     if (arbiter.penButtonPhysical() != null && arbiter.penButtonPhysical() != physical) return
                     applyTransition(arbiter.releaseOverride(ToolArbiter.Source.PEN_BUTTON), "pen-button-up")
@@ -584,13 +584,13 @@ class BoardInteractionController(
             "twoDown" -> if (gestureToolOf(settings.slidebarGesture) != null) {
                 sliderTwoDown = true
                 presentation.acquire(BoardPresentation.Reason.SLIDER)
-                host.setDrawPathSuspended(true, "slider-two-down")
+                host.drawPath.setSuspended(true, "slider-two-down")
 
                 (pen.penSession as? PenSession.Write)?.let { it.convertFromIndex = it.points.size }
             }
             "twoUp" -> {
                 sliderTwoDown = false
-                host.setDrawPathSuspended(false, "slider-two-up")
+                host.drawPath.setSuspended(false, "slider-two-up")
 
                 presentation.release(BoardPresentation.Reason.SLIDER, linger = false)
             }
