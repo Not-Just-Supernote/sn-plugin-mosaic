@@ -180,15 +180,8 @@ internal class PenInput(private val board: BoardInteractionController) {
         val exit = event.actionMasked == MotionEvent.ACTION_HOVER_EXIT
         penHoverX = penX(event)
         penHoverY = penY(event)
-        if (exit) {
-            if (!penContact)
-            return
-        }
-        if (penContact) return
+        if (exit || penContact) return
         board.notes.setNoteHeaderHoverBlocked(board.notes.noteHeaderHit(penHoverX, penHoverY) || board.notes.noteOffPageHit(penHoverX, penHoverY))
-        if (board.eraserMode) {
-        }
-
         reevaluateTrailColor("hover")
     }
 

@@ -65,9 +65,19 @@ class BoardInteractionController(
 
     internal val viewportTmp = FloatArray(2)
 
-    // ── Notipal 浮窗拖动 ──
-    // 与双指平移一致：白板上走 PAN_ZOOM 同款显示（A2 + 灰卡临时白底 + flat），
-    // 笔记卡片里只切 A2 刷新、不改卡片显示；松手后按各自的 settle 恢复。
+    // The parts of the controller. They hold no reference to each other at construction, so their order does not matter.
+    internal val noteShots = NoteShots(this)
+    internal val inkling = InklingBridge(this)
+    internal val trailCleanup = CardTrailCleanup(this)
+    internal val textEditing = CardTextEditing(this)
+    internal val selection = SelectionController(this)
+    internal val transforms = SelectionTransforms(this)
+    internal val notes = NoteSession(this)
+    internal val cardGestures = CardStrokeGestures(this)
+    internal val pen = PenInput(this)
+    internal val panZoom = PanZoomGesture(this)
+    internal val touch = TouchInput(this)
+    internal val cardCommands = CardCommands(this)
 
     // At launch the board draws Kotlin's cached scene until JS has read board.mosaic, then reopens a saved note
     // from it at once. Nothing is loaded when the scene is already in memory.
@@ -519,10 +529,9 @@ class BoardInteractionController(
         when (state) {
             InputRouter.PenState.HOVER -> {
                 pen.penHovering = value
-                if (!value && !pen.penContact)
-                else when (touch.fingerGesture) {
+                // The pen coming near settles a two-finger hold and ends a pinch.
+                if (value || pen.penContact) when (touch.fingerGesture) {
                     is FingerGesture.TwoCandidate -> touch.settleTwoCandidate("hover-enter")
-
                     is FingerGesture.PanZoom -> touch.yieldPanZoomToPen("hover-enter")
                     else -> {}
                 }
@@ -845,8 +854,7 @@ class BoardInteractionController(
         Log.i(TAG, "locate note card=${card.id} at (${card.x},${card.y}) scale=$scale")
     }
 
-    internal val noteShots = NoteShots(this)
-
+    // Requests from outside that a part handles.
     fun focusNoteShot(json: String) = noteShots.focus(json)
 
     fun renderNoteShot(json: String, done: (WritableMap?) -> Unit) = noteShots.render(json, done)
@@ -855,33 +863,11 @@ class BoardInteractionController(
 
     override fun onDeleteNoteLink(shotId: String) = noteShots.deleteLink(shotId)
 
-    internal val inkling = InklingBridge(this)
-
-    internal val trailCleanup = CardTrailCleanup(this)
-
-    internal val textEditing = CardTextEditing(this)
-
-    internal val selection = SelectionController(this)
-
     override fun onSelectBelow() = selection.toggleSelectBelow()
-
-    internal val transforms = SelectionTransforms(this)
-
-    internal val notes = NoteSession(this)
 
     override fun onConvertCardToNote() = notes.convertCardToNote()
 
-    internal val cardGestures = CardStrokeGestures(this)
-
-    internal val pen = PenInput(this)
-
-    internal val panZoom = PanZoomGesture(this)
-
-    internal val touch = TouchInput(this)
-
     override fun onTouch(frame: InputRouter.TouchFrame) = touch.handle(frame)
-
-    internal val cardCommands = CardCommands(this)
 
     override fun onDeleteSelectedCard() = cardCommands.deleteSelectedCard()
 

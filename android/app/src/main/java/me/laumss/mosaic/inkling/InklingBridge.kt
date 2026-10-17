@@ -46,6 +46,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
         MosaicEinkRefreshModule.resetNative(INKLING_DRAG_EINK_OWNER)
     }
 
+    // Notipal 浮窗拖动：白板上和双指平移一样显示（A2、运动配方、扁平卡片），笔记卡片里只切 A2 刷新；松手后按各自的 settle 恢复。
     fun setOverlayDrag(active: Boolean, reason: String) {
         board.handler.removeCallbacks(dragTimeoutTask)
         if (active) board.handler.postDelayed(dragTimeoutTask, INKLING_DRAG_MAX_MS)
