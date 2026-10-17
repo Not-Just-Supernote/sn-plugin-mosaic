@@ -419,8 +419,8 @@ internal class SelectionController(private val board: BoardInteractionController
             "trash" -> deleteLassoSelection()
             "copy" -> copyLassoSelection()
             "note" -> board.notes.convertCardToNote()
-            "black" -> board.toggleSelectedCardBlack()
-            "recognize" -> board.onRecognizeLasso()
+            "black" -> board.cardCommands.toggleSelectedCardBlack()
+            "recognize" -> board.cardCommands.recognizeSelection()
             "shot" -> board.noteShots.insertSelection()
             "edit-text" -> {
                 val card = lasso?.cardIds?.singleOrNull()?.let { BoardEngine.cards[it] }
@@ -502,7 +502,7 @@ internal class SelectionController(private val board: BoardInteractionController
         synchronized(BoardEngine.lock) {
             for (id in sel.strokeIds) BoardEngine.strokes[id]?.let { change.stroke(it, null) }
             if (sel.strokeIds.isEmpty()) {
-                for (id in sel.cardIds) board.collectCardRemoval(id, change)
+                for (id in sel.cardIds) board.cardCommands.collectCardRemoval(id, change)
             }
         }
         setLasso(null)

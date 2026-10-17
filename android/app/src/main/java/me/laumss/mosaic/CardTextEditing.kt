@@ -29,7 +29,7 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
         val original = card.content
         val note = card.kind == "note"
 
-        val below = if (note) board.cardsBelow(card) else emptyList()
+        val below = if (note) board.cardCommands.cardsBelow(card) else emptyList()
         var finished = false
 
         val darkText = !note && card.colored
@@ -46,7 +46,7 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
                     val next = grownToFit(current.withFontScale(nextFontLevel(current.fontScale, step)), current.height)
                     val change = BoardHistory.Change("card-font-live")
                     if (!next.sameGeometry(current)) change.card(current, next)
-                    board.pushCardsBelow(change, below, next.height - card.height)
+                    board.cardCommands.pushCardsBelow(change, below, next.height - card.height)
                     board.applyChange(change, record = false)
                     next.fontScale
                 }
@@ -64,7 +64,7 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
                     val next = if (note) withNoteHeader(current, markdown) else grownToFit(current.withContent(markdown), card.height)
                     val change = BoardHistory.Change("card-text-edit-live")
                     if (!next.sameGeometry(current)) change.card(current, next)
-                    board.pushCardsBelow(change, below, next.height - card.height)
+                    board.cardCommands.pushCardsBelow(change, below, next.height - card.height)
                     board.applyChange(change, record = false)
                 }
             },

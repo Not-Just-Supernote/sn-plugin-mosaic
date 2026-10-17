@@ -61,6 +61,8 @@ internal class TouchInput(private val board: BoardInteractionController) {
 
     private var launcherPullStartY = Float.NaN
 
+    private val twoCandidateTimeout = Runnable { settleTwoCandidate("hold") }
+
     internal fun viewportGestureActive(): Boolean =
         fingerGesture is FingerGesture.PanZoom || fingerGesture is FingerGesture.SurfaceScroll
 
@@ -464,8 +466,6 @@ internal class TouchInput(private val board: BoardInteractionController) {
         fingers.clear()
         Log.i(TAG_FINGER, "gestures cancelled reason=$reason")
     }
-
-    private val twoCandidateTimeout = Runnable { settleTwoCandidate("hold") }
 
     private fun fallbackFromTwoCandidate(a: Finger, b: Finger, reason: String) {
         if (board.pen.penContact || board.pen.penHovering || a.penPriority || b.penPriority) {

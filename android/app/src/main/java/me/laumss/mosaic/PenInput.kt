@@ -43,6 +43,10 @@ internal class PenInput(private val board: BoardInteractionController) {
     var penMoveSession: MoveSession? = null
         private set
 
+    private var trailCause = "none"
+
+    private val hitBuffer = ArrayList<BoardEngine.StrokeRec>()
+
     private fun penX(e: MotionEvent): Float = e.x + InkAlign.offsetX
 
     private fun penY(e: MotionEvent): Float = e.y + InkAlign.offsetY
@@ -187,8 +191,6 @@ internal class PenInput(private val board: BoardInteractionController) {
         trailWhite = want
         board.host.setTrailWhite(want, "$reason:$trailCause")
     }
-
-    private var trailCause = "none"
 
     private fun trailWantsWhite(wx: Float, wy: Float): Boolean {
         trailCause = "none"
@@ -564,8 +566,6 @@ internal class PenInput(private val board: BoardInteractionController) {
         val screenMax = maxRasterWidth * board.density * BoardEngine.scale
         Log.i(BoardInteractionController.TAG_PEN, "UP committed stroke ${s.id} style=${board.penStyle.name} stdWidth=${board.penWidth} drawPathWidth=$committedDrawPathWidth pressureRange=$minPressure..$maxPressure rasterWorldRange=$minRasterWidth..$maxRasterWidth rasterScreenPxRange=$screenMin..$screenMax nibAngle=${rec.nibAngle} points=${s.points.size / 2} space=${s.space} ink=${Integer.toHexString(ink)}")
     }
-
-    private val hitBuffer = ArrayList<BoardEngine.StrokeRec>()
 
     private fun eraseAt(session: PenSession.Erase, wx: Float, wy: Float) {
         hitBuffer.clear()

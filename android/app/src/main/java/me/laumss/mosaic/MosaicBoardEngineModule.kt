@@ -128,7 +128,7 @@ class MosaicBoardEngineModule(
 
     @ReactMethod
     fun createRecognizedTextCard(viewTag: Int, text: String) {
-        withView(viewTag) { it.controller.createRecognizedTextCard(text) }
+        withView(viewTag) { it.controller.cardCommands.createRecognizedTextCard(text) }
     }
 
     @ReactMethod

@@ -23,12 +23,12 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
         MosaicEinkRefreshModule.resetNative(NOTE_SCROLL_EINK_OWNER)
     }
 
+    private var armed = false
+
     internal fun resetNoteScrollMode() {
         board.handler.removeCallbacks(noteScrollResetTask)
         MosaicEinkRefreshModule.resetNative(NOTE_SCROLL_EINK_OWNER)
     }
-
-    private var armed = false
 
     private fun recordCleanupPosition(g: FingerGesture.PanZoom) {
         if (!board.surface.showsBoardChrome) return

@@ -23,8 +23,6 @@ internal class NoteSession(private val board: BoardInteractionController) {
 
     internal var notesDirectory: String = ""
 
-    internal class SuspendedBoard(val scene: BoardEngine.SceneSnapshot, val history: BoardHistory, val lasso: LassoSelection?)
-
     internal var suspendedBoard: SuspendedBoard? = null
 
     internal var currentNoteHeader: String? = null
@@ -42,6 +40,11 @@ internal class NoteSession(private val board: BoardInteractionController) {
 
     // Bottom of the zoomed-out note page in page units; infinite on the board.
     private var notePageBottom = Float.POSITIVE_INFINITY
+
+    // Toolbar height the note's top inset was last laid out with.
+    private var noteToolbarInset = 0f
+
+    internal class SuspendedBoard(val scene: BoardEngine.SceneSnapshot, val history: BoardHistory, val lasso: LassoSelection?)
 
     /** The plugin is closing inside a note: save it, and put the board scene back for the scene cache. */
     fun leaveOnDetach() {
@@ -191,7 +194,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
 
                     val entry = noteEntryCard?.takeIf { it.id == card.id } ?: card
                     val change = BoardHistory.Change("note-resize").card(card, resized)
-                    board.pushCardsBelow(change, board.cardsBelow(entry), resized.height - entry.height)
+                    board.cardCommands.pushCardsBelow(change, board.cardCommands.cardsBelow(entry), resized.height - entry.height)
                     board.applyChange(change, record = false)
                     BoardEngine.mutate { invalidateAll() }
                 }
@@ -292,7 +295,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
         if (suspendedBoard != null || board.surfaceSwitching || notesDirectory.isBlank()) return
         var source = board.selection.selectedCardId?.let { BoardEngine.cards[it] } ?: return
         if (source.kind == "note" || source.kind == "image") return
-        board.normalizeColoredCardToDefault(source)?.let { pre ->
+        board.cardCommands.normalizeColoredCardToDefault(source)?.let { pre ->
             board.applyChange(pre, record = true)
             source = BoardEngine.cards[source.id] ?: return
         }
@@ -322,16 +325,13 @@ internal class NoteSession(private val board: BoardInteractionController) {
                     val change = BoardHistory.Change("card-to-note")
                     synchronized(BoardEngine.lock) { BoardEngine.cardStrokes[source.id]?.forEach { change.stroke(it, null) } }
                     change.card(source, note)
-                    board.pushCardsBelow(change, board.cardsBelow(source), note.height - source.height)
+                    board.cardCommands.pushCardsBelow(change, board.cardCommands.cardsBelow(source), note.height - source.height)
                     board.applyChange(change, record = true)
                     board.selection.selectSingleCard(note); board.scheduleChromeUpdate()
                 }
             }
         }
     }
-
-    // Toolbar height the note's top inset was last laid out with.
-    private var noteToolbarInset = 0f
 
     // When the toolbar hides or shows in a note, a page resting at its top follows the toolbar edge,
     // so hiding it leaves no blank band and showing it does not cover the header.
