@@ -101,7 +101,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
 
     private fun enterSurface(next: BoardSurface, scene: BoardEngine.SceneSnapshot) {
         board.trailCleanup.cancel("surface-change")
-        if (board.surface !== next) board.resetNoteScrollMode()
+        if (board.surface !== next) board.panZoom.resetNoteScrollMode()
         if (board.surface !== next) board.inkling.invalidateClipboardWork("surface:${next.name}")
         board.surface = next
 

@@ -1,7 +1,6 @@
 package me.laumss.mosaic
 
 import android.content.Intent
-import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
 import android.os.Handler
@@ -26,17 +25,11 @@ class BoardInteractionController(
         const val TAG = "MosaicInteraction"
         const val TAG_PEN = "MosaicPen"
         private const val TAG_FINGER = "MosaicFinger"
-        private const val TAG_PAN = "MosaicPan"
         const val TAG_LASSO = "MosaicLasso"
         private const val TAG_TOOL = "MosaicTool"
         private const val TAG_TWO = "MosaicTwoFinger"
 
         const val PEN_WIDTH_DP = 2f
-
-        private const val ZOOM_SNAP_RATIO = 0.03f
-        // Releasing a note pinch this close to 100% snaps back to the page filling the width.
-        private const val NOTE_ZOOM_SNAP_RATIO = 0.08f
-        private const val NOTE_PAN_ZOOM_LOCK_SLOP_DP = 12f
 
         // Longest the board stays unpainted at launch while a saved note reopens.
         private const val NOTE_RESTORE_PAINT_HOLD_MS = 2000L
@@ -67,7 +60,6 @@ class BoardInteractionController(
         const val TWO_FINGER_DOUBLE_TAP_DIST_DP = 120f
 
         private const val EINK_OWNER = "gesture"
-        private const val NOTE_SCROLL_EINK_OWNER = "note-scroll"
         const val NOTE_SCROLL_SETTLE_MS = 400L
 
         const val GESTURE_SETTLE_MS = 600L
@@ -104,15 +96,6 @@ class BoardInteractionController(
     internal var surfaceSwitching = false
 
     internal val viewportTmp = FloatArray(2)
-
-    private val noteScrollResetTask = Runnable {
-        MosaicEinkRefreshModule.resetNative(NOTE_SCROLL_EINK_OWNER)
-    }
-
-    internal fun resetNoteScrollMode() {
-        handler.removeCallbacks(noteScrollResetTask)
-        MosaicEinkRefreshModule.resetNative(NOTE_SCROLL_EINK_OWNER)
-    }
 
     // ── Notipal 浮窗拖动 ──
     // 与双指平移一致：白板上走 PAN_ZOOM 同款显示（A2 + 灰卡临时白底 + flat），
@@ -193,10 +176,7 @@ class BoardInteractionController(
 
     internal var sliderTwoDown = false
 
-
     internal val fingers = LinkedHashMap<Int, Finger>()
-
-
 
     internal var fingerGesture: FingerGesture = FingerGesture.Idle
     private var cardLongPressTask: Runnable? = null
@@ -220,7 +200,6 @@ class BoardInteractionController(
     private var regions: List<SparseNavigation.Region> = emptyList()
     private var chromeUpdatePosted = false
     private var launcherPullStartY = Float.NaN
-    private var panZoomArmed = false
 
     internal val presentation by lazy {
         BoardPresentation(handler, content, { surface.showsBoardChrome }, EINK_OWNER, GESTURE_SETTLE_MS).also {
@@ -281,7 +260,7 @@ class BoardInteractionController(
         SceneCache.onJsSceneApplied = null
         // The view drops its suspend request itself once the system ink is released.
         releasePenForJsScene("detach", notifyHost = false)
-        resetNoteScrollMode()
+        panZoom.resetNoteScrollMode()
         textEditing.close()
         releasePaintHold("detach")
         noteShots.reset()
@@ -650,31 +629,6 @@ class BoardInteractionController(
         change.card(card, null)
     }
 
-    private fun recordPanZoomCleanupPosition(g: FingerGesture.PanZoom) {
-        if (!surface.showsBoardChrome) return
-        val bounds = Rect()
-        val px = RectF()
-        val strokes = ArrayList<BoardEngine.StrokeRec>()
-        synchronized(BoardEngine.lock) {
-            for (card in BoardEngine.cards.values) {
-                if (card.colored) continue
-                worldRectToPx(BoardEngine.cardDirtyBounds(card), px).roundOut(bounds)
-                if (bounds.intersect(0, 0, content.width, content.height)) g.cleanupTrail.op(bounds, Region.Op.UNION)
-            }
-            // Capture ink at the old viewport before each pan/zoom step, including
-            // boards containing only handwriting. The driver selects settled white
-            // pixels after the final frame, preserving ink at its new position.
-            BoardEngine.queryCanvasStrokes(viewWorld(), strokes)
-            for (stroke in strokes) {
-                if (stroke.connectionId?.let { BoardEngine.necks[it]?.dark } == true) continue
-                val ends = stroke.threadEnds
-                if (ends != null && BoardEngine.cards[ends.first]?.colored == true && BoardEngine.cards[ends.second]?.colored == true) continue
-                worldRectToPx(BoardEngine.strokeWorldBounds(stroke), px).roundOut(bounds)
-                if (bounds.intersect(0, 0, content.width, content.height)) g.cleanupTrail.op(bounds, Region.Op.UNION)
-            }
-        }
-    }
-
     override fun onTouch(frame: InputRouter.TouchFrame) {
         if (frame.action == InputRouter.ACTION_DOWN || frame.action == InputRouter.ACTION_POINTER_DOWN) trailCleanup.cancel("touch-down")
         if (maybeCloseFromLauncherPull(frame)) return
@@ -811,7 +765,7 @@ class BoardInteractionController(
             if (fingers.size > 2) { fingerGesture = FingerGesture.Idle; return }
             if (!touchEnabled && gestureToolOf(settings.screenGesture) == null) { fingerGesture = FingerGesture.Idle; return }
             if (abs(a.downAt - b.downAt) > TWO_FINGER_PAIR_WINDOW_MS || gestureToolOf(settings.screenGesture) == null) {
-                beginPanZoom(a, b)
+                panZoom.begin(a, b)
             } else {
                 fingerGesture = FingerGesture.TwoCandidate(a.id, b.id, now)
                 handler.postDelayed(twoCandidateTimeout, TWO_FINGER_CANDIDATE_HOLD_MS)
@@ -966,7 +920,7 @@ class BoardInteractionController(
                     fallbackFromTwoCandidate(a, b, "moved")
                 }
             }
-            is FingerGesture.PanZoom -> updatePanZoom(g)
+            is FingerGesture.PanZoom -> panZoom.update(g)
             is FingerGesture.SurfaceScroll -> {
                 val f = fingers[g.fingerId] ?: return
                 val dy = (f.y - g.startY) / density
@@ -1032,11 +986,11 @@ class BoardInteractionController(
             }
             is FingerGesture.PanZoom -> {
                 if (id == g.a || id == g.b) {
-                    endPanZoom(g, cleanOldPositions = !cancelled)
+                    panZoom.end(g, cleanOldPositions = !cancelled)
 
                     if (fingers.size >= 2) {
                         val (a, b) = firstTwo()
-                        beginPanZoom(a, b)
+                        panZoom.begin(a, b)
                     } else fingerGesture = FingerGesture.Idle
                 }
             }
@@ -1093,7 +1047,7 @@ class BoardInteractionController(
         handler.removeCallbacks(twoCandidateTimeout)
         fingerMoveSession?.let { transforms.cancelMoveSession(it) }
         fingerMoveSession = null
-        (fingerGesture as? FingerGesture.PanZoom)?.let { endPanZoom(it, cleanOldPositions = false) }
+        (fingerGesture as? FingerGesture.PanZoom)?.let { panZoom.end(it, cleanOldPositions = false) }
         if (fingerGesture === FingerGesture.ScreenTool) {
             applyTransition(arbiter.releaseOverride(ToolArbiter.Source.SCREEN), "screen-cancel")
             presentation.release(BoardPresentation.Reason.SCREEN_TOOL, linger = false)
@@ -1116,7 +1070,7 @@ class BoardInteractionController(
             Log.i(TAG_TWO, "candidate $reason → blocked by pen proximity")
             return
         }
-        if (touchEnabled) beginPanZoom(a, b) else fingerGesture = FingerGesture.Idle
+        if (touchEnabled) panZoom.begin(a, b) else fingerGesture = FingerGesture.Idle
     }
 
     private fun adoptScreenTool(a: Finger, b: Finger, reason: String): Boolean {
@@ -1151,181 +1105,17 @@ class BoardInteractionController(
         val g = fingerGesture as? FingerGesture.PanZoom ?: return
         val a = fingers[g.a]
         val b = fingers[g.b]
-        endPanZoom(g, cleanOldPositions = false)
+        panZoom.end(g, cleanOldPositions = false)
         fingerGesture = FingerGesture.Idle
         if (a == null || b == null) return
         if (!adoptScreenTool(a, b, reason)) {
-            Log.i(TAG_PAN, "panzoom yielded to pen: no screen tool reason=$reason")
-        }
-    }
-
-    private fun beginPanZoom(a: Finger, b: Finger) {
-        trailCleanup.cancel("panzoom-begin")
-        val view = viewWorld()
-        val activeRegion = currentRegions().let { SparseNavigation.findActiveRegion(it, view) }
-        val neighbors = if (activeRegion == null) SparseNavigation.Neighbors.NONE else SparseNavigation.findNeighbors(currentRegions(), activeRegion)
-        val g = FingerGesture.PanZoom(
-            a.id, b.id,
-            BoardEngine.panX, BoardEngine.panY, BoardEngine.scale,
-            (a.x + b.x) / 2f, (a.y + b.y) / 2f, max(1f, hypot(b.x - a.x, b.y - a.y)),
-            activeRegion, neighbors,
-        )
-        fingerGesture = g
-        panZoomArmed = false
-
-        if (surface.showsBoardChrome) {
-            overlay.setLassoVisible(false)
-            presentation.acquire(BoardPresentation.Reason.PAN_ZOOM)
-        } else {
-            handler.removeCallbacks(noteScrollResetTask)
-            MosaicEinkRefreshModule.applyNative(MosaicEinkRefreshModule.MODE_A2, NOTE_SCROLL_EINK_OWNER)
-        }
-        armPanZoom()
-        val bnd = activeRegion?.bounds
-        val centerX = (view.centerX() / density - g.startPanX) / g.startScale
-        val centerY = (view.centerY() / density - g.startPanY) / g.startScale
-        Log.i(TAG_PAN, "begin surface=${surface.name} a=${a.id} b=${b.id} pan=(${g.startPanX},${g.startPanY}) centerWorld=($centerX,$centerY) scale=${g.startScale} region=${activeRegion != null} neighbors=${neighbors.any()} bounds=${bnd?.let { "(${it.left},${it.top},${it.right},${it.bottom})" }} worldView=(${view.width()},${view.height()})")
-    }
-
-    private fun armPanZoom() {
-        val g = fingerGesture as? FingerGesture.PanZoom ?: return
-        resnapPanZoom(g)
-        if (!panZoomArmed) {
-            panZoomArmed = true
-            // Notes zoom too now, so they also scale the cached frame instead of re-rastering tiles every frame.
-            content.setZoomPreview(true)
-
-            content.setGestureFreezeTiles(true)
-            content.setGestureThrottle(true)
-            Log.i(TAG_PAN, "armed pan=(${g.startPanX},${g.startPanY}) scale=${g.startScale}")
-        }
-    }
-
-    private fun resnapPanZoom(g: FingerGesture.PanZoom) {
-        val a = fingers[g.a] ?: return
-        val b = fingers[g.b] ?: return
-        g.startPanX = BoardEngine.panX
-        g.startPanY = BoardEngine.panY
-        g.startScale = BoardEngine.scale
-        g.startCenterX = (a.x + b.x) / 2f
-        g.startCenterY = (a.y + b.y) / 2f
-        g.startDistance = max(1f, hypot(b.x - a.x, b.y - a.y))
-    }
-
-    private fun updatePanZoom(g: FingerGesture.PanZoom) {
-        if (!panZoomArmed) return
-        val a = fingers[g.a] ?: return
-        val b = fingers[g.b] ?: return
-        val d = density
-        val cx = (a.x + b.x) / 2f
-        val cy = (a.y + b.y) / 2f
-        g.lastCenterX = cx
-        g.lastCenterY = cy
-        val dist = max(1f, hypot(b.x - a.x, b.y - a.y))
-        if (!surface.showsBoardChrome && g.lock == PanZoomLock.NONE) {
-            val spread = abs(dist - g.startDistance)
-            val travel = hypot(cx - g.startCenterX, cy - g.startCenterY)
-            val slop = NOTE_PAN_ZOOM_LOCK_SLOP_DP * d
-            if (spread < slop && travel < slop) return
-            g.lock = if (spread >= travel) PanZoomLock.ZOOM else PanZoomLock.PAN
-            // Start from here so the slop already travelled does not jump the page.
-            resnapPanZoom(g)
-            Log.i(TAG_PAN, "note gesture locked ${g.lock} spread=$spread travel=$travel")
-            return
-        }
-        val ratio = if (g.lock == PanZoomLock.PAN) 1f else dist / g.startDistance
-        val nextScale = surface.constrainScale(g.startScale * ratio, g.startScale)
-
-        val startCxDp = g.startCenterX / d
-        val startCyDp = g.startCenterY / d
-        val worldCx = (startCxDp - g.startPanX) / g.startScale
-        val worldCy = (startCyDp - g.startPanY) / g.startScale
-        // A locked zoom stays anchored where it started instead of following the fingers.
-        val anchorX = if (g.lock == PanZoomLock.ZOOM) startCxDp else cx / d
-        val anchorY = if (g.lock == PanZoomLock.ZOOM) startCyDp else cy / d
-        surface.constrainPan(anchorX - worldCx * nextScale, anchorY - worldCy * nextScale, nextScale, viewportTmp)
-
-        val panX = snapPanToPx(viewportTmp[0])
-        val panY = snapPanToPx(viewportTmp[1])
-
-        g.overscroll = null
-        if (panX != BoardEngine.panX || panY != BoardEngine.panY || nextScale != BoardEngine.scale) {
-            recordPanZoomCleanupPosition(g)
-        }
-        g.frames++
-        BoardEngine.setViewport(panX, panY, nextScale)
-        if (g.frames % 10 == 0) {
-            val centerX = (host.width / density / 2f - panX) / nextScale
-            val centerY = (host.height / density / 2f - panY) / nextScale
-            Log.i(TAG_PAN, "frame=${g.frames} centerWorld=($centerX,$centerY) scale=$nextScale pan=($panX,$panY)")
+            Log.i(PanZoomGesture.TAG_PAN, "panzoom yielded to pen: no screen tool reason=$reason")
         }
     }
 
     internal fun toolbarHeightWorld(): Float = chrome.toolbarHeightPx() / density
 
     internal fun snapPanToPx(panDp: Float): Float = Math.round(panDp * density) / density
-
-    private fun magneticZoom(scale: Float): Float {
-        val level = BoardGeometry.ZOOM_LEVELS[BoardGeometry.nearestZoomIndex(scale)]
-        return if (abs(level - scale) <= scale * ZOOM_SNAP_RATIO) level else scale
-    }
-
-    private fun endPanZoom(g: FingerGesture.PanZoom, cleanOldPositions: Boolean = true) {
-        if (cleanOldPositions && !g.cleanupTrail.isEmpty) recordPanZoomCleanupPosition(g)
-        var panX = BoardEngine.panX
-        var panY = BoardEngine.panY
-        var scale = BoardEngine.scale
-
-        val snapped = when {
-            scale == g.startScale -> scale
-            surface.showsBoardChrome -> magneticZoom(scale)
-            abs(scale - notes.notePageScale) <= notes.notePageScale * NOTE_ZOOM_SNAP_RATIO -> notes.notePageScale
-            else -> scale
-        }
-        if (snapped != scale) {
-            val zoomLocked = g.lock == PanZoomLock.ZOOM
-            val ax = (if (zoomLocked) g.startCenterX else g.lastCenterX) / density
-            val ay = (if (zoomLocked) g.startCenterY else g.lastCenterY) / density
-            val p = BoardGeometry.zoomAroundScreenPoint(panX, panY, scale, snapped, ax, ay)
-            surface.constrainPan(p[0], p[1], snapped, viewportTmp)
-            panX = snapPanToPx(viewportTmp[0]); panY = snapPanToPx(viewportTmp[1]); scale = snapped
-
-            BoardEngine.setViewport(panX, panY, scale)
-            Log.i(TAG_PAN, "snap scale ${g.startScale}->$scale")
-        }
-        content.setZoomPreview(false)
-        content.setGestureFreezeTiles(false)
-        content.setGestureThrottle(false)
-        overlay.setLassoVisible(true)
-        val over = g.overscroll
-        val region = g.region
-        if (over != null && region != null && over.distancePx >= SparseNavigation.JUMP_TRIGGER_PX) {
-            val target = when (over.direction) {
-                SparseNavigation.Direction.LEFT -> g.neighbors.left
-                SparseNavigation.Direction.RIGHT -> g.neighbors.right
-                SparseNavigation.Direction.UP -> g.neighbors.up
-                SparseNavigation.Direction.DOWN -> g.neighbors.down
-            }
-            if (target != null) {
-                val centered = SparseNavigation.panToCenterRect(target.bounds, host.width / density, host.height / density, scale)
-                panX = centered[0]
-                panY = centered[1]
-                Log.i(TAG_PAN, "jump ${over.direction} overscroll=${over.distancePx}")
-            }
-        }
-        commitViewport(panX, panY, scale)
-        selection.updateLassoOverlay()
-        panZoomArmed = false
-        presentation.release(BoardPresentation.Reason.PAN_ZOOM)
-        if (cleanOldPositions) trailCleanup.schedule(g.cleanupTrail, "pan-zoom")
-        if (!surface.showsBoardChrome) {
-            handler.removeCallbacks(noteScrollResetTask)
-            handler.postDelayed(noteScrollResetTask, NOTE_SCROLL_SETTLE_MS)
-        }
-        val centerX = (host.width / density / 2f - panX) / scale
-        val centerY = (host.height / density / 2f - panY) / scale
-        Log.i(TAG_PAN, "end frames=${g.frames} centerWorld=($centerX,$centerY) pan=($panX,$panY) scale=$scale")
-    }
 
     override fun onPenState(state: InputRouter.PenState, value: Boolean) {
         when (state) {
@@ -1383,7 +1173,7 @@ class BoardInteractionController(
         host.flushInkHandoff("manual-refresh")
         Log.i(TAG, "manual full refresh: exit lasso/eraser/gesture states ${arbiter.describe()} lasso=${selection.lasso != null}")
         cancelActiveInteractions("manual-refresh")
-        resetNoteScrollMode()
+        panZoom.resetNoteScrollMode()
         for (source in ToolArbiter.Source.values()) applyTransition(arbiter.forceExit(source), "manual-refresh")
         applyTransition(arbiter.clearBase(), "manual-refresh")
         selection.setLasso(null)
@@ -1423,7 +1213,7 @@ class BoardInteractionController(
         trailCleanup.resume("slider-finished")
     }
 
-    private fun currentRegions(): List<SparseNavigation.Region> {
+    internal fun currentRegions(): List<SparseNavigation.Region> {
         if (!regionsDirty) return regions
         val items = ArrayList<SparseNavigation.Item>()
         synchronized(BoardEngine.lock) {
@@ -1814,4 +1604,6 @@ class BoardInteractionController(
     internal val cardGestures = CardStrokeGestures(this)
 
     internal val pen = PenInput(this)
+
+    internal val panZoom = PanZoomGesture(this)
 }
