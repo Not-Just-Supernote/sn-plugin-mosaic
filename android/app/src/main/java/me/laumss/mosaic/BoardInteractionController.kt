@@ -49,7 +49,7 @@ class BoardInteractionController(
 
     internal var history = BoardHistory()
 
-    internal val whiteboard = WhiteboardSurface(emitter) { host.armCloseWatchdog("board-close", noteShots.sessionActive) }
+    internal val whiteboard = WhiteboardSurface(emitter) { host.closeWatchdog.arm("board-close", noteShots.sessionActive) }
 
     internal var surface: BoardSurface = whiteboard
 

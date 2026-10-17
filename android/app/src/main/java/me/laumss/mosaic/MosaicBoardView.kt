@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Point
-import android.graphics.RectF
 import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.IBinder
@@ -23,11 +22,11 @@ import java.util.concurrent.atomic.AtomicLong
 
 @SuppressLint("ViewConstructor")
 class MosaicBoardView(
-    private val reactContext: ReactContext,
+    internal val reactContext: ReactContext,
 ) : FrameLayout(reactContext), InklingLink.Host {
     companion object {
         private val PEN_BLOCK_REASSERT_MS = longArrayOf(0L, 60L, 200L, 500L)
-        private const val TAG = "MosaicBoardView"
+        const val TAG = "MosaicBoardView"
         private const val NATIVE_BUILD_TAG = "pressure-clock-20260928a"
 
         private const val RETRY_INTERVAL_MS = 500L
@@ -54,12 +53,6 @@ class MosaicBoardView(
         // 卡片手势抬笔后多久整屏刷新，清掉系统笔迹。
         private const val TRAIL_CLEAR_REFRESH_DELAY_MS = 600L
 
-        private const val CLOSE_WATCHDOG_MS = 3000L
-
-        private const val CLOSE_WATCHDOG_NOTE_SHOT_MS = 8000L
-
-        private const val HOST_PLUGIN_MANAGER_MODULE = "NativePluginManager"
-
         private const val DEVICE_TYPE_A6X2 = 4
     }
 
@@ -78,6 +71,7 @@ class MosaicBoardView(
     }
 
     var deviceType: Int = -1
+
     var notesDirectory: String = ""
         set(value) { field = value; controller.notes.setNotesDirectory(value) }
 
@@ -98,6 +92,7 @@ class MosaicBoardView(
         set(value) = controller.setTouchEnabled(value, fromJs = true)
 
     private var boardTranslucent = false
+
     fun setBoardTranslucent(translucent: Boolean) {
         if (boardTranslucent == translucent) return
         boardTranslucent = translucent
@@ -151,20 +146,25 @@ class MosaicBoardView(
         }
 
     private val contentView = BoardContentView(reactContext)
+
     private val grayRestore = EinkGrayRestore(contentView, "board", eligible = {
         InklingLink.isBoardSurface() && !stylusContact &&
             !contentView.isMovingCards && !contentView.isDeferringRefresh && !contentView.holdPaint
     })
+
     private val inkView = TransientInkView(reactContext)
     private val overlayView = InteractionOverlayView(reactContext)
     private val chromeView = BoardChromeView(reactContext)
+
     private val commandEmitter = BoardCommandEmitter(reactContext).also { emitter ->
         emitter.viewMetricsDp = {
             val d = resources.displayMetrics.density
             floatArrayOf(width / d, height / d, chromeView.toolbarHeightPx() / d)
         }
     }
+
     val controller = BoardInteractionController(this, contentView, inkView, overlayView, chromeView, commandEmitter)
+    internal val closeWatchdog = CloseWatchdog(this)
     private var sceneChangeCounter = 0
     private var stylusContact = false
 
@@ -180,12 +180,13 @@ class MosaicBoardView(
     private var plainStrokeCommit = false
     private var plainStrokeCommitted = false
     private var lastPenEventAt = 0L
+
     private val inkHandoffTask: Runnable = Runnable {
         if (!inkHandoffPending) return@Runnable
         val sincePen = SystemClock.uptimeMillis() - lastPenEventAt
         if (stylusContact && sincePen < INK_CONTACT_STALE_MS) {
             Log.i(TAG, "ink handoff idle: pen in contact, retry sincePen=$sincePen")
-            handler.postDelayed(inkHandoffTask, INK_HANDOFF_RETRY_MS)
+            mainHandler.postDelayed(inkHandoffTask, INK_HANDOFF_RETRY_MS)
             return@Runnable
         }
         if (stylusContact) {
@@ -196,6 +197,7 @@ class MosaicBoardView(
         Log.i(TAG, "ink handoff idle: finalize")
         finalizeInkSession("idle")
     }
+
     private var trailDiscardedDuringContact = false
     private var strokeSceneChangedDuringContact = false
 
@@ -212,11 +214,12 @@ class MosaicBoardView(
         }
     }
 
-    private val handler = Handler(Looper.getMainLooper())
+    internal val mainHandler = Handler(Looper.getMainLooper())
     private var configureGeneration = 0
     private var rotationReconfigureToken = 0
-    @Volatile private var attached = false
+    @Volatile internal var attached = false
     private var configured = false
+
     private var drawPathActive = false
         set(value) {
             field = value
@@ -227,6 +230,7 @@ class MosaicBoardView(
     private var drawPathBinder: IBinder? = null
 
     private enum class SyncUrgency { NONE, IDLE, PROMPT }
+
     private var backgroundSyncUrgency = SyncUrgency.NONE
     private var backgroundSyncTask: Runnable? = null
 
@@ -263,18 +267,23 @@ class MosaicBoardView(
             trailWhite -> DrawPathClient.PEN_COLOR_WHITE
             else -> DrawPathClient.PEN_COLOR_BLACK
         }
+
     private var lastWriteInfoRefreshAt = 0L
     private var lastObservedRotation = -1
+
     private val displayManager by lazy {
         context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
     }
+
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = Unit
+
         override fun onDisplayRemoved(displayId: Int) = Unit
+
         override fun onDisplayChanged(displayId: Int) {
             if (!attached || displayId != display?.displayId) return
 
-            handler.post {
+            mainHandler.post {
                 if (!attached) return@post
                 Log.i(TAG, "display changed: rotation=${display?.rotation}")
                 requestRotationReconfigure("displayChanged")
@@ -286,9 +295,10 @@ class MosaicBoardView(
         override fun run() {
             if (!attached) return
             refreshWriteInfo("contextWatch")
-            handler.postDelayed(this, 1500L)
+            mainHandler.postDelayed(this, 1500L)
         }
     }
+
     private val orientationWatch = object : Runnable {
         override fun run() {
             if (!attached) return
@@ -297,14 +307,15 @@ class MosaicBoardView(
                 Log.i(TAG, "orientation watcher: $lastObservedRotation -> $rotation")
                 requestRotationReconfigure("orientationWatcher")
             }
-            handler.postDelayed(this, 250L)
+            mainHandler.postDelayed(this, 250L)
         }
     }
+
     private val configurationCallback = object : ComponentCallbacks {
         override fun onConfigurationChanged(newConfig: Configuration) {
             if (!attached) return
 
-            handler.postDelayed({
+            mainHandler.postDelayed({
                 requestRotationReconfigure("applicationConfigurationChanged")
             }, 100L)
         }
@@ -336,7 +347,7 @@ class MosaicBoardView(
                 controller.onSceneOrViewportChanged(reason)
                 noteContentChanged(reason, moved)
             } else {
-                handler.post {
+                mainHandler.post {
                     sceneChangeCounter++
                     controller.onSceneOrViewportChanged(reason)
                     noteContentChanged(reason, moved)
@@ -354,7 +365,7 @@ class MosaicBoardView(
         InputReader.ensureBoardReader(context)
         InklingLink.attach(context, this)
         publishBoardVisibility(true)
-        handler.post {
+        mainHandler.post {
             if (!attached) return@post
             PortraitLock.activate(this)
         }
@@ -366,15 +377,15 @@ class MosaicBoardView(
         controller.attach()
 
         contentView.requestInitialRaster()
-        handler.postDelayed({
+        mainHandler.postDelayed({
             if (attached) contentView.requestInitialRaster()
         }, 250L)
         context.applicationContext.registerComponentCallbacks(configurationCallback)
-        displayManager.registerDisplayListener(displayListener, handler)
+        displayManager.registerDisplayListener(displayListener, mainHandler)
         publishHostRotation()
         lastObservedRotation = display?.rotation ?: 0
-        handler.post(orientationWatch)
-        handler.postDelayed(writeContextWatch, 1500L)
+        mainHandler.post(orientationWatch)
+        mainHandler.postDelayed(writeContextWatch, 1500L)
         refreshWriteInfo("attach", force = true)
         scheduleConfigure("attach")
     }
@@ -391,7 +402,7 @@ class MosaicBoardView(
         writeInfoRequestId.incrementAndGet()
         writeContext = null
         lastWriteInfoSent = null
-        handler.removeCallbacksAndMessages(null)
+        mainHandler.removeCallbacksAndMessages(null)
         inkView.release()
         DrawPathGate.detach()
         val releaseBinder = drawPathBinder ?: DrawPathClient.getBinder()
@@ -435,7 +446,7 @@ class MosaicBoardView(
         Thread({
             val dirty = NoteLinks.reload(file)
             if (dirty.isNotEmpty()) contentView.markWorldDirty(dirty)
-            handler.post { chromeView.refreshNoteLinks() }
+            mainHandler.post { chromeView.refreshNoteLinks() }
         }, "MosaicNoteLinks").start()
     }
 
@@ -444,8 +455,8 @@ class MosaicBoardView(
         contentView.forceRedrawAfterHostRefresh()
         if (InklingLink.isBoardSurface()) grayRestore.request("manual-key")
         else {
-            handler.postDelayed({ if (attached) contentView.forceRedrawAfterHostRefresh() }, 350L)
-            handler.postDelayed({ if (attached) contentView.postInvalidateOnAnimation() }, 1000L)
+            mainHandler.postDelayed({ if (attached) contentView.forceRedrawAfterHostRefresh() }, 350L)
+            mainHandler.postDelayed({ if (attached) contentView.postInvalidateOnAnimation() }, 1000L)
         }
     }
 
@@ -479,7 +490,7 @@ class MosaicBoardView(
     override fun onConfigurationChanged(newConfig: Configuration?) {
         super.onConfigurationChanged(newConfig)
         if (!attached) return
-        handler.postDelayed({
+        mainHandler.postDelayed({
             requestRotationReconfigure("viewConfigurationChanged")
         }, 100L)
     }
@@ -493,7 +504,7 @@ class MosaicBoardView(
         }
         if (!attached || !hasWindowFocus) return
         controller.trailCleanup.resume("focus-gained")
-        handler.postDelayed({
+        mainHandler.postDelayed({
             if (attached && hasWindowFocus) {
                 requestRotationReconfigure("windowFocusGained")
             }
@@ -564,7 +575,7 @@ class MosaicBoardView(
 
     override fun onInklingToolbarRectChanged() {
         if (!attached) return
-        handler.post {
+        mainHandler.post {
             if (!attached) return@post
             rearmDrawPath("inkling-toolbar-rect")
         }
@@ -572,7 +583,7 @@ class MosaicBoardView(
 
     override fun onInklingOverlayDragChanged(active: Boolean) {
         if (!attached) return
-        handler.post {
+        mainHandler.post {
             if (!attached) return@post
             controller.inkling.setOverlayDrag(active, "inkling")
         }
@@ -580,7 +591,7 @@ class MosaicBoardView(
 
     override fun onInklingCloseRequested() {
         if (!attached) return
-        handler.post {
+        mainHandler.post {
             if (!attached) return@post
             controller.notes.closeForInkling()
         }
@@ -588,7 +599,7 @@ class MosaicBoardView(
 
     override fun onInklingPasteStrokesRequested() {
         if (!attached) return
-        handler.post {
+        mainHandler.post {
             if (!attached) return@post
             if (!InklingLink.isInkSurface()) {
                 Log.i(TAG, "inkling paste deferred surface=${InklingLink.currentSurface()}")
@@ -600,7 +611,7 @@ class MosaicBoardView(
 
     override fun onInklingClearSelectionRequested(delete: Boolean) {
         if (!attached) return
-        handler.post {
+        mainHandler.post {
             if (!attached) return@post
             if (!InklingLink.isInkSurface()) {
                 Log.i(TAG, "inkling clear-selection deferred surface=${InklingLink.currentSurface()} delete=$delete")
@@ -612,7 +623,7 @@ class MosaicBoardView(
 
     override fun onInklingTextCardRequested(text: String, anchorScreenX: Int, anchorScreenY: Int) {
         if (!attached) return
-        handler.post {
+        mainHandler.post {
             if (!attached) return@post
             if (!InklingLink.isBoardSurface()) {
                 Log.i(TAG, "inkling text-card deferred surface=${InklingLink.currentSurface()}")
@@ -623,7 +634,7 @@ class MosaicBoardView(
     }
 
     override fun onInklingPaletteRequested(requestId: String, data: String?) {
-        handler.post {
+        mainHandler.post {
             val result = if (attached && InklingLink.isBoardSurface()) {
                 try {
                     if (data == null) controller.inkling.paletteSelectionInfo()
@@ -639,7 +650,7 @@ class MosaicBoardView(
 
     override fun onInklingInboxReady() {
         if (!attached) return
-        handler.post {
+        mainHandler.post {
             if (!attached) return@post
             controller.notes.preparePendingNoteImport()
             if (!InklingLink.isBoardSurface()) {
@@ -654,7 +665,7 @@ class MosaicBoardView(
 
     override fun onInklingSurfaceChanged(surface: String, noteRef: String?) {
         if (!attached) return
-        handler.post {
+        mainHandler.post {
             if (!attached) return@post
 
             val data = Arguments.createMap().apply {
@@ -666,61 +677,6 @@ class MosaicBoardView(
                 .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
                 .emit(BOARD_VISIBILITY_EVENT, data)
             Log.i(TAG, "surface event surface=$surface noteRef=$noteRef")
-        }
-    }
-
-    private val closeWatchdog = Runnable {
-        Log.i(TAG, "[CloseWatchdog] fired attached=$attached sinceArmMs=${SystemClock.uptimeMillis() - closeWatchdogArmedUptime}")
-        if (!attached) return@Runnable
-        Log.w(TAG, "[CloseWatchdog] JS did not close within ${closeWatchdogDelayMs}ms; forcing host closePluginView")
-        forceHostClosePluginView("watchdog")
-    }
-    private var closeWatchdogArmedUptime = 0L
-    private var closeWatchdogArmedWall = 0L
-    private var closeWatchdogDelayMs = CLOSE_WATCHDOG_MS
-
-    private val closeHeartbeat = object : Runnable {
-        override fun run() {
-            val up = SystemClock.uptimeMillis() - closeWatchdogArmedUptime
-            val wall = System.currentTimeMillis() - closeWatchdogArmedWall
-            Log.i(TAG, "[CloseWatchdog] tick uptimeMs=$up wallMs=$wall drift=${wall - up} attached=$attached")
-            if (attached) handler.postDelayed(this, 1000L)
-        }
-    }
-
-    fun armCloseWatchdog(reason: String, noteShotSession: Boolean = false) {
-        if (!attached) return
-        closeWatchdogArmedUptime = SystemClock.uptimeMillis()
-        closeWatchdogArmedWall = System.currentTimeMillis()
-        closeWatchdogDelayMs = if (noteShotSession) CLOSE_WATCHDOG_NOTE_SHOT_MS else CLOSE_WATCHDOG_MS
-        handler.removeCallbacks(closeWatchdog)
-        handler.removeCallbacks(closeHeartbeat)
-        handler.postDelayed(closeWatchdog, closeWatchdogDelayMs)
-        handler.postDelayed(closeHeartbeat, 1000L)
-        Log.i(TAG, "[CloseWatchdog] armed reason=$reason delay=${closeWatchdogDelayMs}ms")
-    }
-
-    private fun forceHostClosePluginView(reason: String) {
-        try {
-            val module = reactContext.catalystInstance?.getNativeModule(HOST_PLUGIN_MANAGER_MODULE)
-            if (module == null) {
-                Log.w(TAG, "[CloseWatchdog] $HOST_PLUGIN_MANAGER_MODULE unavailable reason=$reason")
-                return
-            }
-            val methods = module.javaClass.methods.filter { it.name == "closePluginView" }
-            methods.firstOrNull { it.parameterTypes.isEmpty() }?.let {
-                it.invoke(module)
-                Log.i(TAG, "[CloseWatchdog] closePluginView() forced reason=$reason")
-                return
-            }
-            methods.firstOrNull { it.parameterTypes.size == 1 }?.let {
-                it.invoke(module, com.facebook.react.bridge.PromiseImpl(null, null))
-                Log.i(TAG, "[CloseWatchdog] closePluginView(promise) forced reason=$reason")
-                return
-            }
-            Log.w(TAG, "[CloseWatchdog] no closePluginView method on host module reason=$reason")
-        } catch (error: Throwable) {
-            Log.w(TAG, "[CloseWatchdog] force close failed reason=$reason", error)
         }
     }
 
@@ -773,11 +729,11 @@ class MosaicBoardView(
             sendBackgroundSync()
         }
         backgroundSyncTask = task
-        handler.postDelayed(task, delay)
+        mainHandler.postDelayed(task, delay)
     }
 
     private fun cancelBackgroundSync() {
-        backgroundSyncTask?.let { handler.removeCallbacks(it) }
+        backgroundSyncTask?.let { mainHandler.removeCallbacks(it) }
         backgroundSyncTask = null
     }
 
@@ -788,7 +744,7 @@ class MosaicBoardView(
             sendBackgroundSync()
         }
         backgroundSyncTask = task
-        handler.postDelayed(task, delay)
+        mainHandler.postDelayed(task, delay)
     }
 
     private fun sendBackgroundSync(force: Boolean = false) {
@@ -834,7 +790,7 @@ class MosaicBoardView(
             // 书法笔的轨迹抬笔后系统服务还会再画，整屏刷新太早（150ms 内）会清不掉；设备实测 0.6 秒后刷新每次都清掉。
             // 背景同步等刷新做完再发，由 runPendingFullRefresh 安排。
             syncHoldUntil = SystemClock.uptimeMillis() + SYNC_HOLD_FOR_REFRESH_MAX_MS
-            handler.postDelayed({ if (attached) requestFullRefreshWhenSettled(reason) }, TRAIL_CLEAR_REFRESH_DELAY_MS)
+            mainHandler.postDelayed({ if (attached) requestFullRefreshWhenSettled(reason) }, TRAIL_CLEAR_REFRESH_DELAY_MS)
         }
         Log.i(TAG, "pen trail discarded: reason=$reason sync=${if (stylusContact) "now" else "deferred"} fullRefresh=$fullRefresh stylus=$stylusContact active=$drawPathActive")
     }
@@ -932,7 +888,7 @@ class MosaicBoardView(
         val requestId = writeInfoRequestId.incrementAndGet()
         Log.i(TAG, "drawPath context refresh queued reason=$reason request=$requestId")
         DrawPathContextClient.refresh(reactContext) { snapshot ->
-            handler.post {
+            mainHandler.post {
                 if (!attached || requestId != writeInfoRequestId.get()) return@post
                 if (snapshot == null) {
                     Log.i(TAG, "drawPath context unavailable reason=$reason request=$requestId")
@@ -1124,13 +1080,13 @@ class MosaicBoardView(
         }
         awaitingStrokeCommit = false
         inkHandoffPending = true
-        handler.removeCallbacks(inkHandoffTask)
-        handler.postDelayed(inkHandoffTask, INK_HANDOFF_IDLE_MS)
+        mainHandler.removeCallbacks(inkHandoffTask)
+        mainHandler.postDelayed(inkHandoffTask, INK_HANDOFF_IDLE_MS)
         Log.i(TAG, "ink handoff hold: ${INK_HANDOFF_IDLE_MS}ms")
     }
 
     private fun clearInkHandoff(): Boolean {
-        handler.removeCallbacks(inkHandoffTask)
+        mainHandler.removeCallbacks(inkHandoffTask)
         val was = inkHandoffPending
         inkHandoffPending = false
         return was
@@ -1189,7 +1145,7 @@ class MosaicBoardView(
         scheduleConfigure("$source:immediate")
 
         listOf(350L, 900L, 1600L, 2800L).forEach { delay ->
-            handler.postDelayed({
+            mainHandler.postDelayed({
                 if (!attached) {
                     Log.i(TAG, "drawPath settle skipped: source=$source delay=$delay detached")
                     return@postDelayed
@@ -1226,7 +1182,7 @@ class MosaicBoardView(
             "drawPath configure queued: reason=$reason generation=$generation " +
                 "rotation=${display?.rotation} attached=$attached",
         )
-        handler.post {
+        mainHandler.post {
             Log.i(
                 TAG,
                 "drawPath configure dispatch: reason=$reason generation=$generation " +
@@ -1280,7 +1236,7 @@ class MosaicBoardView(
             )
 
             REARM_DELAYS_MS.forEach { delay ->
-                handler.postDelayed({
+                mainHandler.postDelayed({
                     if (!attached) return@postDelayed
                     if (generation != configureGeneration) return@postDelayed
                     rearmDrawPath("rearm+$delay")
@@ -1317,7 +1273,7 @@ class MosaicBoardView(
             "drawPath retry queued: reason=$reason generation=$generation " +
                 "nextAttempt=${attempt + 1} delay=$delay",
         )
-        handler.postDelayed({ configureWithRetry(generation, attempt + 1, reason) }, delay)
+        mainHandler.postDelayed({ configureWithRetry(generation, attempt + 1, reason) }, delay)
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -1393,7 +1349,7 @@ class MosaicBoardView(
                 applyPenRefreshMode()
                 if (writing) {
                     cancelStrokeCommitWait()
-                    handler.removeCallbacks(inkHandoffTask)
+                    mainHandler.removeCallbacks(inkHandoffTask)
                     plainStrokeCommitted = false
                     strokeSceneChangedDuringContact = false
                     contentView.setDeferRefresh(true)
@@ -1427,8 +1383,8 @@ class MosaicBoardView(
                         contentView.markSettleRequested()
                         contentView.postInvalidateOnAnimation()
                     }
-                    handler.removeCallbacks(penModeResetFallback)
-                    handler.postDelayed(penModeResetFallback, PEN_MODE_RESET_MAX_MS)
+                    mainHandler.removeCallbacks(penModeResetFallback)
+                    mainHandler.postDelayed(penModeResetFallback, PEN_MODE_RESET_MAX_MS)
                 }
                 if (transientStrokeActive) inkEnd()
                 transientStrokeActive = false
@@ -1486,6 +1442,7 @@ class MosaicBoardView(
     }
 
     private var layoutPassPosted = false
+
     private val manualLayoutPass = Runnable {
         layoutPassPosted = false
         val w = width
