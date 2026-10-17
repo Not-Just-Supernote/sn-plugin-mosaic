@@ -1,8 +1,6 @@
 import { DeviceEventEmitter } from 'react-native';
 import { PluginDocAPI, PluginManager } from 'sn-plugin-lib';
 
-
-
 const LOG = '[MosaicDocText]';
 export const DOC_TEXT_EVENT = 'MosaicDocText';
 
@@ -10,13 +8,11 @@ export const DOC_SELECT_BUTTON_ID = 101;
 
 let pendingText: string | null = null;
 
-
 export function consumePendingDocText(): string | null {
   const text = pendingText;
   pendingText = null;
   return text;
 }
-
 
 export function registerDocSelectionListener(): void {
   try {

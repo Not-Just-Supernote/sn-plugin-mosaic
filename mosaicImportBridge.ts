@@ -3,7 +3,6 @@ import { NativeUIUtils, PluginManager } from 'sn-plugin-lib';
 import { NativeModules } from 'react-native';
 import { t } from './i18n';
 
-
 export const MOSAIC_INBOX_DIR = '/sdcard/EXPORT/mosaic/inbox';
 
 const FILE_READ_PERMISSION = 'plugin.permission.FILE:READ';
@@ -31,7 +30,6 @@ async function ensurePermission(permission: string, description: string): Promis
     return false;
   }
 }
-
 
 export function ensureMosaicImportPermissions(): Promise<boolean> {
   const native = (NativeModules as any).MosaicPermission;
@@ -90,19 +88,16 @@ async function ensureInbox(): Promise<void> {
   }
 }
 
-
 export async function claimPendingMosaicImageCard(): Promise<PendingMosaicImageCardClaim | null> {
   await ensureInbox();
   const entries = await RNFS.readDir(MOSAIC_INBOX_DIR);
 
-  
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.json.processing')) continue;
     const restored = entry.path.slice(0, -'.processing'.length);
     try {
       await RNFS.moveFile(entry.path, restored);
     } catch {
-      
     }
   }
 
@@ -111,14 +106,12 @@ export async function claimPendingMosaicImageCard(): Promise<PendingMosaicImageC
     .filter(entry => entry.isFile() && entry.name.endsWith('.json'))
     .sort((a, b) => a.mtime && b.mtime ? a.mtime.getTime() - b.mtime.getTime() : a.name.localeCompare(b.name));
   if (listing.length > 0) {
-    
     console.log(`[MosaicImport] inbox entries=${listing.length} requests=${candidates.length} names=${listing.map(entry => entry.name).join(',')}`);
   }
 
   for (const entry of candidates) {
     const claimPath = `${entry.path}.processing`;
-    
-    
+
     const ageMs = entry.mtime ? Date.now() - entry.mtime.getTime() : Number.POSITIVE_INFINITY;
     if (Number(entry.size) === 0 && ageMs > STALE_MARKER_MS) {
       await quarantineMarker(entry.path, 'empty marker');
@@ -151,11 +144,9 @@ export async function claimPendingMosaicImageCard(): Promise<PendingMosaicImageC
         originalPath: entry.path,
       };
     } catch (error) {
-      
       try {
         if (await RNFS.exists(claimPath)) await RNFS.moveFile(claimPath, entry.path);
       } catch {
-        
       }
       if (!reportedBadMarkers.has(entry.name)) {
         reportedBadMarkers.add(entry.name);
@@ -166,7 +157,6 @@ export async function claimPendingMosaicImageCard(): Promise<PendingMosaicImageC
   }
   return null;
 }
-
 
 const STALE_MARKER_MS = 5000;
 const reportedBadMarkers = new Set<string>();
@@ -183,8 +173,6 @@ async function quarantineMarker(path: string, reason: string): Promise<void> {
 export async function completePendingMosaicImageCard(
   claim: PendingMosaicImageCardClaim,
 ): Promise<void> {
-  
-  
   try {
     if (await RNFS.exists(claim.claimPath)) {
       await RNFS.moveFile(claim.claimPath, `${claim.originalPath}.done`);
@@ -193,17 +181,14 @@ export async function completePendingMosaicImageCard(
     try {
       if (await RNFS.exists(claim.claimPath)) await RNFS.unlink(claim.claimPath);
     } catch {
-      
     }
   }
-  
-  
+
   for (const path of [claim.request.imagePath, claim.request.notePath]) {
     if (!path) continue;
     try {
       if (await RNFS.exists(path)) await RNFS.unlink(path);
     } catch {
-      
     }
   }
   const notePath = claim.request.notePath;
@@ -221,7 +206,6 @@ export async function releasePendingMosaicImageCard(
       await RNFS.moveFile(claim.claimPath, claim.originalPath);
     }
   } catch {
-    
   }
 }
 

@@ -12,19 +12,16 @@ import {
 import { base64ToBytes } from './React/src/base64';
 import type { Card, Connection, Viewport } from './React/src/types';
 
-
-
 export const BOARD_COMMAND_EVENT = 'MosaicBoardCommand';
 
 export type BoardCommand =
   | {
       type: 'strokeUpsert'; id: string; space: string; width: number; color: number;
-      
+
       pen: number; drawPathWidth?: number; sampleScale: number; nibAngle?: number; angles?: string; contourOffsets?: number[]; points: string;
       bounds?: { left: number; top: number; right: number; bottom: number };
     }
   | {
-      
       type: 'strokeBatch'; ids: string[]; spaces: string[]; widths: number[]; colors: number[];
       pens: number[]; drawPathWidths: number[]; sampleScales: number[]; nibAngles?: (number | null)[]; angles?: string[]; contourOffsets?: number[][]; bounds: number[];
       pointOffsets: number[]; pointCounts: number[]; points: string;
@@ -34,40 +31,40 @@ export type BoardCommand =
   | { type: 'cardsRemove'; ids: string[] }
   | { type: 'connectionAdd'; id: string; from: string; to: string; locked?: boolean }
   | { type: 'connectionsRemove'; ids: string[] }
-  
+
   | { type: 'viewport'; panX: number; panY: number; scale: number; viewW?: number; viewH?: number; topInset?: number }
-  
+
   | { type: 'action'; name: 'close'; emittedAt?: number }
-  
+
   | { type: 'action'; name: 'sync'; enable: boolean; address: string }
   | { type: 'action'; name: 'touchEnabled'; value: boolean }
-  
+
   | { type: 'action'; name: 'insertTextCard'; text: string; x: number; y: number; width?: number; height?: number; source?: 'inkling' | 'doc' }
-  
+
   | { type: 'action'; name: 'recognizeLasso' }
   | { type: 'action'; name: 'deleteNoteShot'; shotId: string }
   | { type: 'action'; name: 'saveArchive' }
   | { type: 'action'; name: 'loadArchive' }
-  
+
   | {
       type: 'action';
       name: 'noteShotReady';
       shotId: string;
       path: string;
-      
+
       width: number;
       height: number;
-      
+
       rect: { x: number; y: number; w: number; h: number };
-      
+
       hotspot: { x: number; y: number; w: number; h: number };
-      
+
       anchors: string;
-      
+
       fingerprint: string;
-      
+
       pxPerWorld: number;
-      
+
       screenW: number;
       screenH: number;
     };
@@ -81,7 +78,6 @@ export function subscribeBoardCommands(handler: (ops: BoardCommand[]) => void): 
   });
   return () => subscription.remove();
 }
-
 
 function unpackAngles(encoded?: string): number[] | undefined {
   if (!encoded) return undefined;
@@ -113,15 +109,13 @@ export function strokeFromCommand(op: Extract<BoardCommand, { type: 'strokeUpser
     contourOffsets: readContourOffsets(op.contourOffsets, points.byteLength / 12),
     encoding: STROKE_ENCODING_F32X3,
     points,
-    
-    
+
     bounds: bounds && [bounds.left, bounds.top, bounds.right, bounds.bottom].every(Number.isFinite)
       ? [bounds.left, bounds.top, bounds.right, bounds.bottom]
       : computeStrokeBounds(unpackStrokePoints(points)),
     createdAt: new Date().toISOString(),
   };
 }
-
 
 export function strokesFromBatch(op: Extract<BoardCommand, { type: 'strokeBatch' }>): InkStroke[] {
   const count = Math.min(
@@ -176,14 +170,13 @@ export function strokesFromBatch(op: Extract<BoardCommand, { type: 'strokeBatch'
   return output;
 }
 
-
 export function normalizeDrawPathPenType(value: number): number | null {
   if (!Number.isInteger(value)) return null
   switch (value) {
-    case 0: return 16 
-    case 10: return 15 
-    case 14: return 15 
-    case 17: return 11 
+    case 0: return 16
+    case 10: return 15
+    case 14: return 15
+    case 17: return 11
     case 11:
     case 15:
     case 16:
@@ -192,12 +185,10 @@ export function normalizeDrawPathPenType(value: number): number | null {
   }
 }
 
-
 export function cardFromCommand(
   op: Extract<BoardCommand, { type: 'cardUpsert' }>,
   existing: Card | undefined,
 ): Card {
-  
   const colors = {
     bgColor: op.bgColor ? op.bgColor : CARD_DEFAULTS.bgColor,
     textColor: op.textColor ? op.textColor : CARD_DEFAULTS.textColor,
@@ -216,7 +207,7 @@ export function cardFromCommand(
       ...geometry,
       ...colors,
       kind: op.kind as Card['kind'],
-      
+
       content: op.content ?? existing.content,
       noteRef: op.noteRef || undefined,
       imageRef: op.imageRef ?? existing.imageRef,

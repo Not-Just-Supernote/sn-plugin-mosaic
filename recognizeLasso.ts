@@ -1,28 +1,25 @@
 import RNFS from 'react-native-fs';
 import { PluginCommAPI, PluginFileAPI } from 'sn-plugin-lib';
 
-
-
 const LOG = '[MosaicRecognize]';
 const CLIP_LASSO_FILE = '/sdcard/EXPORT/mosaic/clip_lasso.json';
 
-const SIDE_MARGIN = 100; 
-const MOSAIC_PRESSURE = 1000; 
-const MOSAIC_THICK_FACTOR = 20; 
+const SIDE_MARGIN = 100;
+const MOSAIC_PRESSURE = 1000;
+const MOSAIC_THICK_FACTOR = 20;
 const MOSAIC_THICK_MIN = 100;
 const MOSAIC_THICK_MAX = 900;
 
 type ClipStroke = { penStyle?: number; width?: number; pts?: number[] };
 
-
 function mosaicPenToSdk(objType: number): number {
   switch (objType) {
-    case 0: 
-    case 16: return 16;  
-    case 14: 
-    case 15: return 15; 
-    case 17: 
-    case 11: return 11; 
+    case 0:
+    case 16: return 16;
+    case 14:
+    case 15: return 15;
+    case 17:
+    case 11: return 11;
     default: return 16;
   }
 }
@@ -31,7 +28,6 @@ function validPageSize(value: any): value is { width: number; height: number } {
   return Number.isInteger(value?.width) && value.width > 0
     && Number.isInteger(value?.height) && value.height > 0;
 }
-
 
 async function currentPageSize(): Promise<{ width: number; height: number } | null> {
   try {
@@ -66,7 +62,6 @@ async function readClipStrokes(): Promise<ClipStroke[] | null> {
   }
 }
 
-
 async function strokesToElements(
   strokes: ClipStroke[],
   pageSize: { width: number; height: number },
@@ -100,10 +95,7 @@ async function strokesToElements(
     for (let i = 0; i + 2 < p.length; i += 3) {
       const pageX = SIDE_MARGIN + (p[i] - minX) * fit;
       const pageY = SIDE_MARGIN + (p[i + 1] - minY) * fit;
-      
-      
-      
-      
+
       androidPoints.push({ x: Math.round(pageX), y: Math.round(pageY) });
       pressures.push(Math.max(1, Math.round((p[i + 2] ?? 1) * MOSAIC_PRESSURE)));
     }
@@ -124,7 +116,6 @@ async function strokesToElements(
   }
   return elements;
 }
-
 
 export async function recognizeLassoText(): Promise<string | null> {
   const strokes = await readClipStrokes();

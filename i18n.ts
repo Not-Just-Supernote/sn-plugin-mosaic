@@ -101,7 +101,6 @@ function detectLocale(): Locale {
     const identifier = I18nManager.getConstants().localeIdentifier;
     if (identifier?.toLowerCase().startsWith('zh')) return 'zh';
   } catch {
-    
   }
   return 'en';
 }

@@ -4,9 +4,9 @@ import { NativePluginManager } from 'sn-plugin-lib';
 export interface MosaicSyncConfig {
   serverUrl: string;
   boardId: string;
-  
+
   enabled: boolean;
-  
+
   localAddress: string;
 }
 

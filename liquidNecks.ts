@@ -7,8 +7,6 @@ import {
 import { resolveCardSize } from './React/src/cardGeometry';
 import type { Card, Connection } from './React/src/types';
 
-
-
 const RECONNECT_THRESHOLD = 2;
 
 export type NeckPath = { id: string; path: string };
@@ -45,7 +43,7 @@ export function createNeckSession(): NeckSession {
         const edgeDist = getSignedEdgeDistance(a, b);
         if (edgeDist > LIQUID_THRESHOLDS.STRETCH_MAX) continue;
         const pairKey = [a.id, b.id].sort().join('|');
-        
+
         if (
           !prevActivePairKeys.has(pairKey)
           && seenCardIds.has(a.id)

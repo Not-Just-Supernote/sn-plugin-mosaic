@@ -6,8 +6,6 @@ import { plainHttp } from './rawNet';
 import { bytesToBase64 } from './React/src/base64';
 import { encodeUtf8 } from './React/src/utf8';
 
-
-
 const ASSET_SYNC_DEBOUNCE_MS = 1500;
 const MAX_ASSET_BYTES = 2 * 1024 * 1024;
 
@@ -17,7 +15,6 @@ const MAX_NOTE_TILES = 1000;
 const NOTE_TILE_FILE = /^(\d+)\.png$/;
 
 type FileSync = 'uploaded' | 'downloaded' | 'none';
-
 
 async function localNoteTiles(dir: string): Promise<number[]> {
   const entries = await RNFS.readDir(dir).catch(() => []);
@@ -30,21 +27,18 @@ async function localNoteTiles(dir: string): Promise<number[]> {
 }
 
 export class AssetSync {
-  
   private uploaded = new Map<string, number>();
-  
+
   private missingAt = new Map<string, number>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private busy = false;
   private queued: { boardId: string; cards: Card[] } | null = null;
 
-  
   constructor(
     private site: string,
     private readonly onDownloaded: (paths: string[]) => void,
   ) {}
 
-  
   setSite(site: string) {
     if (site === this.site) return;
     this.site = site;
@@ -78,7 +72,6 @@ export class AssetSync {
     let uploaded = 0;
     const downloadedPaths: string[] = [];
     try {
-      
       const seen = new Set<string>();
       for (const card of job.cards) {
         if (card.kind === 'note' && card.noteRef) {
@@ -121,7 +114,7 @@ export class AssetSync {
       console.log(`[MosaicAsset] sync failed: ${String(error)}`);
     } finally {
       this.busy = false;
-      
+
       const next = this.queued as { boardId: string; cards: Card[] } | null;
       if (next !== null) this.schedule(next.boardId, next.cards);
     }
@@ -188,7 +181,7 @@ export class AssetSync {
           return false;
         }
       }
-      
+
       await RNFS.moveFile(tmp, path);
       return true;
     } catch (error) {

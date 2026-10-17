@@ -9,6 +9,7 @@ import java.nio.ByteOrder
 
 object BoardEngine {
     private const val TAG = "MosaicBoardEngine"
+    // Must match PROTOCOL_VERSION in engineSync.ts; change both together.
     const val PROTOCOL_VERSION = 9
 
     const val MIN_FONT_SCALE = 0.5f

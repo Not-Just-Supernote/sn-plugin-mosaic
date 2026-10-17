@@ -1,13 +1,11 @@
 import { memo } from 'react';
 import { requireNativeComponent, StyleProp, ViewProps, ViewStyle } from 'react-native';
 
-
 export type MosaicBoardViewProps = ViewProps & {
-  
   deviceType?: number;
-  
+
   touchEnabled?: boolean;
-  
+
   notesDirectory?: string;
 };
 

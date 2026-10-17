@@ -6,8 +6,6 @@ import { MAX_CARD_SIZE, MIN_IMAGE_CARD_SIZE } from './React/src/cardGeometry';
 import { generateId } from './React/src/id';
 import type { Card } from './React/src/types';
 
-
-
 export const IMAGE_DIR_NAME = 'images';
 const IMAGE_FILE_PREFIX = 'img-';
 const IMAGE_FILE_EXT = '.png';
@@ -15,17 +13,15 @@ const IMAGE_FILE_EXT = '.png';
 const IMAGE_CARD_DEFAULT_LONG_SIDE = 480;
 
 export type ImportedImage = {
-  
   imageRef: string;
-  
+
   width: number;
   height: number;
-  
+
   bytes: number;
 };
 
 type MosaicImageModule = {
-  
   importImage(
     source: string,
     destPath: string,
@@ -44,7 +40,6 @@ async function resolveImageDir(): Promise<string> {
   return dir;
 }
 
-
 export function ensureImageDir(): Promise<string> {
   if (imageDir !== null) return Promise.resolve(imageDir);
   if (imageDirPromise === null) {
@@ -59,7 +54,6 @@ export function ensureImageDir(): Promise<string> {
   return imageDirPromise;
 }
 
-
 export function imagePathFor(imageRef: string | undefined): string {
   if (!imageRef || imageDir === null) return '';
   return `${imageDir}/${imageRef}`;
@@ -68,7 +62,6 @@ export function imagePathFor(imageRef: string | undefined): string {
 export function imageAvailable(): boolean {
   return MosaicImage !== undefined;
 }
-
 
 export async function importImage(source: string, maxLongSide = 0): Promise<ImportedImage> {
   if (MosaicImage === undefined) throw new Error('MosaicImage native module unavailable');
@@ -87,7 +80,6 @@ export function collectImageRefs(cards: Card[]): Set<string> {
   return refs;
 }
 
-
 export async function pruneOrphanImages(referenced: Set<string>): Promise<number> {
   const dir = await ensureImageDir();
   const entries = await RNFS.readDir(dir);
@@ -98,13 +90,11 @@ export async function pruneOrphanImages(referenced: Set<string>): Promise<number
       await RNFS.unlink(entry.path);
       removed += 1;
     } catch {
-      
     }
   }
   if (removed > 0) console.log(`[MosaicImage] pruned orphan images=${removed} kept=${referenced.size}`);
   return removed;
 }
-
 
 export function imageCardSizeFor(
   natural: { width: number; height: number },
@@ -120,7 +110,6 @@ export function imageCardSizeFor(
   );
   return { width: w * ratio, height: h * ratio };
 }
-
 
 export function createImageCard(args: {
   imageRef: string;

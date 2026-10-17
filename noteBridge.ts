@@ -7,8 +7,6 @@ import {
   PluginManager,
 } from 'sn-plugin-lib';
 
-
-
 const LOG = '[MosaicNoteShot]';
 export const RESTORE_TARGET_EVENT = 'MosaicRestoreTarget';
 
@@ -36,7 +34,7 @@ const SHOT_DIR_FRAGMENT = '/EXPORT/mosaic/shots/';
 
 type MosaicNoteShotNativeModule = {
   takePendingRestore(): Promise<string | null>;
-  
+
   pictureSignature?(path: string, aspect: number): Promise<{ width: number; height: number; sig: string } | null>;
 };
 
@@ -54,47 +52,43 @@ export type ShotBox = [number, number, number, number];
 
 export type ShotXYWH = [number, number, number, number];
 
-
 export interface NoteShotVersion {
-  
   w: number;
   h: number;
   sig: string;
-  
+
   hs: ShotXYWH;
-  
+
   r: ShotXYWH;
   f: string;
 }
 
-
 export interface NoteShotRecord {
   id: string;
-  
+
   rect: ShotRect;
-  
+
   cards: Record<string, ShotBox>;
   strokes: Record<string, ShotBox>;
-  
+
   fingerprint: string;
-  
+
   pxPerWorld: number;
-  
+
   versions: NoteShotVersion[];
   notePath: string;
-  
+
   page: number;
   createdAt: string;
   updatedAt: string;
 }
-
 
 export interface NoteShotPng {
   path: string;
   width: number;
   height: number;
   rect: ShotRect;
-  
+
   hotspot: ShotRect;
   cards: Record<string, ShotBox>;
   strokes: Record<string, ShotBox>;
@@ -102,18 +96,17 @@ export interface NoteShotPng {
   pxPerWorld: number;
 }
 
-
 export interface NoteShotTarget {
   id: string;
-  
+
   rect: ShotRect | null;
-  
+
   fingerprint: string | null;
   notePath: string;
   page: number;
-  
+
   num: number;
-  
+
   adopt: boolean;
 }
 
@@ -126,8 +119,6 @@ type ShotStore = { v: 1; shots: Record<string, NoteShotRecord> };
 let storeQueue: Promise<unknown> = Promise.resolve();
 const pendingShotDeletes = new Map<string, Promise<void>>();
 const deletedShotIds = new Set<string>();
-
-
 
 async function ensurePermission(permission: string, description: string): Promise<boolean> {
   try {
@@ -146,7 +137,6 @@ async function ensurePermission(permission: string, description: string): Promis
   }
 }
 
-
 export async function ensureArchivePermissions(readReason: string, writeReason: string): Promise<boolean> {
   if (!(await ensurePermission(FILE_READ_PERMISSION, readReason))) return false;
   return ensurePermission(FILE_WRITE_PERMISSION, writeReason);
@@ -156,8 +146,6 @@ export async function ensureNoteShotPermissions(): Promise<boolean> {
   if (!(await ensurePermission(FILE_READ_PERMISSION, '读取白板截图并插入当前笔记'))) return false;
   return ensurePermission(FILE_WRITE_PERMISSION, '将白板截图写入当前笔记');
 }
-
-
 
 async function resolveStorePath(): Promise<string> {
   return `${await NativePluginManager.getPluginDirPath()}/${STORE_FILENAME}`;
@@ -299,7 +287,6 @@ async function saveShotRecord(
   });
 }
 
-
 function shotJsonForNative(
   id: string,
   record: NoteShotRecord | null,
@@ -330,7 +317,6 @@ async function pictureSignature(
   }
 }
 
-
 function signatureDistance(a: string, b: string): number {
   if (!a || a.length !== b.length) return -1;
   let bits = 0;
@@ -340,7 +326,6 @@ function signatureDistance(a: string, b: string): number {
   }
   return bits;
 }
-
 
 async function versionOf(
   png: NoteShotPng,
@@ -358,12 +343,9 @@ async function versionOf(
   };
 }
 
-
-
 function round4(value: number): number {
   return Math.round(value * 10000) / 10000;
 }
-
 
 function encodeUserData(id: string, png: NoteShotPng): string {
   const { hotspot, rect } = png;
@@ -386,13 +368,10 @@ function shotIdOf(userData: unknown): string | null {
   }
 }
 
-
-
 function readRect(value: any): ShotRect | null {
   const x = Number(value?.x), y = Number(value?.y), w = Number(value?.w), h = Number(value?.h);
   return [x, y, w, h].every(Number.isFinite) && w > 0 && h > 0 ? { x, y, w, h } : null;
 }
-
 
 export function noteShotPngFrom(value: any): NoteShotPng | null {
   const rect = readRect(value?.rect);
@@ -418,8 +397,6 @@ export function noteShotPngFrom(value: any): NoteShotPng | null {
     pxPerWorld: Number(value.pxPerWorld) > 0 ? Number(value.pxPerWorld) : 0,
   };
 }
-
-
 
 async function currentFileAndPage(): Promise<{ filePath: string; page: number } | null> {
   const fileRes: any = await PluginCommAPI.getCurrentFilePath();
@@ -448,7 +425,6 @@ async function pageSizeOf(notePath: string, page: number): Promise<PageSize | nu
   return null;
 }
 
-
 async function findShotElement(
   notePath: string,
   page: number,
@@ -456,7 +432,6 @@ async function findShotElement(
   num?: number,
   adopt = false,
 ): Promise<{ element: any; release: () => void } | null> {
-  
   if (typeof num === 'number' && num > 0) {
     const single = await readSingleElement(PluginFileAPI.getElement(notePath, page, num));
     const singleId = single !== null ? shotIdOf(single.userData) : null;
@@ -496,7 +471,6 @@ async function readSingleElement(request: Promise<unknown>): Promise<any | null>
   }
 }
 
-
 async function findInsertedShot(
   notePath: string,
   page: number,
@@ -518,7 +492,6 @@ function toPageRect(rect: any): PageRect | null {
     : null;
 }
 
-
 function hostKeepsOwnCopy(storedPath: unknown): boolean {
   return typeof storedPath === 'string' && storedPath.length > 0 && !storedPath.includes(SHOT_DIR_FRAGMENT);
 }
@@ -533,7 +506,6 @@ async function deleteFile(path: string): Promise<void> {
 
 const clamp = (value: number, lo: number, hi: number): number => (hi < lo ? lo : Math.min(hi, Math.max(lo, value)));
 
-
 function placeInPage(png: NoteShotPng, screen: PageSize, page: PageSize): PageRect {
   const k = screen.width > 0 && screen.height > 0 ? Math.min(page.width / screen.width, page.height / screen.height) : 1;
   let w = png.width * k;
@@ -546,7 +518,6 @@ function placeInPage(png: NoteShotPng, screen: PageSize, page: PageSize): PageRe
   return { left, top, right: left + w, bottom: top + h };
 }
 
-
 function refitInPage(old: PageRect, ratio: number, png: NoteShotPng, page: PageSize): PageRect {
   const aspect = png.height / Math.max(1, png.width);
   let w = (old.right - old.left) * (Number.isFinite(ratio) && ratio > 0 ? ratio : 1);
@@ -558,7 +529,6 @@ function refitInPage(old: PageRect, ratio: number, png: NoteShotPng, page: PageS
   const top = Math.round(clamp(old.top, 0, page.height - h));
   return { left, top, right: left + w, bottom: top + h };
 }
-
 
 async function selectInsertedPicture(rect: PageRect, page: PageSize): Promise<void> {
   const lassoRect = {
@@ -582,7 +552,6 @@ async function selectInsertedPicture(rect: PageRect, page: PageSize): Promise<vo
     console.log(`${LOG} lasso inserted picture failed: ${err}`);
   }
 }
-
 
 export async function insertNoteShot(
   shotId: string,
@@ -624,8 +593,6 @@ export async function insertNoteShot(
     if (!inserted) return 'failed';
     keepPng = true;
 
-    
-    
     let pictureRect = rect;
     let hostSignature: { width: number; height: number; sig: string } | null = null;
     try {
@@ -662,7 +629,6 @@ export async function insertNoteShot(
   }
 }
 
-
 async function updateNoteShot(target: NoteShotTarget, record: NoteShotRecord | null, png: NoteShotPng): Promise<boolean> {
   if (deletedShotIds.has(target.id) || pendingShotDeletes.has(target.id)) {
     await deleteFile(png.path);
@@ -679,7 +645,7 @@ async function updateNoteShot(target: NoteShotTarget, record: NoteShotRecord | n
     }
     const pageSize = await pageSizeOf(target.notePath, target.page);
     if (pageSize === null) return false;
-    
+
     const found = await findShotElement(target.notePath, target.page, target.id, target.num, target.adopt);
     if (found === null) {
       console.log(`${LOG} update skipped: picture id=${target.id} num=${target.num} no longer on page=${target.page}`);
@@ -691,14 +657,13 @@ async function updateNoteShot(target: NoteShotTarget, record: NoteShotRecord | n
       const old = toPageRect(element.picture?.rect);
       if (old === null) return false;
       const oldPath = element.picture?.picturePath;
-      
+
       const previousWidth = target.rect?.w ?? record?.rect.w ?? png.rect.w;
       const next = refitInPage(old, previousWidth > 0 ? png.rect.w / previousWidth : 1, png, pageSize);
       element.picture = { picturePath: png.path, rect: next };
-      
+
       element.userData = encodeUserData(target.id, png);
-      
-      
+
       element.pageNum = target.page;
       const layer = typeof element.layerNum === 'number' && element.layerNum >= 0 ? element.layerNum : MAIN_LAYER;
       element.layerNum = layer;
@@ -708,14 +673,14 @@ async function updateNoteShot(target: NoteShotTarget, record: NoteShotRecord | n
       if (modified) {
         const ownCopy = hostKeepsOwnCopy(oldPath);
         keepPng = !ownCopy;
-        
+
         if (!ownCopy && typeof oldPath === 'string' && oldPath !== png.path) staleOwnPng = oldPath;
       }
     } finally {
       found.release();
     }
     if (!modified) return false;
-    
+
     let hostSignature: { width: number; height: number; sig: string } | null = null;
     try {
       const back = await findShotElement(target.notePath, target.page, target.id, target.num);
@@ -754,7 +719,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-
 export async function consumeNativePendingRestore(): Promise<NoteShotTarget | null> {
   if (MosaicNoteShot === undefined) return null;
   try {
@@ -780,13 +744,11 @@ export async function consumeNativePendingRestore(): Promise<NoteShotTarget | nu
   }
 }
 
-
 export async function focusNoteShot(viewTag: number, target: NoteShotTarget): Promise<void> {
   const record = await getShotRecord(target.id);
   console.log(`${LOG} focus id=${target.id} record=${record !== null} note=${target.notePath} page=${target.page} num=${target.num} adopt=${target.adopt}`);
   MosaicBoardEngine?.focusNoteShot?.(viewTag, shotJsonForNative(target.id, record, target.rect));
 }
-
 
 export async function refreshNoteShot(viewTag: number, target: NoteShotTarget): Promise<void> {
   const engine = MosaicBoardEngine;

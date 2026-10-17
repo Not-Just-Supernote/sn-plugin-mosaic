@@ -12,8 +12,7 @@ import { imagePathFor } from './imageStore';
 import { notePathFor } from './noteStore';
 import { cardFontScale } from './boardCommands';
 
-
-
+// Must match BoardEngine.PROTOCOL_VERSION in Kotlin; change both together.
 const PROTOCOL_VERSION = 9;
 
 const OP_ADD_STROKE = 1;
@@ -21,22 +20,21 @@ const OP_REMOVE_STROKES = 2;
 const OP_UPSERT_CARD = 3;
 const OP_REMOVE_CARDS = 4;
 
-
 const OP_SET_CONNECTIONS = 8;
 
 type EngineModule = {
   applyOps(base64: string): void;
   setViewport(panX: number, panY: number, scale: number): void;
-  
+
   setViewportIfUnset(panX: number, panY: number, scale: number): void;
   clearScene(): void;
-  
+
   documentReplaced(viewTag: number): void;
   undo(viewTag: number): void;
   redo(viewTag: number): void;
-  
+
   selectCards(viewTag: number, ids: string[]): void;
-  
+
   invalidateImages(paths: string[]): void;
 };
 
@@ -100,7 +98,6 @@ class OpsWriter {
     this.offset += 4;
   }
 
-  
   raw(data: Uint8Array) {
     this.ensure(data.byteLength);
     this.bytes.set(data, this.offset);
@@ -132,7 +129,6 @@ class OpsWriter {
     this.bytes = new Uint8Array(next);
   }
 }
-
 
 function utf8Encode(text: string): Uint8Array {
   const out: number[] = [];
@@ -169,7 +165,7 @@ function writeStroke(writer: OpsWriter, stroke: InkStroke) {
   writer.str(stroke.space);
   writer.f32(stroke.width);
   writer.u32(stroke.color);
-  
+
   writer.u16(stroke.pen);
   writer.f32(stroke.sampleScale);
   writer.u32(stroke.drawPathWidth ?? Math.round(Math.max(0.5, Math.min(40, stroke.width)) * 100));
@@ -181,10 +177,7 @@ function writeStroke(writer: OpsWriter, stroke: InkStroke) {
   writer.u32(contourOffsets.length);
   for (const end of contourOffsets) writer.u32(end);
   const points = stroke.points;
-  
-  
-  
-  
+
   if ((stroke.encoding === undefined || stroke.encoding === STROKE_ENCODING_F32X3)
       && points.byteLength % 12 === 0) {
     writer.u32(points.byteLength / 12);
@@ -213,15 +206,13 @@ function writeCard(writer: OpsWriter, card: Card) {
   writer.i32(card.zIndex);
   writer.str(card.kind ?? 'text');
   writer.str(card.content ?? '');
-  
-  
-  
+
   writer.str(card.kind === 'image' ? imagePathFor(card.imageRef) : card.kind === 'note' ? notePathFor(card.noteRef) : '');
   writer.str(card.kind === 'note' ? (card.noteRef ?? '') : '');
-  
+
   writer.str(card.bgColor ?? '');
   writer.str(card.textColor ?? '');
-  
+
   writer.str(card.title ?? '');
   writer.f32(cardFontScale(card));
 }
@@ -237,7 +228,6 @@ export class EngineSyncSession {
   private lastCards = new Map<string, Card>();
   private lastConnectionsSignature = '';
 
-  
   reset() {
     this.lastInk = new Map();
     this.lastCards = new Map();
@@ -249,7 +239,6 @@ export class EngineSyncSession {
     MosaicBoardEngine?.setViewport(viewport.panX, viewport.panY, viewport.scale || 1);
   }
 
-  
   setViewportIfUnset(viewport: Viewport) {
     MosaicBoardEngine?.setViewportIfUnset?.(viewport.panX, viewport.panY, viewport.scale || 1);
   }
@@ -262,12 +251,10 @@ export class EngineSyncSession {
     if (viewTag !== null && ids.length > 0) MosaicBoardEngine?.selectCards?.(viewTag, ids);
   }
 
-  
   invalidateImages(paths: string[]) {
     if (paths.length > 0) MosaicBoardEngine?.invalidateImages?.(paths);
   }
 
-  
   refreshAssetCardPaths(cards: Card[]) {
     if (MosaicBoardEngine === undefined) return;
     const assetCards = cards.filter(card =>
@@ -285,8 +272,6 @@ export class EngineSyncSession {
         .filter(path => path.length > 0),
     );
   }
-
-  
 
   acknowledgeStroke(stroke: InkStroke) {
     this.lastInk.set(stroke.id, stroke);
@@ -308,9 +293,6 @@ export class EngineSyncSession {
     for (const id of ids) this.lastCards.delete(id);
   }
 
-  
-
-  
   syncInk(next: InkStroke[]) {
     if (MosaicBoardEngine === undefined) return;
     const writer = new OpsWriter();
@@ -348,7 +330,6 @@ export class EngineSyncSession {
     this.lastInk = new Map(next.map(stroke => [stroke.id, stroke]));
   }
 
-  
   syncCards(next: Card[]) {
     if (MosaicBoardEngine === undefined) return;
     const writer = new OpsWriter();
@@ -366,7 +347,6 @@ export class EngineSyncSession {
     this.lastCards = new Map(next.map(card => [card.id, card]));
   }
 
-  
   syncConnections(connections: Connection[]) {
     if (MosaicBoardEngine === undefined) return;
     const signature = connections.map(c => `${c.id}:${c.fromCardId}:${c.toCardId}:${c.locked === true ? 1 : 0}`).join(';');
@@ -384,4 +364,3 @@ export class EngineSyncSession {
     MosaicBoardEngine.applyOps(writer.finish());
   }
 }
-

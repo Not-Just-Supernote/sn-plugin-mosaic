@@ -1,6 +1,5 @@
 import { DeviceEventEmitter, NativeModules } from 'react-native';
 
-
 type RawNetModule = {
   wsOpen(id: number, host: string, port: number, path: string): void;
   wsSend(id: number, text: string): void;
@@ -26,7 +25,6 @@ function parsePlain(url: string, scheme: 'ws' | 'http'): { host: string; port: n
   if (!match) return null;
   return { host: match[1], port: match[2] ? Number(match[2]) : 80, path: match[3] || '/' };
 }
-
 
 export class RawWebSocket {
   readyState = 0;
@@ -72,14 +70,12 @@ export class RawWebSocket {
   }
 }
 
-
 export function plainSocketFactory(endpoint: string): WebSocket | null {
   if (!native) return null;
   const target = parsePlain(endpoint, 'ws');
   if (!target) return null;
   return new RawWebSocket(target.host, target.port, target.path) as unknown as WebSocket;
 }
-
 
 export async function plainHttp(
   method: 'GET' | 'PUT',
