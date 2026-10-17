@@ -29,9 +29,9 @@ internal class TouchInput(private val board: BoardInteractionController) {
 
     private val edgeSwipeZonePx: Float get() = EDGE_SWIPE_ZONE_DP * board.density
 
-    internal val fingers = LinkedHashMap<Int, Finger>()
+    val fingers = LinkedHashMap<Int, Finger>()
 
-    internal var fingerGesture: FingerGesture = FingerGesture.Idle
+    var fingerGesture: FingerGesture = FingerGesture.Idle
 
     private var cardLongPressTask: Runnable? = null
 
@@ -57,13 +57,13 @@ internal class TouchInput(private val board: BoardInteractionController) {
 
     private var lastTwoFingerTapY = 0f
 
-    internal var fingerMoveSession: MoveSession? = null
+    var fingerMoveSession: MoveSession? = null
 
     private var launcherPullStartY = Float.NaN
 
     private val twoCandidateTimeout = Runnable { settleTwoCandidate("hold") }
 
-    internal fun viewportGestureActive(): Boolean =
+    fun viewportGestureActive(): Boolean =
         fingerGesture is FingerGesture.PanZoom || fingerGesture is FingerGesture.SurfaceScroll
 
     fun handle(frame: InputRouter.TouchFrame) {
@@ -78,7 +78,7 @@ internal class TouchInput(private val board: BoardInteractionController) {
         }
         when (frame.action) {
             InputRouter.ACTION_DOWN, InputRouter.ACTION_POINTER_DOWN -> {
-                board.host.flushInkHandoff("touch")
+                board.host.inkHandoff.flushInkHandoff("touch")
                 if (frame.action == InputRouter.ACTION_DOWN) board.refreshViewOffset()
                 val i = frame.actionIndex
                 fingerDown(frame.ids[i], frame.xs[i] - board.viewOffsetX, frame.ys[i] - board.viewOffsetY, frame.penPriority, frame.uptimeMs)
@@ -326,7 +326,7 @@ internal class TouchInput(private val board: BoardInteractionController) {
         board.handler.postDelayed(task, holdMs)
     }
 
-    internal fun cancelCardLongPress() {
+    fun cancelCardLongPress() {
         cardLongPressTask?.let { board.handler.removeCallbacks(it) }
         cardLongPressTask = null
     }
@@ -452,7 +452,7 @@ internal class TouchInput(private val board: BoardInteractionController) {
         return Pair(it.next(), it.next())
     }
 
-    internal fun cancelFingerGestures(reason: String) {
+    fun cancelFingerGestures(reason: String) {
         cancelCardLongPress()
         board.handler.removeCallbacks(twoCandidateTimeout)
         fingerMoveSession?.let { board.transforms.cancelMoveSession(it) }
@@ -495,7 +495,7 @@ internal class TouchInput(private val board: BoardInteractionController) {
         return true
     }
 
-    internal fun settleTwoCandidate(reason: String): Boolean {
+    fun settleTwoCandidate(reason: String): Boolean {
         val g = fingerGesture as? FingerGesture.TwoCandidate ?: return false
         board.handler.removeCallbacks(twoCandidateTimeout)
         val a = fingers[g.a] ?: return false
@@ -504,7 +504,7 @@ internal class TouchInput(private val board: BoardInteractionController) {
         return true
     }
 
-    internal fun yieldPanZoomToPen(reason: String) {
+    fun yieldPanZoomToPen(reason: String) {
         val g = fingerGesture as? FingerGesture.PanZoom ?: return
         val a = fingers[g.a]
         val b = fingers[g.b]

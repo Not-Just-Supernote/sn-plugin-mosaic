@@ -17,7 +17,7 @@ internal class CardCommands(private val board: BoardInteractionController) {
 
     private class PendingRecognition(val rect: RectF, val strokeIds: List<String>)
 
-    internal fun normalizeColoredCardToDefault(card: BoardEngine.CardRec): BoardHistory.Change? {
+    fun normalizeColoredCardToDefault(card: BoardEngine.CardRec): BoardHistory.Change? {
         if (!card.colored) return null
         val next = card.withColors("", "")
         val change = BoardHistory.Change("card-normalize")
@@ -27,7 +27,7 @@ internal class CardCommands(private val board: BoardInteractionController) {
         return change
     }
 
-    internal fun toggleSelectedCardBlack() {
+    fun toggleSelectedCardBlack() {
         val card = board.selection.selectedCardId?.let { BoardEngine.cards[it] } ?: return
         if (card.kind == "image" || card.kind == "note") return
         val isBlack = card.bgColor.equals("#000000", ignoreCase = true)
@@ -68,7 +68,7 @@ internal class CardCommands(private val board: BoardInteractionController) {
         return "-$removed/+$added"
     }
 
-    internal fun collectCardRemoval(cardId: String, change: BoardHistory.Change) {
+    fun collectCardRemoval(cardId: String, change: BoardHistory.Change) {
         val card = BoardEngine.cards[cardId] ?: return
         BoardEngine.cardStrokes[cardId]?.forEach { change.stroke(it, null) }
         val threads = ArrayList<BoardEngine.StrokeRec>()
@@ -82,7 +82,7 @@ internal class CardCommands(private val board: BoardInteractionController) {
         change.card(card, null)
     }
 
-    internal fun cardsBelow(anchor: BoardEngine.CardRec): List<BoardEngine.CardRec> {
+    fun cardsBelow(anchor: BoardEngine.CardRec): List<BoardEngine.CardRec> {
         val column = arrayListOf(anchor.rect(RectF()))
         val result = ArrayList<BoardEngine.CardRec>()
         val candidates = synchronized(BoardEngine.lock) { BoardEngine.cards.values.filter { it.id != anchor.id } }
@@ -98,7 +98,7 @@ internal class CardCommands(private val board: BoardInteractionController) {
         return result
     }
 
-    internal fun pushCardsBelow(change: BoardHistory.Change, below: List<BoardEngine.CardRec>, grow: Float) {
+    fun pushCardsBelow(change: BoardHistory.Change, below: List<BoardEngine.CardRec>, grow: Float) {
         val dy = max(0f, grow)
         for (b in below) {
             val current = BoardEngine.cards[b.id] ?: continue
@@ -137,7 +137,7 @@ internal class CardCommands(private val board: BoardInteractionController) {
         Log.i(BoardInteractionController.TAG, "toggle card accent id=${card.id} colored=${next.colored} connections=$relinked")
     }
 
-    internal fun recognizeSelection() {
+    fun recognizeSelection() {
         val sel = board.selection.lasso ?: return
         if (!board.selection.isPureInkSelection(sel)) {
             Log.i(BoardInteractionController.TAG_LASSO, "recognize skipped: selection not pure ink cards=${sel.cardIds.size} strokes=${sel.strokeIds.size}")

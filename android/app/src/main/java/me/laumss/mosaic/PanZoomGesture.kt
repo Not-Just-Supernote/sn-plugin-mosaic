@@ -25,7 +25,7 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
 
     private var armed = false
 
-    internal fun resetNoteScrollMode() {
+    fun resetNoteScrollMode() {
         board.handler.removeCallbacks(noteScrollResetTask)
         MosaicEinkRefreshModule.resetNative(NOTE_SCROLL_EINK_OWNER)
     }
@@ -55,7 +55,7 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
         }
     }
 
-    internal fun begin(a: Finger, b: Finger) {
+    fun begin(a: Finger, b: Finger) {
         board.trailCleanup.cancel("panzoom-begin")
         val view = board.viewWorld()
         val activeRegion = board.currentRegions().let { SparseNavigation.findActiveRegion(it, view) }
@@ -108,7 +108,7 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
         g.startDistance = max(1f, hypot(b.x - a.x, b.y - a.y))
     }
 
-    internal fun update(g: FingerGesture.PanZoom) {
+    fun update(g: FingerGesture.PanZoom) {
         if (!armed) return
         val a = board.touch.fingers[g.a] ?: return
         val b = board.touch.fingers[g.b] ?: return
@@ -162,7 +162,7 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
         return if (abs(level - scale) <= scale * ZOOM_SNAP_RATIO) level else scale
     }
 
-    internal fun end(g: FingerGesture.PanZoom, cleanOldPositions: Boolean = true) {
+    fun end(g: FingerGesture.PanZoom, cleanOldPositions: Boolean = true) {
         if (cleanOldPositions && !g.cleanupTrail.isEmpty) recordCleanupPosition(g)
         var panX = BoardEngine.panX
         var panY = BoardEngine.panY

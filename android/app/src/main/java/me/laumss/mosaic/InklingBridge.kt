@@ -19,7 +19,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
 
     private val clipboardIo = ClipboardStrokeIo()
 
-    internal val pasteGeneration = AtomicLong(0L)
+    val pasteGeneration = AtomicLong(0L)
 
     private val exportGeneration = AtomicLong(0L)
 
@@ -61,7 +61,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
         Log.i(BoardInteractionController.TAG, "inkling overlay drag active=$active board=$dragOnBoard reason=$reason")
     }
 
-    internal fun resetOverlayDrag() {
+    fun resetOverlayDrag() {
         board.handler.removeCallbacks(dragTimeoutTask)
         board.handler.removeCallbacks(dragNoteResetTask)
         if (dragNoteModeHeld) {
@@ -72,7 +72,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
         dragOnBoard = false
     }
 
-    internal fun toolbarHit(viewX: Float, viewY: Float): Boolean =
+    fun toolbarHit(viewX: Float, viewY: Float): Boolean =
         InklingLink.consumesScreenPoint(viewX + board.viewOffsetX, viewY + board.viewOffsetY)
 
     fun clearSelection(delete: Boolean) {
@@ -182,7 +182,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
         Log.i(BoardInteractionController.TAG, "imported text card source=$source at world=($left,$top) size=${size.x}x${size.y} len=${text.length}")
     }
 
-    internal fun invalidateClipboardWork(reason: String) {
+    fun invalidateClipboardWork(reason: String) {
         val generation = pasteGeneration.incrementAndGet()
         pasteTask?.cancel(true)
         pasteTask = null
@@ -246,7 +246,7 @@ internal class InklingBridge(private val board: BoardInteractionController) {
         return org.json.JSONObject().put("success", true).put("changed", changed)
     }
 
-    internal fun exportLassoStrokes(sel: LassoSelection?) {
+    fun exportLassoStrokes(sel: LassoSelection?) {
         val sequence = exportGeneration.incrementAndGet()
         val file = File(InklingLink.CLIP_LASSO_FILE)
         if (sel == null) {

@@ -45,12 +45,12 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
         return false
     }
 
-    internal fun cancelFrameHold() {
+    fun cancelFrameHold() {
         frameHoldTask?.let { board.handler.removeCallbacks(it) }
         frameHoldTask = null
     }
 
-    internal fun updateFrameGesture(s: PenSession.Write, wx: Float, wy: Float) {
+    fun updateFrameGesture(s: PenSession.Write, wx: Float, wy: Float) {
         val scale = max(0.01f, BoardEngine.scale)
         if (s.frameCandidate != null) {
             val moved = hypot(wx - s.frameRecognizedX, wy - s.frameRecognizedY) * scale
@@ -167,7 +167,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
     }
 
     // Grows a text card to take in a stroke written past its edge; the card keeps its strokes in place on the board.
-    internal fun growCardForStroke(rec: BoardEngine.StrokeRec): BoardHistory.Change? = synchronized(BoardEngine.lock) {
+    fun growCardForStroke(rec: BoardEngine.StrokeRec): BoardHistory.Change? = synchronized(BoardEngine.lock) {
         val cardId = rec.cardId ?: return null
         val card = BoardEngine.cards[cardId] ?: return null
         if (card.kind != "text") return null

@@ -17,7 +17,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         private const val ROTATE_SNAP_DEG = 3f
     }
 
-    internal fun beginResize(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, card: BoardEngine.CardRec, handle: BoardGeometry.Handle): MoveSession.CardResize {
+    fun beginResize(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, card: BoardEngine.CardRec, handle: BoardGeometry.Handle): MoveSession.CardResize {
         // 与套索拖动笔迹相同：拖动期间停掉系统笔迹服务，只由 Mosaic 画预览。
         board.host.drawPath.setSuspended(true, "card-resize")
         val session = MoveSession.CardResize(isPen, pointerId, wx, wy, card, handle)
@@ -98,7 +98,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         CardSizeConstraints.constrainRect(m.card.withFontScale(m.fontScale), m.preview, m.handle, proportional = true)
     }
 
-    internal fun beginSelectionResize(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, sel: LassoSelection, handle: BoardGeometry.Handle): MoveSession.SelectionResize {
+    fun beginSelectionResize(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, sel: LassoSelection, handle: BoardGeometry.Handle): MoveSession.SelectionResize {
         board.host.drawPath.setSuspended(true, "lasso-selection-resize")
         val cards = ArrayList<BoardEngine.CardRec>()
         val strokes = ArrayList<BoardEngine.StrokeRec>()
@@ -187,7 +187,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         m.preview.set(x, y, x + w, y + h)
     }
 
-    internal fun beginSelectionRotate(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, sel: LassoSelection): MoveSession.SelectionRotate {
+    fun beginSelectionRotate(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, sel: LassoSelection): MoveSession.SelectionRotate {
         board.host.drawPath.setSuspended(true, "lasso-selection-rotate")
         val strokes = ArrayList<BoardEngine.StrokeRec>()
         val inkPath = Path()
@@ -261,7 +261,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         }
     }
 
-    internal fun beginSelectionMove(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, sel: LassoSelection): MoveSession.Selection {
+    fun beginSelectionMove(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, sel: LassoSelection): MoveSession.Selection {
         board.host.drawPath.setSuspended(true, "lasso-selection-move")
         val cards = ArrayList<BoardEngine.CardRec>()
         val strokes = ArrayList<BoardEngine.StrokeRec>()
@@ -281,7 +281,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         return MoveSession.Selection(isPen, pointerId, wx, wy, sel, cards, strokes, liftZ)
     }
 
-    internal fun updateMoveSession(m: MoveSession, wx: Float, wy: Float) {
+    fun updateMoveSession(m: MoveSession, wx: Float, wy: Float) {
         recordCardCleanupPosition(m)
         val dx = wx - m.startWorldX
         val dy = wy - m.startWorldY
@@ -312,7 +312,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         }
     }
 
-    internal fun endMoveSession(m: MoveSession, wx: Float, wy: Float) {
+    fun endMoveSession(m: MoveSession, wx: Float, wy: Float) {
         recordCardCleanupPosition(m)
         val dx = wx - m.startWorldX
         val dy = wy - m.startWorldY
@@ -470,7 +470,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         }
     }
 
-    internal fun cancelMoveSession(m: MoveSession) {
+    fun cancelMoveSession(m: MoveSession) {
         when (m) {
             is MoveSession.CardResize -> {
                 board.overlay.hideCardPreview()

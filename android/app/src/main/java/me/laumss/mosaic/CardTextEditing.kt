@@ -23,7 +23,7 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
         else levels.lastOrNull { it < current - 0.01f } ?: levels.first()
     }
 
-    internal fun editCard(card: BoardEngine.CardRec) {
+    fun editCard(card: BoardEngine.CardRec) {
         close()
         board.host.inkEnabled = false
         val original = card.content
@@ -134,7 +134,7 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
             card.imagePath, card.noteRef, card.bgColor, card.textColor, lines.firstOrNull().orEmpty())
     }
 
-    internal fun editPageHeader(recognized: String? = null) {
+    fun editPageHeader(recognized: String? = null) {
         if (board.surface.showsBoardChrome) return
         val ref = board.notes.noteController.document?.ref ?: return
         val source = board.notes.suspendedBoard?.scene?.cards?.firstOrNull { it.noteRef == ref } ?: return
@@ -203,7 +203,7 @@ internal class CardTextEditing(private val board: BoardInteractionController) {
         board.emitter.commit()
     }
 
-    internal fun close() {
+    fun close() {
         val overlay = editorView ?: return
         if (overlay is CardTextEditor) overlay.release()
         board.host.removeView(overlay)

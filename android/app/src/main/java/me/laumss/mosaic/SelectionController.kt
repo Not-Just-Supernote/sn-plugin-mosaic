@@ -12,14 +12,14 @@ internal class SelectionController(private val board: BoardInteractionController
         const val LASSO_BOUNDS_PAD = 10f
     }
 
-    internal val selectedCardId: String?
+    val selectedCardId: String?
         get() = lasso?.let { if (isSingleCardSelection(it)) it.cardIds.firstOrNull() else null }
 
-    internal var selectBelowArmed = false
+    var selectBelowArmed = false
 
-    internal var selectBelowPendingRestore = false
+    var selectBelowPendingRestore = false
 
-    internal var lasso: LassoSelection? = null
+    var lasso: LassoSelection? = null
 
     private var selectionCopyBusy = false
 
@@ -32,7 +32,7 @@ internal class SelectionController(private val board: BoardInteractionController
         }
     }
 
-    internal fun isSingleCardSelection(sel: LassoSelection): Boolean {
+    fun isSingleCardSelection(sel: LassoSelection): Boolean {
         if (sel.cardIds.size != 1) return false
         if (cardResizeLocked(sel.cardIds[0])) return false
         if (sel.strokeIds.isEmpty()) return true
@@ -40,7 +40,7 @@ internal class SelectionController(private val board: BoardInteractionController
         return sel.strokeIds.all { BoardEngine.strokes[it]?.cardId == id }
     }
 
-    internal fun selectSingleCard(card: BoardEngine.CardRec) {
+    fun selectSingleCard(card: BoardEngine.CardRec) {
         val frame = card.rect(RectF()).apply { inset(-LASSO_BOUNDS_PAD, -LASSO_BOUNDS_PAD) }
         setLasso(LassoSelection(frame, listOf(card.id), emptyList()))
     }
@@ -65,7 +65,7 @@ internal class SelectionController(private val board: BoardInteractionController
         LassoSelection(selectionFrame(expanded), cards, expanded.strokeIds, sel.fromLasso)
     }
 
-    internal fun selectConnectedComponent(card: BoardEngine.CardRec) {
+    fun selectConnectedComponent(card: BoardEngine.CardRec) {
         val ids = connectedComponent(card.id)
         if (ids.size <= 1) { selectSingleCard(card); return }
         val frame = RectF()
@@ -139,9 +139,9 @@ internal class SelectionController(private val board: BoardInteractionController
     }
 
     // LASSO_BOUNDS_PAD is world units on the board; above 100% (an open note) it stays the same on screen.
-    internal fun lassoPadWorld(): Float = LASSO_BOUNDS_PAD / BoardEngine.scale.coerceAtLeast(1f)
+    fun lassoPadWorld(): Float = LASSO_BOUNDS_PAD / BoardEngine.scale.coerceAtLeast(1f)
 
-    internal fun selectionFrame(sel: LassoSelection): RectF {
+    fun selectionFrame(sel: LassoSelection): RectF {
         val out = RectF()
         var any = false
         val r = RectF()
@@ -255,7 +255,7 @@ internal class SelectionController(private val board: BoardInteractionController
         }.isEmpty
     }
 
-    internal fun setLasso(requested: LassoSelection?) {
+    fun setLasso(requested: LassoSelection?) {
         val next = requested?.let(::expandBoundSelection)
 
         if (next == null && selectBelowPendingRestore) {
@@ -294,12 +294,12 @@ internal class SelectionController(private val board: BoardInteractionController
         }
     }
 
-    internal fun selectionIds(): List<String> {
+    fun selectionIds(): List<String> {
         val sel = lasso ?: return emptyList()
         return if (isSingleCardSelection(sel)) emptyList() else sel.cardIds.toList()
     }
 
-    internal fun updateLassoOverlay() {
+    fun updateLassoOverlay() {
         val current = lasso
         if (current == null) {
             board.overlay.setLassoFrame(null)
@@ -336,7 +336,7 @@ internal class SelectionController(private val board: BoardInteractionController
             horizontalEdgesOnly = kind == "note")
     }
 
-    internal fun shapeKindOf(sel: LassoSelection): Shapes.Kind? {
+    fun shapeKindOf(sel: LassoSelection): Shapes.Kind? {
         if (sel.cardIds.isNotEmpty()) return null
         val stroke = shapeStrokeOf(sel) ?: return null
         return Shapes.kindOf(stroke)
@@ -356,7 +356,7 @@ internal class SelectionController(private val board: BoardInteractionController
         }
     }
 
-    internal fun isPureInkSelection(sel: LassoSelection): Boolean {
+    fun isPureInkSelection(sel: LassoSelection): Boolean {
         if (sel.cardIds.isNotEmpty() || sel.strokeIds.isEmpty()) return false
         return synchronized(BoardEngine.lock) {
             sel.strokeIds.all { id ->
@@ -367,7 +367,7 @@ internal class SelectionController(private val board: BoardInteractionController
         }
     }
 
-    internal fun selectionRotatable(sel: LassoSelection): Boolean =
+    fun selectionRotatable(sel: LassoSelection): Boolean =
         sel.strokeIds.isNotEmpty() && sel.cardIds.isEmpty()
 
     private fun lassoActionRects(frame: RectF, types: List<String>): List<Pair<RectF, String>> {
@@ -404,7 +404,7 @@ internal class SelectionController(private val board: BoardInteractionController
         }
     }
 
-    internal fun selectionHit(sel: LassoSelection, wx: Float, wy: Float): Boolean {
+    fun selectionHit(sel: LassoSelection, wx: Float, wy: Float): Boolean {
         if (sel.rect.contains(wx, wy)) return true
         val r = RectF()
         for (id in sel.cardIds) {
@@ -414,7 +414,7 @@ internal class SelectionController(private val board: BoardInteractionController
         return false
     }
 
-    internal fun handleLassoAction(action: String) {
+    fun handleLassoAction(action: String) {
         when (action) {
             "trash" -> deleteLassoSelection()
             "copy" -> copyLassoSelection()
@@ -448,7 +448,7 @@ internal class SelectionController(private val board: BoardInteractionController
         updateLassoOverlay()
     }
 
-    internal fun selectStroke(rec: BoardEngine.StrokeRec) {
+    fun selectStroke(rec: BoardEngine.StrokeRec) {
         val frame = synchronized(BoardEngine.lock) { RectF(BoardEngine.strokeInkBounds(rec)) }
         val pad = lassoPadWorld()
         frame.inset(-pad, -pad)
@@ -496,7 +496,7 @@ internal class SelectionController(private val board: BoardInteractionController
         }
     }
 
-    internal fun deleteLassoSelection() {
+    fun deleteLassoSelection() {
         val sel = lasso ?: return
         val change = BoardHistory.Change("lasso-delete")
         synchronized(BoardEngine.lock) {
@@ -510,7 +510,7 @@ internal class SelectionController(private val board: BoardInteractionController
         Log.i(BoardInteractionController.TAG_LASSO, "deleted strokes=${sel.strokeIds.size} cards=${sel.cardIds.size}")
     }
 
-    internal fun refreshSingleCardFrame() {
+    fun refreshSingleCardFrame() {
         val sel = lasso ?: return
         if (!isSingleCardSelection(sel)) return
         val card = BoardEngine.cards[sel.cardIds[0]] ?: return
@@ -520,18 +520,18 @@ internal class SelectionController(private val board: BoardInteractionController
         updateLassoOverlay()
     }
 
-    internal fun singleCardFrameHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
+    fun singleCardFrameHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
         val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardEngine.scale, 0.25f)
         val kind = sel.cardIds.firstOrNull()?.let { BoardEngine.cards[it]?.kind }
         return ResizeHandles.hit(ResizeHandles.forCard(kind), sel.rect, wx, wy, radius)
     }
 
-    internal fun shapeEdgeHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
+    fun shapeEdgeHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
         val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardEngine.scale, 0.25f)
         return ResizeHandles.hit(ResizeHandles.forSelection(false, true, false), sel.rect, wx, wy, radius)
     }
 
-    internal fun selectionCornerHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
+    fun selectionCornerHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
         if (isSingleCardSelection(sel)) return null
         val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardEngine.scale, 0.25f)
         return ResizeHandles.hit(ResizeHandles.forSelection(true, shapeKindOf(sel) != null, false), sel.rect, wx, wy, radius)
@@ -555,7 +555,7 @@ internal class SelectionController(private val board: BoardInteractionController
         Log.i(BoardInteractionController.TAG_LASSO, "select-below cancelled reason=$reason")
     }
 
-    internal fun handleSelectBelow(wy: Float) {
+    fun handleSelectBelow(wy: Float) {
         selectBelowArmed = false
         board.chrome.setSelectBelowActive(false)
 

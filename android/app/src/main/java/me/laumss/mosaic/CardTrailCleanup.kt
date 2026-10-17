@@ -47,7 +47,7 @@ internal class CardTrailCleanup(private val board: BoardInteractionController) {
         queue("resume:$reason", 0L)
     }
 
-    internal fun schedule(oldPositions: Region, reason: String) {
+    fun schedule(oldPositions: Region, reason: String) {
         if (!board.surface.showsBoardChrome) return
         backlog.add(oldPositions)
         if (backlog.isEmpty) return

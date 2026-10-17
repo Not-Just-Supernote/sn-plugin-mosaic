@@ -19,7 +19,7 @@ internal class PenInput(private val board: BoardInteractionController) {
     var penContact = false
         private set
 
-    internal var penHovering = false
+    var penHovering = false
 
     var penHoverX = 0f
         private set
@@ -40,8 +40,7 @@ internal class PenInput(private val board: BoardInteractionController) {
     var penSession: PenSession? = null
         private set
 
-    var penMoveSession: MoveSession? = null
-        private set
+    private var penMoveSession: MoveSession? = null
 
     private var trailCause = "none"
 
@@ -153,9 +152,9 @@ internal class PenInput(private val board: BoardInteractionController) {
         }
     }
 
-    internal fun discardWriteTrail(s: PenSession.Write, reason: String) {
+    fun discardWriteTrail(s: PenSession.Write, reason: String) {
         if (s.points.size < 4) return
-        board.host.onPenTrailDiscarded(reason)
+        board.host.inkHandoff.onPenTrailDiscarded(reason)
     }
 
     fun onPen(event: MotionEvent) {
@@ -185,7 +184,7 @@ internal class PenInput(private val board: BoardInteractionController) {
         reevaluateTrailColor("hover")
     }
 
-    internal fun reevaluateTrailColor(reason: String) {
+    fun reevaluateTrailColor(reason: String) {
         val want = trailWantsWhite(board.worldX(penHoverX), board.worldY(penHoverY))
         if (want == trailWhite) return
         trailWhite = want
@@ -547,7 +546,7 @@ internal class PenInput(private val board: BoardInteractionController) {
         val rec = draft.withColor(ink)
         val change = (if (s.continuousWrite) board.cardGestures.growCardForStroke(rec) else null)
             ?: BoardHistory.Change("draw").stroke(null, rec)
-        board.host.commitPlainStroke { board.applyChange(change, record = true) }
+        board.host.inkHandoff.commitPlainStroke { board.applyChange(change, record = true) }
         lastCardWriteId = s.cardId
         lastCardWriteAt = SystemClock.uptimeMillis()
         if (!marker && (ink != INK_BLACK) != trailWhite) Log.i(BoardInteractionController.TAG_PEN, "[MosaicTrail] color differs from hardware trail committedWhite=${ink != INK_BLACK} trailWhite=$trailWhite stroke=${s.id}")

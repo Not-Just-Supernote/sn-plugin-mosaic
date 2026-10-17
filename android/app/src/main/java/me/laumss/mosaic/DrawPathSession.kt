@@ -8,6 +8,7 @@ import android.hardware.display.DisplayManager
 import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
+import android.view.MotionEvent
 import com.ratta.supernote.pluginlib.api.HostDataCacheAPI
 import java.util.concurrent.atomic.AtomicLong
 
@@ -20,13 +21,14 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         private const val FAST_MAX_ATTEMPTS = 20
         private val REARM_DELAYS_MS = longArrayOf(400L, 900L, 1700L)
         private const val WRITE_INFO_REFRESH_MIN_INTERVAL_MS = 1000L
+        private const val HOVER_REARM_MIN_INTERVAL_MS = 1000L
     }
 
     private var penWidth: Int = (PenPopup.WIDTHS[PenPopup.DEFAULT_INDEX] * 100f).toInt()
 
     private var penStyle: PenStyle = PenStyle.PEN
 
-    @Volatile internal var penConfigDirty = true
+    @Volatile private var penConfigDirty = true
 
     private var stylusCalibX = 0
 
@@ -38,9 +40,9 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
 
     private var rotationReconfigureToken = 0
 
-    internal var configured = false
+    var configured = false
 
-    internal var drawPathActive = false
+    var drawPathActive = false
         set(value) {
             field = value
             DrawPathGate.inkExpected = value
@@ -48,13 +50,13 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
 
     private var drawPathGateHeld = false
 
-    internal var drawPathBinder: IBinder? = null
+    var drawPathBinder: IBinder? = null
 
     private var suspendRequested = false
 
     private var regionBlocked = false
 
-    internal val drawPathSuspended: Boolean get() = suspendRequested || regionBlocked
+    val drawPathSuspended: Boolean get() = suspendRequested || regionBlocked
 
     @Volatile private var writeContext: WriteContext? = null
 
@@ -62,7 +64,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
 
     private var lastWriteInfoSent: WriteContext? = null
 
-    internal val drawPathAppName: String = DrawPathClient.MOSAIC_APP_NAME
+    val drawPathAppName: String = DrawPathClient.MOSAIC_APP_NAME
 
     private var trailWhite = false
 
@@ -131,7 +133,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         override fun onLowMemory() = Unit
     }
 
-    internal var lastHoverRearmAt = 0L
+    var lastHoverRearmAt = 0L
 
     /** Starts watching rotation and the note being written to, and configures the service. */
     fun attach() {
@@ -143,6 +145,32 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         view.mainHandler.postDelayed(writeContextWatch, 1500L)
         refreshWriteInfo("attach", force = true)
         scheduleConfigure("attach")
+    }
+
+    /** Re-sends the pen setup while the pen hovers, so the next stroke starts with it; waits while a stroke is handed off. */
+    fun onPenHover(action: Int) {
+        val handoff = view.inkHandoff
+        val now = System.currentTimeMillis()
+        when (action) {
+            MotionEvent.ACTION_HOVER_ENTER -> {
+                if (handoff.awaitingStrokeCommit) {
+                    handoff.hoverRearmDeferred = true
+                } else {
+                    lastHoverRearmAt = now
+                    rearmDrawPath("hoverEnter")
+                }
+            }
+            MotionEvent.ACTION_HOVER_MOVE -> {
+                if (now - lastHoverRearmAt > HOVER_REARM_MIN_INTERVAL_MS || penConfigDirty) {
+                    if (handoff.awaitingStrokeCommit) {
+                        handoff.hoverRearmDeferred = true
+                    } else {
+                        lastHoverRearmAt = now
+                        rearmDrawPath("hoverHold")
+                    }
+                }
+            }
+        }
     }
 
     /** Stops the watchers and drops configure and write-info work still queued. */
@@ -201,7 +229,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         val layerId: Int,
     )
 
-    internal fun restoreDrawPathPressureCurve() {
+    fun restoreDrawPathPressureCurve() {
         val binder = drawPathBinder ?: return
         synchronized(DrawPathGate.writeLock) {
             DrawPathClient.restoreDefaultPressureCurve(binder, drawPathAppName)
@@ -270,9 +298,9 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
             Log.i(MosaicBoardView.TAG, "[MosaicTrail] color=$color stored reason=$reason configured=$configured active=$drawPathActive")
             return
         }
-        if (view.stylusContact || view.awaitingStrokeCommit) {
-            view.hoverRearmDeferred = true
-            Log.i(MosaicBoardView.TAG, "[MosaicTrail] color=$color deferred reason=$reason contact=${view.stylusContact} awaitingCommit=${view.awaitingStrokeCommit}")
+        if (view.inkHandoff.stylusContact || view.inkHandoff.awaitingStrokeCommit) {
+            view.inkHandoff.hoverRearmDeferred = true
+            Log.i(MosaicBoardView.TAG, "[MosaicTrail] color=$color deferred reason=$reason contact=${view.inkHandoff.stylusContact} awaitingCommit=${view.inkHandoff.awaitingStrokeCommit}")
             return
         }
         val binder = drawPathBinder ?: return
@@ -404,7 +432,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         }
     }
 
-    internal fun enableDrawPath(reason: String) {
+    fun enableDrawPath(reason: String) {
         val binder = ensureBinder()
         if (binder == null) {
             Log.w(MosaicBoardView.TAG, "drawPath enable pending: reason=$reason binder=null")
@@ -429,13 +457,13 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
     }
 
     fun reassertPenBlock(reason: String) {
-        Log.i(MosaicBoardView.TAG, "[MosaicPenButton] block reason=$reason ink=${view.inkEnabled} lasso=${view.lassoEnabled} active=$drawPathActive configured=$configured contact=${view.stylusContact}")
+        Log.i(MosaicBoardView.TAG, "[MosaicPenButton] block reason=$reason ink=${view.inkEnabled} lasso=${view.lassoEnabled} active=$drawPathActive configured=$configured contact=${view.inkHandoff.stylusContact}")
         if (!view.attached || !configured || view.inkEnabled || drawPathActive) return
 
         DrawPathGate.reblock("pen-block:$reason", PEN_BLOCK_REASSERT_MS)
     }
 
-    internal fun disableDrawPath(reason: String) {
+    fun disableDrawPath(reason: String) {
         drawPathActive = false
         val binder = drawPathBinder ?: return
         try {
@@ -490,7 +518,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         refreshWriteInfo(reason, force = true)
     }
 
-    internal fun requestRotationReconfigure(source: String) {
+    fun requestRotationReconfigure(source: String) {
         publishHostRotation()
         refreshWriteInfo(source)
         val expectedRotation = view.display?.rotation ?: -1
@@ -534,7 +562,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         }
     }
 
-    internal fun scheduleConfigure(reason: String) {
+    fun scheduleConfigure(reason: String) {
         configured = false
         val generation = ++configureGeneration
         Log.i(
@@ -613,7 +641,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         }
     }
 
-    internal fun rearmDrawPath(reason: String) {
+    fun rearmDrawPath(reason: String) {
         if (!configured) return
         val binder = drawPathBinder ?: return
         try {

@@ -19,20 +19,20 @@ internal class NoteSession(private val board: BoardInteractionController) {
         }
     }
 
-    internal val noteController = NoteController()
+    val noteController = NoteController()
 
-    internal var notesDirectory: String = ""
+    var notesDirectory: String = ""
 
-    internal var suspendedBoard: SuspendedBoard? = null
+    var suspendedBoard: SuspendedBoard? = null
 
-    internal var currentNoteHeader: String? = null
+    var currentNoteHeader: String? = null
 
-    internal var currentNoteHeaderPlaceholder = false
+    var currentNoteHeaderPlaceholder = false
 
-    internal var currentNoteHeaderHeight = 0f
+    var currentNoteHeaderHeight = 0f
 
     // View scale of the open note page; the header is laid out at screen size inside it.
-    internal var notePageScale = 1f
+    var notePageScale = 1f
 
     private var noteEntryCard: BoardEngine.CardRec? = null
 
@@ -44,7 +44,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
     // Toolbar height the note's top inset was last laid out with.
     private var noteToolbarInset = 0f
 
-    internal class SuspendedBoard(val scene: BoardEngine.SceneSnapshot, val history: BoardHistory, val lasso: LassoSelection?)
+    class SuspendedBoard(val scene: BoardEngine.SceneSnapshot, val history: BoardHistory, val lasso: LassoSelection?)
 
     /** The plugin is closing inside a note: save it, and put the board scene back for the scene cache. */
     fun leaveOnDetach() {
@@ -75,7 +75,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
         return true
     }
 
-    internal fun restoreSessionNote() {
+    fun restoreSessionNote() {
         if (preparePendingNoteImport()) return
         if (suspendedBoard != null || board.surfaceSwitching) return
         val ref = MosaicSession.savedNoteRef(board.host.context) ?: return
@@ -127,14 +127,14 @@ internal class NoteSession(private val board: BoardInteractionController) {
         Log.i(BoardInteractionController.TAG, "surface entered name=${next.name}")
     }
 
-    internal fun applyTemplateForSurface(next: BoardSurface, noteRef: String?) {
+    fun applyTemplateForSurface(next: BoardSurface, noteRef: String?) {
         val template = TemplateStore.board(board.host.context)
         val pageWidth = if (next.showsBoardChrome) 0f else ScrollingDocument.WIDTH
         board.content.setBackgroundTemplate(template, pageWidth)
         board.chrome.setCurrentTemplate(template)
     }
 
-    internal fun openNote(ref: String?) {
+    fun openNote(ref: String?) {
         if (suspendedBoard != null || board.surfaceSwitching || ref.isNullOrBlank() || !ref.matches(Regex("note-[a-zA-Z0-9-]+")) || notesDirectory.isBlank()) return
         val sourceCard = synchronized(BoardEngine.lock) { BoardEngine.cards.values.firstOrNull { it.noteRef == ref } } ?: return
         board.inkling.invalidateClipboardWork("open-note")
@@ -231,21 +231,21 @@ internal class NoteSession(private val board: BoardInteractionController) {
         }
     }
 
-    internal fun setPageNoteHeader(markdown: String) {
+    fun setPageNoteHeader(markdown: String) {
         currentNoteHeaderPlaceholder = markdown.isBlank()
         currentNoteHeader = if (currentNoteHeaderPlaceholder) MosaicStrings.t(MosaicStrings.Key.noteHeaderPlaceholder) else markdown
         currentNoteHeaderHeight = BoardContentView.noteHeaderHeight(currentNoteHeader.orEmpty(), notePageScale)
     }
 
-    internal fun pageHeaderRegionWorld(): RectF = RectF(0f, -currentNoteHeaderHeight, ScrollingDocument.WIDTH, 0f)
+    fun pageHeaderRegionWorld(): RectF = RectF(0f, -currentNoteHeaderHeight, ScrollingDocument.WIDTH, 0f)
 
     private fun noteTopInsetWorld(): Float = board.toolbarHeightWorld() + currentNoteHeaderHeight * BoardEngine.scale
 
-    internal fun noteHeaderHit(x: Float, y: Float): Boolean =
+    fun noteHeaderHit(x: Float, y: Float): Boolean =
         !board.surface.showsBoardChrome && currentNoteHeaderHeight > 0f && board.worldY(y) < 0f && !noteOffPageHit(x, y)
 
     // Zoomed out, the white around the note page cannot be written on.
-    internal fun noteOffPageHit(x: Float, y: Float): Boolean {
+    fun noteOffPageHit(x: Float, y: Float): Boolean {
         if (board.surface.showsBoardChrome) return false
         val wx = board.worldX(x)
         val wy = board.worldY(y)
@@ -256,7 +256,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
         wy > notePageBottom && (board.surface as? NoteSurface)?.zoomedOut(BoardEngine.scale) == true
 
     // Ink inside a note stays on the writable page: below the header, between the sides, above the zoomed-out end.
-    internal fun noteInkOffPage(wx: Float, wy: Float): Boolean =
+    fun noteInkOffPage(wx: Float, wy: Float): Boolean =
         !board.surface.showsBoardChrome && (wx < 0f || wx > ScrollingDocument.WIDTH || wy < 0f || noteBelowPageEnd(wy))
 
     // Off-page parts of the view in view pixels, handed to the system ink service so it never draws there.
@@ -279,13 +279,13 @@ internal class NoteSession(private val board: BoardInteractionController) {
     }
 
     // Zoomed out, the note page ends where the ink ends; the content view frames it there and the pen stops at it.
-    internal fun syncNotePageFrame() {
+    fun syncNotePageFrame() {
         val note = board.surface as? NoteSurface
         notePageBottom = note?.zoomedOutPageBottom() ?: Float.POSITIVE_INFINITY
         board.content.setNotePageFrame(if (note != null) notePageScale else 0f, notePageBottom)
     }
 
-    internal fun setNoteHeaderHoverBlocked(blocked: Boolean) {
+    fun setNoteHeaderHoverBlocked(blocked: Boolean) {
         if (noteHeaderHoverBlocked == blocked) return
         noteHeaderHoverBlocked = blocked
         board.host.drawPath.setRegionBlocked(blocked, "note-header")
@@ -335,7 +335,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
 
     // When the toolbar hides or shows in a note, a page resting at its top follows the toolbar edge,
     // so hiding it leaves no blank band and showing it does not cover the header.
-    internal fun keepNoteTopOnToolbarChange() {
+    fun keepNoteTopOnToolbarChange() {
         val now = board.toolbarHeightWorld()
         val before = noteToolbarInset
         noteToolbarInset = now

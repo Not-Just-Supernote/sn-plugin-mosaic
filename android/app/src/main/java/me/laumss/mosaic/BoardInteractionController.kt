@@ -560,7 +560,7 @@ class BoardInteractionController(
     override fun onManualRefresh() {
         trailCleanup.cancel("manual-refresh")
         if (surfaceSwitching) return
-        host.flushInkHandoff("manual-refresh")
+        host.inkHandoff.flushInkHandoff("manual-refresh")
         Log.i(TAG, "manual full refresh: exit lasso/eraser/gesture states ${arbiter.describe()} lasso=${selection.lasso != null}")
         cancelActiveInteractions("manual-refresh")
         panZoom.resetNoteScrollMode()
@@ -575,7 +575,7 @@ class BoardInteractionController(
     override fun onSlider(gesture: String, side: Int) {
         if (side != settings.sliderSide) return
         trailCleanup.cancel("slider")
-        host.flushInkHandoff("slider")
+        host.inkHandoff.flushInkHandoff("slider")
         Log.i(TAG, "[Slider] $gesture side=$side")
         when (gesture) {
             "slideUp" -> redo()
