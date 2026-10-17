@@ -1346,7 +1346,7 @@ class MosaicBoardView(
             lastStylusY = event.y
 
             controller.preflightPenButtonState()
-            controller.onPen(event)
+            controller.pen.onPen(event)
 
             feedInkView(event)
 
@@ -1354,7 +1354,7 @@ class MosaicBoardView(
         } else {
             val counterBefore = sceneChangeCounter
             feedInkView(event)
-            controller.onPen(event)
+            controller.pen.onPen(event)
             if ((event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)
                 && awaitingStrokeCommit && sceneChangeCounter == counterBefore && !plainStrokeCommitted
             ) {
@@ -1451,7 +1451,7 @@ class MosaicBoardView(
         if (toolType == MotionEvent.TOOL_TYPE_STYLUS
             || toolType == MotionEvent.TOOL_TYPE_ERASER
         ) {
-            controller.onPenHover(event)
+            controller.pen.onPenHover(event)
 
             val now = System.currentTimeMillis()
             when (event.actionMasked) {

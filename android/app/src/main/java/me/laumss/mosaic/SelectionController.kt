@@ -274,7 +274,7 @@ internal class SelectionController(private val board: BoardInteractionController
         board.scheduleChromeUpdate()
         if (next == null) {
             board.handler.postDelayed({
-                if (lasso == null && !board.penContact && !board.lassoMode) {
+                if (lasso == null && !board.pen.penContact && !board.lassoMode) {
                     board.presentation.release(BoardPresentation.Reason.LASSO, linger = false)
                     board.content.markSettleRequested()
                     board.content.postInvalidateOnAnimation()
@@ -283,7 +283,7 @@ internal class SelectionController(private val board: BoardInteractionController
         }
         if (next != null) {
             board.handler.post {
-                if (!board.penContact) {
+                if (!board.pen.penContact) {
                     board.refreshHostToolFlags()
                     board.overlay.invalidate()
                     board.content.markSettleRequested()

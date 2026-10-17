@@ -42,7 +42,7 @@ internal class CardTrailCleanup(private val board: BoardInteractionController) {
     fun resume(reason: String) {
         if (backlog.isEmpty || queued || driver.phase != "idle" ||
             !board.surface.showsBoardChrome || !board.content.isAttachedToWindow || !board.content.isShown ||
-            board.content.holdPaint || board.chrome.blocksPen || board.penContact || board.fingers.isNotEmpty() || board.sliderTwoDown ||
+            board.content.holdPaint || board.chrome.blocksPen || board.pen.penContact || board.fingers.isNotEmpty() || board.sliderTwoDown ||
             board.presentation.state.movingCards) return
         queue("resume:$reason", 0L)
     }
@@ -72,7 +72,7 @@ internal class CardTrailCleanup(private val board: BoardInteractionController) {
                 runningTicket = ticket
                 driver.schedule {
                     val exposed = Region(trail)
-                    if (!board.surface.showsBoardChrome || board.chrome.blocksPen || board.penContact ||
+                    if (!board.surface.showsBoardChrome || board.chrome.blocksPen || board.pen.penContact ||
                         board.fingers.isNotEmpty() || board.sliderTwoDown || scale != BoardEngine.scale || panX != BoardEngine.panX || panY != BoardEngine.panY) {
                         exposed.setEmpty()
                     } else {

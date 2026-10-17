@@ -29,7 +29,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
         }
         board.overlay.hideFramePreview()
         if (candidate != null) {
-            board.discardWriteTrail(s, "card-frame")
+            board.pen.discardWriteTrail(s, "card-frame")
             createCardFromFrame(candidate)
             Log.i(BoardInteractionController.TAG_PEN, "UP consumed as card frame")
             return true
@@ -66,7 +66,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
         cancelFrameHold()
         val task = Runnable {
             frameHoldTask = null
-            if (!board.penContact || board.penSession !== s) return@Runnable
+            if (!board.pen.penContact || board.pen.penSession !== s) return@Runnable
             s.frameEvaluations++
             val evaluation = CardFrameRecognizer.evaluate(s.points.toArray(), CardFrameRecognizer.Options(viewportScale = BoardEngine.scale))
             val rect = evaluation.rect
@@ -122,7 +122,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
             CardEdgeExtend.clampToBlockers(card, match.side, match.rect, BoardEngine.cards.values, CARD_EXTEND_GAP)
         }
         // 认出是方括号就吃掉这一笔，挡死了也不留下笔迹。
-        board.discardWriteTrail(s, "card-extend")
+        board.pen.discardWriteTrail(s, "card-extend")
         if (target.width() - card.width < 1f && target.height() - card.height < 1f) {
             Log.i(BoardInteractionController.TAG_PEN, "[CardExtend] blocked card=${card.id} side=${match.side} ${match.metrics}")
             return true
@@ -208,7 +208,7 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
         if (hypot(lx - fx, ly - fy) < BoardGeometry.CARD_STROKE_MIN_DISTANCE) return false
         val endX = source.x + lx
         val endY = source.y + ly
-        return completeCardLink(source, endX, endY) { reason -> board.discardWriteTrail(s, reason) }
+        return completeCardLink(source, endX, endY) { reason -> board.pen.discardWriteTrail(s, reason) }
     }
 
     private fun completeCardLink(source: BoardEngine.CardRec, endX: Float, endY: Float,

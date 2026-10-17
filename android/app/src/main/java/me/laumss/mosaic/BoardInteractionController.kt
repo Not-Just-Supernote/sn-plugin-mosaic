@@ -1,15 +1,12 @@
 package me.laumss.mosaic
 
 import android.content.Intent
-import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Region
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.util.Log
-import android.view.MotionEvent
 import com.facebook.react.bridge.WritableMap
 import java.util.UUID
 import kotlin.math.abs
@@ -35,16 +32,11 @@ class BoardInteractionController(
         private const val TAG_TWO = "MosaicTwoFinger"
 
         const val PEN_WIDTH_DP = 2f
-        const val INK_BLACK = 0xff000000.toInt()
-
-        const val ERASER_HIT_RADIUS = 12f
 
         private const val ZOOM_SNAP_RATIO = 0.03f
         // Releasing a note pinch this close to 100% snaps back to the page filling the width.
         private const val NOTE_ZOOM_SNAP_RATIO = 0.08f
         private const val NOTE_PAN_ZOOM_LOCK_SLOP_DP = 12f
-
-        private const val SHAPE_MIN_DRAG_DP = 8f
 
         // Longest the board stays unpainted at launch while a saved note reopens.
         private const val NOTE_RESTORE_PAINT_HOLD_MS = 2000L
@@ -53,9 +45,6 @@ class BoardInteractionController(
 
         const val ACCENT_BG_COLOR = "#FFF9E3"
         const val ACCENT_TEXT_COLOR = "#3f3b2e"
-
-        // A card stroke that starts this soon after the previous stroke on the same card is handwriting, not a card gesture.
-        const val CARD_CONTINUOUS_WRITE_MS = 1500L
 
         const val TWO_FINGER_CANDIDATE_HOLD_MS = 300L
 
@@ -153,7 +142,7 @@ class BoardInteractionController(
     }
 
     // Strokes written on the cached board before JS has loaded would be lost when JS's scene replaces it.
-    private var penHeldForJsScene = false
+    internal var penHeldForJsScene = false
     private val releasePenForJsSceneTask = Runnable { releasePenForJsScene("timeout") }
 
     internal fun holdPenForJsScene() {
@@ -174,26 +163,26 @@ class BoardInteractionController(
     var touchEnabled = true
         private set
 
-    private var eraserMode = false
+    internal var eraserMode = false
     internal var lassoMode = false
 
-    private var shapeMode = false
-    private var shapeKind = Shapes.Kind.RECT
+    internal var shapeMode = false
+    internal var shapeKind = Shapes.Kind.RECT
 
     internal var shapeSelectionPending = false
 
-    private var penStyle: PenStyle = PenStyle.PEN
+    internal var penStyle: PenStyle = PenStyle.PEN
 
-    private var penWidth = PenPopup.WIDTHS[PenPopup.DEFAULT_INDEX]
+    internal var penWidth = PenPopup.WIDTHS[PenPopup.DEFAULT_INDEX]
 
-    private var markerInk = MarkerInk.BLACK
+    internal var markerInk = MarkerInk.BLACK
 
     fun setPenStyle(style: PenStyle, width: Float) {
         penStyle = style
         penWidth = width.coerceIn(1f, 40f)
         Log.i(TAG_PEN, "style=${style.name} stdWidth=$penWidth")
         host.setPenStyle(style, penWidth)
-        reevaluateTrailColor("pen-style")
+        pen.reevaluateTrailColor("pen-style")
     }
 
     fun setMarkerInk(ink: MarkerInk) {
@@ -202,71 +191,14 @@ class BoardInteractionController(
         host.setMarkerInk(ink, "marker-ink")
     }
 
-    internal var penContact = false
-    private var penHovering = false
-    private var penHoverX = 0f
-    private var penHoverY = 0f
-
-    private var trailWhite = false
-
-    private var penLastX = 0f
-    private var penLastY = 0f
-
     internal var sliderTwoDown = false
-    private var lastCardWriteId: String? = null
-    private var lastCardWriteAt = 0L
 
-    internal var penSession: PenSession? = null
-    private var penMoveSession: MoveSession? = null
-
-    private class Finger(val id: Int, val downX: Float, val downY: Float, val downAt: Long, val penPriority: Boolean) {
-        var x = downX
-        var y = downY
-    }
 
     internal val fingers = LinkedHashMap<Int, Finger>()
 
-    private enum class PanZoomLock { NONE, PAN, ZOOM }
 
-    private sealed class FingerGesture {
-        object Idle : FingerGesture()
 
-        class CardPending(val fingerId: Int, val cardId: String) : FingerGesture()
-
-        class TwoCandidate(val a: Int, val b: Int, val startedAt: Long) : FingerGesture()
-
-        class PanZoom(
-            val a: Int,
-            val b: Int,
-            var startPanX: Float,
-            var startPanY: Float,
-            var startScale: Float,
-            var startCenterX: Float,
-            var startCenterY: Float,
-            var startDistance: Float,
-            val region: SparseNavigation.Region?,
-            val neighbors: SparseNavigation.Neighbors,
-        ) : FingerGesture() {
-            val cleanupTrail = Region()
-            var frames = 0
-            var overscroll: SparseNavigation.Overscroll? = null
-
-            var lastCenterX = startCenterX
-            var lastCenterY = startCenterY
-            // In a note, the gesture locks to pan or zoom once one motion passes the slop; the board does both at once.
-            var lock = PanZoomLock.NONE
-        }
-
-        object ScreenTool : FingerGesture()
-
-        class Move(val fingerId: Int) : FingerGesture()
-
-        class SurfaceScroll(val fingerId: Int, val startY: Float, val startPanY: Float) : FingerGesture()
-
-        class EdgeSwipe(val fingerId: Int, val downX: Float, val downY: Float) : FingerGesture()
-    }
-
-    private var fingerGesture: FingerGesture = FingerGesture.Idle
+    internal var fingerGesture: FingerGesture = FingerGesture.Idle
     private var cardLongPressTask: Runnable? = null
 
     private var tapEpisodeActive = false
@@ -292,7 +224,7 @@ class BoardInteractionController(
 
     internal val presentation by lazy {
         BoardPresentation(handler, content, { surface.showsBoardChrome }, EINK_OWNER, GESTURE_SETTLE_MS).also {
-            it.onStateChanged = { if (penHovering && !penContact) reevaluateTrailColor("presentation") }
+            it.onStateChanged = { if (pen.penHovering && !pen.penContact) pen.reevaluateTrailColor("presentation") }
         }
     }
 
@@ -365,8 +297,7 @@ class BoardInteractionController(
         InkAlign.stop()
         cancelCardLongPress()
         cardGestures.cancelFrameHold()
-        penSession = null
-        penMoveSession = null
+        pen.reset()
         fingerMoveSession = null
         BoardEngine.hiddenCardIds = emptySet()
         BoardEngine.hiddenStrokeIds = emptySet()
@@ -433,20 +364,12 @@ class BoardInteractionController(
 
     internal fun worldY(px: Float): Float = (px / density - BoardEngine.panY) / BoardEngine.scale
 
-    private fun isOnDarkCard(wx: Float, wy: Float): Boolean =
+    internal fun isOnDarkCard(wx: Float, wy: Float): Boolean =
         InkBackdrop.darkAt(wx, wy)
 
     internal fun screenX(world: Float): Float = (world * BoardEngine.scale + BoardEngine.panX) * density
 
     internal fun screenY(world: Float): Float = (world * BoardEngine.scale + BoardEngine.panY) * density
-
-    private fun penX(e: MotionEvent): Float = e.x + InkAlign.offsetX
-
-    private fun penY(e: MotionEvent): Float = e.y + InkAlign.offsetY
-
-    private fun penHistX(e: MotionEvent, i: Int): Float = e.getHistoricalX(i) + InkAlign.offsetX
-
-    private fun penHistY(e: MotionEvent, i: Int): Float = e.getHistoricalY(i) + InkAlign.offsetY
 
     internal fun worldRectToPx(r: RectF, out: RectF): RectF {
         out.set(screenX(r.left), screenY(r.top), screenX(r.right), screenY(r.bottom))
@@ -490,7 +413,7 @@ class BoardInteractionController(
         regionsDirty = true
         scheduleChromeUpdate()
 
-        if (penHovering && !penContact) reevaluateTrailColor(if (inkFixed) "ink-reconciled" else "scene:${change.label}")
+        if (pen.penHovering && !pen.penContact) pen.reevaluateTrailColor(if (inkFixed) "ink-reconciled" else "scene:${change.label}")
     }
 
     private fun applyDiffs(diffs: List<BoardHistory.Diff>, forward: Boolean, emitCommands: Boolean) {
@@ -607,84 +530,11 @@ class BoardInteractionController(
         Log.i(TAG_TOOL, "$source ${t.reason} ${t.before}->${t.after} keepSelection=${t.keepSelection} ${arbiter.describe()}")
         if (!t.changed) return
 
-        val previous = penSession
-        var discardedWrite: PenSession.Write? = null
-        when (previous) {
-            is PenSession.Write -> { cardGestures.cancelFrameHold(); overlay.hideFramePreview(); penSession = null; discardedWrite = previous }
-            is PenSession.Erase -> { finishErase(previous); penSession = null }
-            is PenSession.Lasso -> { penSession = null; ink.abortStroke() }
-            is PenSession.Shape -> { penSession = null; overlay.hideShapePreview() }
-            else -> {}
-        }
+        val previous = pen.penSession
+        val discardedWrite = pen.endSessionForToolChange()
         if (!t.after.lasso && !t.after.shape && !t.keepSelection) selection.setLasso(null)
         syncToolMirrors(t.after, source)
-
-        discardedWrite?.let { discardWriteTrail(it, "tool-change:$source") }
-
-        if (penContact && previous != null && previous !== PenSession.Consumed) {
-            beginContactSession(t.after, discardedWrite, source)
-        }
-    }
-
-    private fun beginContactSession(state: ToolArbiter.State, prevWrite: PenSession.Write?, source: String) {
-        val wx = worldX(penLastX)
-        val wy = worldY(penLastY)
-        when {
-            state.eraser -> {
-                val session = PenSession.Erase(BoardHistory.Change("erase"))
-                penSession = session
-                var replayed = 0
-                val from = prevWrite?.convertFromIndex ?: -1
-                if (prevWrite != null && from >= 0) {
-                    var i = from
-                    while (i + 1 < prevWrite.points.size) {
-                        eraseAt(session, prevWrite.points[i] + prevWrite.cardX, prevWrite.points[i + 1] + prevWrite.cardY)
-                        i += 2
-                        replayed++
-                    }
-                }
-                eraseAt(session, wx, wy)
-                flushErase(session)
-            }
-            state.lasso -> {
-                val session = PenSession.Lasso()
-                session.pointsPx.add(penLastX); session.pointsPx.add(penLastY)
-                penSession = session
-                Log.i(TAG_PEN, "contact converted to lasso source=$source")
-            }
-            state.shape -> {
-                penSession = PenSession.Shape(shapeKind, penLastX, penLastY)
-                Log.i(TAG_PEN, "contact converted to shape source=$source")
-            }
-            else -> {
-                if (selection.lasso != null) { penSession = PenSession.Consumed; return }
-                val card = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
-                val connection = if (card == null) BoardEngine.connectionAt(wx, wy) else null
-                val session = PenSession.Write(
-                    id = newId("stroke-"),
-                    space = when {
-                        card != null -> "card:${card.id}"
-                        connection != null -> "connection:${connection.id}"
-                        else -> "canvas"
-                    },
-                    cardId = card?.id,
-                    cardX = card?.x ?: 0f,
-                    cardY = card?.y ?: 0f,
-                )
-                val pressure = InputReader.currentPenPressure()
-                if (pressure != null) appendWritePoint(session, wx, wy, pressure)
-                else Log.i(TAG_PEN, "contact write waiting for drawPath pressure source")
-                session.frameLastMeaningfulX = wx
-                session.frameLastMeaningfulY = wy
-                penSession = session
-                Log.i(TAG_PEN, "contact converted to write source=$source")
-            }
-        }
-    }
-
-    internal fun discardWriteTrail(s: PenSession.Write, reason: String) {
-        if (s.points.size < 4) return
-        host.onPenTrailDiscarded(reason)
+        pen.resumeAfterToolChange(previous, discardedWrite, t.after, source)
     }
 
     internal fun syncToolMirrors(state: ToolArbiter.State, source: String) {
@@ -725,480 +575,14 @@ class BoardInteractionController(
             Log.i(
                 TAG_TOOL,
                 "pen-button preflight hover=$rawHover rubber=$rawRubber stylus=$rawStylusButton " +
-                    "controllerHover=$penHovering contact=$penContact",
+                    "controllerHover=${pen.penHovering} contact=${pen.penContact}",
             )
         }
-        if (rawHover && !penHovering) onPenState(InputRouter.PenState.HOVER, true)
+        if (rawHover && !pen.penHovering) onPenState(InputRouter.PenState.HOVER, true)
         when {
             rawRubber -> onPenState(InputRouter.PenState.RUBBER, true)
             rawStylusButton -> onPenState(InputRouter.PenState.STYLUS, true)
         }
-    }
-
-    fun onPen(event: MotionEvent) {
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) trailCleanup.cancel("pen-down")
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> penDown(event)
-            MotionEvent.ACTION_MOVE -> penMove(event)
-            MotionEvent.ACTION_UP -> penUp(event, cancelled = false)
-            MotionEvent.ACTION_CANCEL -> penUp(event, cancelled = true)
-        }
-        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) trailCleanup.resume("pen-up")
-    }
-
-    fun onPenHover(event: MotionEvent) {
-        val exit = event.actionMasked == MotionEvent.ACTION_HOVER_EXIT
-        penHoverX = penX(event)
-        penHoverY = penY(event)
-        if (exit) {
-            if (!penContact)
-            return
-        }
-        if (penContact) return
-        notes.setNoteHeaderHoverBlocked(notes.noteHeaderHit(penHoverX, penHoverY) || notes.noteOffPageHit(penHoverX, penHoverY))
-        if (eraserMode) {
-        }
-
-        reevaluateTrailColor("hover")
-    }
-
-    private fun reevaluateTrailColor(reason: String) {
-        val want = trailWantsWhite(worldX(penHoverX), worldY(penHoverY))
-        if (want == trailWhite) return
-        trailWhite = want
-        host.setTrailWhite(want, "$reason:$trailCause")
-    }
-
-    private var trailCause = "none"
-
-    private fun trailWantsWhite(wx: Float, wy: Float): Boolean {
-        trailCause = "none"
-        if (penStyle == PenStyle.MARKER) return false
-        val top = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
-        val space = when {
-            top != null -> "card:${top.id}"
-            else -> BoardEngine.connectionAt(wx, wy)?.let { "connection:${it.id}" } ?: "canvas"
-        }
-        val layerDark = InkBackdrop.layerDarkAt(space, wx - (top?.x ?: 0f), wy - (top?.y ?: 0f), penWidth * 0.5f)
-        if (layerDark) { trailCause = "layer"; return true }
-        trailCause = "background"
-        return InkBackdrop.darkAt(wx, wy)
-    }
-
-    private fun penDown(e: MotionEvent) {
-        val x = penX(e)
-        val y = penY(e)
-        penLastX = x
-        penLastY = y
-
-        when (fingerGesture) {
-            FingerGesture.ScreenTool -> {}
-            is FingerGesture.TwoCandidate -> {
-                if (!settleTwoCandidate("pen-down")) cancelFingerGestures("pen-down")
-            }
-            else -> cancelFingerGestures("pen-down")
-        }
-        val waitingForJsScene = penHeldForJsScene && surface.showsBoardChrome
-        if (surfaceSwitching || waitingForJsScene || chrome.consumesPoint(x, y) || inkling.toolbarHit(x, y) || notes.noteHeaderHit(x, y) || notes.noteOffPageHit(x, y)) {
-            Log.i(
-                TAG_PEN,
-                "DOWN rejected: ${when {
-                    surfaceSwitching -> "surface-switching"
-                    waitingForJsScene -> "scene-cache"
-                    inkling.toolbarHit(x, y) -> "inkling-toolbar"
-                    notes.noteHeaderHit(x, y) -> "note-header"
-                    notes.noteOffPageHit(x, y) -> "note-off-page"
-                    else -> "chrome"
-                }}",
-            )
-            penSession = PenSession.Consumed
-            return
-        }
-        penContact = true
-        applyTransition(arbiter.penDown(), "pen-down")
-        val wx = worldX(x)
-        val wy = worldY(y)
-        penHoverX = x; penHoverY = y
-        reevaluateTrailColor("down")
-        Log.i(
-            TAG_PEN,
-            "DOWN px=($x,$y) raw=(${e.x},${e.y}) inkAlign=(${InkAlign.offsetX},${InkAlign.offsetY}) " +
-                "world=(${wx.toInt()},${wy.toInt()}) eraser=$eraserMode lasso=$lassoMode " +
-                "${arbiter.describe()} | ${InputReader.describePenRaw()} density=$density " +
-                "pan=(${BoardEngine.panX},${BoardEngine.panY}) scale=${BoardEngine.scale}",
-        )
-
-        val downCard = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
-        val downLayer = if (downCard != null) InkBackdrop.layerAt("card:${downCard.id}", wx - downCard.x, wy - downCard.y, penWidth * 0.5f)
-            else InkBackdrop.layerAt("canvas", wx, wy, penWidth * 0.5f)
-        Log.i(TAG_PEN, "[MosaicTrail] down trailWhite=$trailWhite cause=$trailCause layer=${downLayer ?: "none"} card=${downCard?.id ?: "canvas"} dark=${downCard?.colored == true}")
-
-        if (selection.selectBelowArmed) {
-            selection.handleSelectBelow(wy)
-            penSession = PenSession.Consumed
-            return
-        }
-
-        val currentLasso = selection.lasso
-
-        val hadSelection = currentLasso != null
-        if (currentLasso != null && BoardEngine.connectionAt(wx, wy) == null) {
-            val single = if (selection.isSingleCardSelection(currentLasso)) BoardEngine.cards[currentLasso.cardIds[0]] else null
-            if (single != null) {
-                val handle = selection.singleCardFrameHandle(currentLasso, wx, wy)
-                if (handle != null) {
-                    penMoveSession = transforms.beginResize(true, e.getPointerId(0), wx, wy, single, handle)
-                    penSession = PenSession.Consumed
-                    return
-                }
-            }
-
-            if (overlay.rotateHandleHit(x, y, LASSO_ACTION_TAP_SLOP_DP * density) && selection.selectionRotatable(currentLasso)) {
-                penMoveSession = transforms.beginSelectionRotate(true, e.getPointerId(0), wx, wy, currentLasso)
-                penSession = PenSession.Consumed
-                return
-            }
-
-            val cornerHandle = selection.selectionCornerHandle(currentLasso, wx, wy)
-                ?: (if (selection.shapeKindOf(currentLasso) != null) selection.shapeEdgeHandle(currentLasso, wx, wy) else null)
-            if (cornerHandle != null) {
-                penMoveSession = transforms.beginSelectionResize(true, e.getPointerId(0), wx, wy, currentLasso, cornerHandle)
-                penSession = PenSession.Consumed
-                return
-            }
-            val action = overlay.lassoActionHit(x, y, LASSO_ACTION_TAP_SLOP_DP * density)
-            if (action != null) {
-                selection.handleLassoAction(action)
-                penSession = PenSession.Consumed
-                return
-            }
-
-            if (selection.selectionHit(currentLasso, wx, wy) || overlay.moveHandleHit(x, y, LASSO_ACTION_TAP_SLOP_DP * density)) {
-                penMoveSession = transforms.beginSelectionMove(true, e.getPointerId(0), wx, wy, currentLasso)
-                penSession = PenSession.Consumed
-                return
-            }
-            selection.setLasso(null)
-            if (lassoMode) {
-                val session = PenSession.Lasso()
-                session.pointsPx.add(x); session.pointsPx.add(y)
-                penSession = session
-                Log.i(TAG_LASSO, "pen DOWN outside selection: lasso tool redraws")
-                return
-            }
-            if (shapeMode) {
-                penSession = PenSession.Shape(shapeKind, x, y)
-                Log.i(TAG_LASSO, "pen DOWN outside selection: shape tool draws")
-                return
-            }
-            penSession = PenSession.Consumed
-            Log.i(TAG_LASSO, "pen DOWN outside selection: cleared")
-            return
-        }
-
-        if (eraserMode) {
-            val session = PenSession.Erase(BoardHistory.Change("erase"))
-            penSession = session
-            eraseAt(session, wx, wy)
-            flushErase(session)
-            return
-        }
-
-        if (lassoMode) {
-            val session = PenSession.Lasso()
-            session.pointsPx.add(x); session.pointsPx.add(y)
-            penSession = session
-            return
-        }
-
-        if (shapeMode) {
-            penSession = PenSession.Shape(shapeKind, x, y)
-            return
-        }
-
-        val linkId = noteShots.linkAt(wx, wy)
-        if (linkId != null) {
-            host.setDrawPathSuspended(true, "note-link-tap")
-            penSession = PenSession.OpenNote("", wx, wy, linkId)
-            Log.i(TAG_PEN, "DOWN on note link badge: open on tap id=$linkId")
-            return
-        }
-        val card = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
-        val connection = if (card == null) BoardEngine.connectionAt(wx, wy) else null
-        // Note previews accept card-local annotations through the normal ink path.
-        // Opening the note is handled by the single-finger tap path.
-        val session = PenSession.Write(
-            id = newId("stroke-"),
-            space = when {
-                card != null -> "card:${card.id}"
-                connection != null -> "connection:${connection.id}"
-                else -> "canvas"
-            },
-            cardId = card?.id,
-            cardX = card?.x ?: 0f,
-            cardY = card?.y ?: 0f,
-        )
-        val downPressure = InputReader.pressureForMotionEvent(e)
-        // Every stroke keeps its pen-down nib so a later palette restyle to the calligraphy pen
-        // renders with the same directional nib; only the PEN raster reads it.
-        session.nibAngle = InputReader.calligraphyNibAngleForMotionEvent(e)
-        if (downPressure != null) appendWritePoint(session, wx, wy, downPressure)
-        else Log.i(TAG_PEN, "DOWN write waiting for drawPath pressure source")
-        session.raw(e.x, e.y)
-        session.frameLastMeaningfulX = wx
-        session.frameLastMeaningfulY = wy
-        session.continuousWrite = card != null && card.id == lastCardWriteId &&
-            SystemClock.uptimeMillis() - lastCardWriteAt < CARD_CONTINUOUS_WRITE_MS
-
-        if (sliderTwoDown) session.convertFromIndex = 0
-        penSession = session
-    }
-
-    private fun appendWritePoint(
-        s: PenSession.Write,
-        wx: Float,
-        wy: Float,
-        pressure: Float?,
-    ): Boolean {
-        if (pressure == null || !pressure.isFinite() || pressure !in 0f..1f) return false
-        if (s.clipped) return false
-        // A stroke that runs off a note page ends at the edge; the system ink is blocked there too.
-        if (notes.noteInkOffPage(wx, wy)) { s.clipped = true; return false }
-        s.points.add(wx - s.cardX)
-        s.points.add(wy - s.cardY)
-        s.pressures.add(pressure)
-        return true
-    }
-
-    private fun penMove(e: MotionEvent) {
-        penLastX = penX(e)
-        penLastY = penY(e)
-        penHoverX = penLastX; penHoverY = penLastY
-        reevaluateTrailColor("move")
-        val move = penMoveSession
-        if (move != null) {
-            move.rawMoves++
-            transforms.updateMoveSession(move, worldX(penX(e)), worldY(penY(e)))
-            return
-        }
-        when (val s = penSession) {
-            is PenSession.Write -> {
-                for (i in 0 until e.historySize) {
-                    val pressure = InputReader.pressureForHistoricalEvent(e, i)
-                    if (pressure != null) {
-                        appendWritePoint(s, worldX(penHistX(e, i)), worldY(penHistY(e, i)), pressure)
-                        s.raw(e.getHistoricalX(i), e.getHistoricalY(i))
-                    }
-                }
-                val wx = worldX(penX(e))
-                val wy = worldY(penY(e))
-                val pressure = InputReader.pressureForMotionEvent(e)
-                if (pressure != null) {
-                    appendWritePoint(s, wx, wy, pressure)
-                    s.raw(e.x, e.y)
-                    if (s.cardId == null && surface.allowsCardFrame) cardGestures.updateFrameGesture(s, wx, wy)
-                }
-            }
-            is PenSession.OpenNote -> {
-                if (hypot(worldX(penX(e)) - s.downX, worldY(penY(e)) - s.downY) > BoardGeometry.CARD_DRAG_THRESHOLD_PX / BoardEngine.scale) {
-                    s.moved = true
-                    host.setDrawPathSuspended(false, "note-tap-cancel")
-                    penSession = PenSession.Consumed
-                }
-            }
-            is PenSession.Erase -> {
-                for (i in 0 until e.historySize) eraseAt(s, worldX(penHistX(e, i)), worldY(penHistY(e, i)))
-                eraseAt(s, worldX(penX(e)), worldY(penY(e)))
-                flushErase(s)
-            }
-            is PenSession.Lasso -> {
-                for (i in 0 until e.historySize) { s.pointsPx.add(penHistX(e, i)); s.pointsPx.add(penHistY(e, i)) }
-                s.pointsPx.add(penX(e)); s.pointsPx.add(penY(e))
-            }
-            is PenSession.Shape -> {
-                s.curX = penX(e); s.curY = penY(e)
-                overlay.showShapePreview(shapePreviewPath(s), isOnDarkCard(worldX(s.anchorX), worldY(s.anchorY)))
-            }
-            else -> {}
-        }
-    }
-
-    private fun shapePreviewPath(s: PenSession.Shape): Path {
-        val pts = Shapes.fromDrag(s.kind, s.anchorX, s.anchorY, s.curX, s.curY)
-        return BoardEngine.buildPolylinePath(pts)
-    }
-
-    private fun penUp(e: MotionEvent, cancelled: Boolean) {
-        val wasContact = penContact
-        penContact = false
-        if (wasContact) Log.i(TAG_PEN, "UP px=(${penX(e)},${penY(e)}) raw=(${e.x},${e.y}) cancelled=$cancelled | ${InputReader.describePenRaw()}")
-        try {
-            val move = penMoveSession
-            if (move != null) {
-                penMoveSession = null
-                if (cancelled) transforms.cancelMoveSession(move) else transforms.endMoveSession(move, worldX(penX(e)), worldY(penY(e)))
-                return
-            }
-            val s = penSession ?: return
-            penSession = null
-            when (s) {
-                is PenSession.Write -> {
-                    cardGestures.cancelFrameHold()
-                    if (cancelled) {
-                        overlay.hideFramePreview()
-                        discardWriteTrail(s, "cancel")
-                        return
-                    }
-                    val wx = worldX(penX(e))
-                    val wy = worldY(penY(e))
-                    s.raw(e.x, e.y)
-                    reportStrokeForAlignment(s)
-                    if (!cardGestures.consumeStroke(s, wx, wy)) commitStroke(s)
-                }
-                is PenSession.Erase -> finishErase(s)
-                is PenSession.Lasso -> {
-                    if (!cancelled) selection.finalizeLasso(s.pointsPx)
-                }
-                is PenSession.Shape -> {
-                    overlay.hideShapePreview()
-                    if (!cancelled) {
-                        s.curX = penX(e); s.curY = penY(e)
-
-                        if (finalizeShape(s) && arbiter.hasOverride(ToolArbiter.Source.SHAPE)) {
-                            shapeSelectionPending = true
-                            applyTransition(
-                                arbiter.replaceOverride(
-                                    ToolArbiter.Source.SHAPE,
-                                    ToolArbiter.Tool.LASSO,
-                                    ToolArbiter.Settle.ON_PEN_UP,
-                                ),
-                                "shape-stroke-to-lasso",
-                            )
-                        }
-                    } else if (arbiter.hasOverride(ToolArbiter.Source.SHAPE)) {
-                        applyTransition(arbiter.releaseOverride(ToolArbiter.Source.SHAPE), "shape-cancel")
-                    }
-                }
-                is PenSession.OpenNote -> {
-                    host.setDrawPathSuspended(false, "note-tap-end")
-                    if (!cancelled) {
-                        val endX = worldX(penX(e)); val endY = worldY(penY(e))
-                        val distance = hypot(endX - s.downX, endY - s.downY)
-                        if (!s.moved && distance <= BoardGeometry.CARD_DRAG_THRESHOLD_PX / BoardEngine.scale) {
-                            val shotId = s.shotId
-                            if (shotId != null) noteShots.openLink(shotId) else notes.openNote(s.ref)
-                        }
-                    }
-                }
-                PenSession.Consumed -> {}
-            }
-        } finally {
-            if (wasContact) applyTransition(arbiter.penUp(), "pen-up")
-        }
-    }
-
-    private fun reportStrokeForAlignment(s: PenSession.Write) {
-        if (s.rawMinX > s.rawMaxX) return
-        refreshViewOffset()
-        InkAlign.onPenUp(
-            s.rawMinX + viewOffsetX, s.rawMinY + viewOffsetY,
-            s.rawMaxX + viewOffsetX, s.rawMaxY + viewOffsetY,
-        )
-    }
-
-    private fun commitStroke(s: PenSession.Write) {
-        if (s.points.size < 2) return
-
-        val marker = penStyle == PenStyle.MARKER
-        val draft = BoardEngine.StrokeRec(
-            s.id,
-            s.space,
-            penWidth,
-            if (marker) markerInk.argb else INK_BLACK,
-            s.points.toArray(),
-            s.pressures.toArray(),
-            penStyle.objType,
-            density * BoardEngine.scale,
-            DrawPathClient.widthArgument(penStyle, penWidth),
-            s.nibAngle,
-        )
-        val ink = synchronized(BoardEngine.lock) { InkBackdrop.resolve(draft) }
-        val rec = draft.withColor(ink)
-        val change = (if (s.continuousWrite) cardGestures.growCardForStroke(rec) else null)
-            ?: BoardHistory.Change("draw").stroke(null, rec)
-        host.commitPlainStroke { applyChange(change, record = true) }
-        lastCardWriteId = s.cardId
-        lastCardWriteAt = SystemClock.uptimeMillis()
-        if (!marker && (ink != INK_BLACK) != trailWhite) Log.i(TAG_PEN, "[MosaicTrail] color differs from hardware trail committedWhite=${ink != INK_BLACK} trailWhite=$trailWhite stroke=${s.id}")
-        val committedPressures = s.pressures.toArray()
-        val minPressure = committedPressures.minOrNull() ?: 0f
-        val maxPressure = committedPressures.maxOrNull() ?: 0f
-        val committedDrawPathWidth = DrawPathClient.widthArgument(penStyle, penWidth)
-        var minRasterWidth = Float.POSITIVE_INFINITY
-        var maxRasterWidth = 0f
-        for (run in rec.runs) {
-            minRasterWidth = minOf(minRasterWidth, run.minWidth)
-            maxRasterWidth = maxOf(maxRasterWidth, run.maxWidth)
-        }
-        if (!minRasterWidth.isFinite()) minRasterWidth = 0f
-        val screenMin = minRasterWidth * density * BoardEngine.scale
-        val screenMax = maxRasterWidth * density * BoardEngine.scale
-        Log.i(TAG_PEN, "UP committed stroke ${s.id} style=${penStyle.name} stdWidth=$penWidth drawPathWidth=$committedDrawPathWidth pressureRange=$minPressure..$maxPressure rasterWorldRange=$minRasterWidth..$maxRasterWidth rasterScreenPxRange=$screenMin..$screenMax nibAngle=${rec.nibAngle} points=${s.points.size / 2} space=${s.space} ink=${Integer.toHexString(ink)}")
-    }
-
-    private val hitBuffer = ArrayList<BoardEngine.StrokeRec>()
-
-    private fun eraseAt(session: PenSession.Erase, wx: Float, wy: Float) {
-        hitBuffer.clear()
-                synchronized(BoardEngine.lock) { BoardEngine.hitTestStrokes(wx, wy, ERASER_HIT_RADIUS / BoardEngine.scale, hitBuffer) }
-        if (hitBuffer.isEmpty()) return
-        for (rec in hitBuffer) {
-            if (session.pendingIds.add(rec.id)) session.pending.stroke(rec, null)
-        }
-    }
-
-    private fun flushErase(session: PenSession.Erase) {
-        val step = session.pending
-        if (step.isEmpty) return
-        session.pending = BoardHistory.Change("erase")
-        session.pendingIds.clear()
-        applyChange(step, record = false)
-        session.change.absorb(step)
-    }
-
-    private fun finishErase(session: PenSession.Erase) {
-        flushErase(session)
-        if (!session.change.isEmpty) {
-            history.push(session.change)
-            Log.i(TAG_PEN, "erased ${session.change.diffs.size} strokes")
-        }
-    }
-
-    private fun finalizeShape(s: PenSession.Shape): Boolean {
-        val dragPx = hypot(s.curX - s.anchorX, s.curY - s.anchorY)
-        if (dragPx < SHAPE_MIN_DRAG_DP * density) {
-            Log.i(TAG_LASSO, "shape: drag too short ${dragPx}px")
-            return false
-        }
-        val ax = worldX(s.anchorX); val ay = worldY(s.anchorY)
-        val shape = Shapes.fromDrag(s.kind, ax, ay, worldX(s.curX), worldY(s.curY))
-        val card = BoardGeometry.topCardAt(BoardEngine.cardsByZ, ax, ay)
-        if (card != null) {
-            var i = 0
-            while (i < shape.size) { shape[i] -= card.x; shape[i + 1] -= card.y; i += 2 }
-        }
-
-        val rec = BoardEngine.StrokeRec(
-            newId("shape-"), if (card != null) "card:${card.id}" else
-                BoardEngine.connectionAt(ax, ay)?.let { "connection:${it.id}" } ?: "canvas", penWidth, INK_BLACK,
-            shape, Shapes.pressures(shape.size / 2), penStyle.objType, density * BoardEngine.scale,
-            DrawPathClient.widthArgument(penStyle, penWidth),
-        )
-        applyChange(BoardHistory.Change("shape").stroke(null, rec), record = true)
-        val kind = Shapes.kindOf(rec)
-        Log.i(TAG_LASSO, "shape: ${kind} points=${shape.size / 2} card=${card?.id ?: "canvas"}")
-        selection.selectStroke(rec)
-        return true
     }
 
     internal fun normalizeColoredCardToDefault(card: BoardEngine.CardRec): BoardHistory.Change? {
@@ -1335,14 +719,14 @@ class BoardInteractionController(
                 tapEpisodeActive = true
                 tapEpisodeStartMs = frame.uptimeMs
                 tapEpisodeMaxFingers = frame.count
-                tapEpisodeMoved = penContact || penHovering || frame.penPriority
+                tapEpisodeMoved = pen.penContact || pen.penHovering || frame.penPriority
                 tapDownX.clear(); tapDownY.clear()
                 for (i in 0 until frame.count) { tapDownX[frame.ids[i]] = frame.xs[i]; tapDownY[frame.ids[i]] = frame.ys[i] }
             }
             InputRouter.ACTION_POINTER_DOWN -> {
                 if (!tapEpisodeActive) return
                 tapEpisodeMaxFingers = maxOf(tapEpisodeMaxFingers, frame.count)
-                if (penContact || penHovering || frame.penPriority) tapEpisodeMoved = true
+                if (pen.penContact || pen.penHovering || frame.penPriority) tapEpisodeMoved = true
                 val i = frame.actionIndex
                 tapDownX[frame.ids[i]] = frame.xs[i]; tapDownY[frame.ids[i]] = frame.ys[i]
 
@@ -1405,7 +789,7 @@ class BoardInteractionController(
 
         if (arbiter.hasOverride(ToolArbiter.Source.SLIDEBAR)) return
 
-        if (penContact) {
+        if (pen.penContact) {
             Log.i(TAG_FINGER, "DOWN id=$id blocked: pen-session")
             return
         }
@@ -1721,24 +1105,13 @@ class BoardInteractionController(
 
     internal fun cancelActiveInteractions(reason: String) {
         cancelFingerGestures(reason)
-        penMoveSession?.let { transforms.cancelMoveSession(it) }
-        penMoveSession = null
-        cardGestures.cancelFrameHold()
-        overlay.hideFramePreview()
-        val s = penSession
-        penSession = null
-        when (s) {
-            is PenSession.Write -> discardWriteTrail(s, reason)
-            is PenSession.Lasso -> ink.abortStroke()
-            is PenSession.Shape -> overlay.hideShapePreview()
-            else -> {}
-        }
+        pen.cancel(reason)
     }
 
     private val twoCandidateTimeout = Runnable { settleTwoCandidate("hold") }
 
     private fun fallbackFromTwoCandidate(a: Finger, b: Finger, reason: String) {
-        if (penContact || penHovering || a.penPriority || b.penPriority) {
+        if (pen.penContact || pen.penHovering || a.penPriority || b.penPriority) {
             fingerGesture = FingerGesture.Idle
             Log.i(TAG_TWO, "candidate $reason → blocked by pen proximity")
             return
@@ -1750,9 +1123,9 @@ class BoardInteractionController(
         val tool = gestureToolOf(settings.screenGesture) ?: return false
         val decision = TwoFingerToolGuard.evaluate(
             a.x + viewOffsetX, a.y + viewOffsetY, b.x + viewOffsetX, b.y + viewOffsetY,
-            if (penHovering) penHoverX + viewOffsetX else null,
-            if (penHovering) penHoverY + viewOffsetY else null,
-            if (penHovering) InputReader.penTiltDirection else null,
+            if (pen.penHovering) pen.penHoverX + viewOffsetX else null,
+            if (pen.penHovering) pen.penHoverY + viewOffsetY else null,
+            if (pen.penHovering) InputReader.penTiltDirection else null,
             settings.leftHand,
             host.resources.displayMetrics.widthPixels.toFloat(),
             host.resources.displayMetrics.heightPixels.toFloat(),
@@ -1765,7 +1138,7 @@ class BoardInteractionController(
         return true
     }
 
-    private fun settleTwoCandidate(reason: String): Boolean {
+    internal fun settleTwoCandidate(reason: String): Boolean {
         val g = fingerGesture as? FingerGesture.TwoCandidate ?: return false
         handler.removeCallbacks(twoCandidateTimeout)
         val a = fingers[g.a] ?: return false
@@ -1957,8 +1330,8 @@ class BoardInteractionController(
     override fun onPenState(state: InputRouter.PenState, value: Boolean) {
         when (state) {
             InputRouter.PenState.HOVER -> {
-                penHovering = value
-                if (!value && !penContact)
+                pen.penHovering = value
+                if (!value && !pen.penContact)
                 else when (fingerGesture) {
                     is FingerGesture.TwoCandidate -> settleTwoCandidate("hover-enter")
 
@@ -1982,8 +1355,8 @@ class BoardInteractionController(
                         return
                     }
 
-                    val near = penContact ||
-                        (if (physical == ToolArbiter.Physical.STYLUS) InputReader.isPenStylusPressNear() else penHovering)
+                    val near = pen.penContact ||
+                        (if (physical == ToolArbiter.Physical.STYLUS) InputReader.isPenStylusPressNear() else pen.penHovering)
                     val bound = if (physical == ToolArbiter.Physical.RUBBER) ToolArbiter.Tool.ERASER else gestureToolOf(settings.penButton)
                     val tool = if (near) bound else ToolArbiter.Tool.ERASER
                     if (tool == null) return
@@ -1993,7 +1366,7 @@ class BoardInteractionController(
                         arbiter.pushOverride(ToolArbiter.Source.PEN_BUTTON, tool, ToolArbiter.Settle.ON_NEXT_PEN_DOWN, armed = armed, physical = physical),
                         "pen-button-down",
                     )
-                    Log.i(TAG_TOOL, "pen-button down physical=$physical tool=$tool near=$near hover=$penHovering contact=$penContact armed=$armed")
+                    Log.i(TAG_TOOL, "pen-button down physical=$physical tool=$tool near=$near hover=${pen.penHovering} contact=${pen.penContact} armed=$armed")
                     host.reassertPenBlock("pen-button:$tool")
                 } else {
                     if (arbiter.penButtonPhysical() != null && arbiter.penButtonPhysical() != physical) return
@@ -2033,7 +1406,7 @@ class BoardInteractionController(
                 presentation.acquire(BoardPresentation.Reason.SLIDER)
                 host.setDrawPathSuspended(true, "slider-two-down")
 
-                (penSession as? PenSession.Write)?.let { it.convertFromIndex = it.points.size }
+                (pen.penSession as? PenSession.Write)?.let { it.convertFromIndex = it.points.size }
             }
             "twoUp" -> {
                 sliderTwoDown = false
@@ -2439,4 +1812,6 @@ class BoardInteractionController(
     override fun onConvertCardToNote() = notes.convertCardToNote()
 
     internal val cardGestures = CardStrokeGestures(this)
+
+    internal val pen = PenInput(this)
 }
