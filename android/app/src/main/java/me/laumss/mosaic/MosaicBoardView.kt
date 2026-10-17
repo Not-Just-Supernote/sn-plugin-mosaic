@@ -470,7 +470,7 @@ class MosaicBoardView(
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (!attached || (w == oldw && h == oldh)) return
-        controller.cancelCardCleanup("size-change")
+        controller.trailCleanup.cancel("size-change")
         Log.i(TAG, "onSizeChanged ${oldw}x$oldh -> ${w}x$h, reconfigure drawPath")
         contentView.requestInitialRaster()
         requestRotationReconfigure("sizeChanged")
@@ -488,11 +488,11 @@ class MosaicBoardView(
         super.onWindowFocusChanged(hasWindowFocus)
         Log.i(TAG, "window focus changed: hasFocus=$hasWindowFocus rotation=${display?.rotation}")
         if (attached && !hasWindowFocus) {
-            controller.cancelCardCleanup("focus-lost")
+            controller.trailCleanup.cancel("focus-lost")
             restoreDrawPathPressureCurve()
         }
         if (!attached || !hasWindowFocus) return
-        controller.resumeCardCleanup("focus-gained")
+        controller.trailCleanup.resume("focus-gained")
         handler.postDelayed({
             if (attached && hasWindowFocus) {
                 requestRotationReconfigure("windowFocusGained")
@@ -503,8 +503,8 @@ class MosaicBoardView(
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
         if (!attached) return
-        if (visibility != VISIBLE) controller.cancelCardCleanup("hidden")
-        else controller.resumeCardCleanup("visible")
+        if (visibility != VISIBLE) controller.trailCleanup.cancel("hidden")
+        else controller.trailCleanup.resume("visible")
         if (visibility != VISIBLE) restoreDrawPathPressureCurve()
         else if (hasWindowFocus()) scheduleConfigure("window-visible")
     }
@@ -742,7 +742,7 @@ class MosaicBoardView(
     }
 
     private fun onContentSettled() {
-        controller.resumeCardCleanup("content-settled")
+        controller.trailCleanup.resume("content-settled")
         if (holdPenRefreshUntilSettle && !stylusContact) {
             holdPenRefreshUntilSettle = false
             if (penModeApplied) {
@@ -1322,7 +1322,7 @@ class MosaicBoardView(
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
-            controller.cancelCardCleanup("view-input")
+            controller.trailCleanup.cancel("view-input")
         }
         return super.dispatchTouchEvent(event)
     }

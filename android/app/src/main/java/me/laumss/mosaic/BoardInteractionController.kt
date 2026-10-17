@@ -116,37 +116,6 @@ class BoardInteractionController(
     }
 
     internal val handler = Handler(Looper.getMainLooper())
-    private val cardCleanupBacklog = CardCleanupBacklog()
-    private var cardCleanupTicket: CardCleanupBacklog.Ticket? = null
-    private var cardCleanupQueued = false
-
-    private val cardCleanup = EinkTrailCleanup(content, "board-card") { result ->
-        val ticket = cardCleanupTicket
-        if (ticket != null && CardCleanupBacklog.whiteCompleted(result) && cardCleanupBacklog.complete(ticket)) {
-            cardCleanupTicket = null
-            Log.i("MosaicEinkCleanup", "backlog cleared after white completion")
-        }
-    }
-
-    fun cancelCardCleanup(reason: String) {
-        host.cancelGrayRestore(reason)
-        cardCleanupQueued = false
-        cardCleanup.cancel(reason)
-        if (reason in listOf("surface-change", "detach", "size-change", "manual-refresh")) {
-            cardCleanupBacklog.clear()
-            cardCleanupTicket = null
-        } else if (!cardCleanupBacklog.isEmpty) {
-            Log.i("MosaicEinkCleanup", "deferred owner=board-card reason=$reason retained=${cardCleanupBacklog.capture().region.bounds}")
-        }
-    }
-
-    fun resumeCardCleanup(reason: String) {
-        if (cardCleanupBacklog.isEmpty || cardCleanupQueued || cardCleanup.phase != "idle" ||
-            !surface.showsBoardChrome || !content.isAttachedToWindow || !content.isShown ||
-            content.holdPaint || chrome.blocksPen || penContact || fingers.isNotEmpty() || sliderTwoDown ||
-            presentation.state.movingCards) return
-        queueCardCleanup("resume:$reason", 0L)
-    }
 
     internal val density: Float get() = host.resources.displayMetrics.density.coerceAtLeast(1f)
 
@@ -288,7 +257,7 @@ class BoardInteractionController(
     }
 
     private fun enterSurface(next: BoardSurface, scene: BoardEngine.SceneSnapshot) {
-        cancelCardCleanup("surface-change")
+        trailCleanup.cancel("surface-change")
         if (surface !== next) resetNoteScrollMode()
         if (surface !== next) inkling.invalidateClipboardWork("surface:${next.name}")
         surface = next
@@ -511,7 +480,7 @@ class BoardInteractionController(
 
     internal var lasso: LassoSelection? = null
 
-    private var penContact = false
+    internal var penContact = false
     private var penHovering = false
     private var penHoverX = 0f
     private var penHoverY = 0f
@@ -521,7 +490,7 @@ class BoardInteractionController(
     private var penLastX = 0f
     private var penLastY = 0f
 
-    private var sliderTwoDown = false
+    internal var sliderTwoDown = false
     private var lastCardWriteId: String? = null
     private var lastCardWriteAt = 0L
 
@@ -589,7 +558,7 @@ class BoardInteractionController(
         var y = downY
     }
 
-    private val fingers = LinkedHashMap<Int, Finger>()
+    internal val fingers = LinkedHashMap<Int, Finger>()
 
     private enum class PanZoomLock { NONE, PAN, ZOOM }
 
@@ -753,7 +722,7 @@ class BoardInteractionController(
     }
 
     fun detach() {
-        cancelCardCleanup("detach")
+        trailCleanup.cancel("detach")
         SceneCache.onJsSceneApplied = null
         // The view drops its suspend request itself once the system ink is released.
         releasePenForJsScene("detach", notifyHost = false)
@@ -867,7 +836,7 @@ class BoardInteractionController(
 
     private fun penHistY(e: MotionEvent, i: Int): Float = e.getHistoricalY(i) + InkAlign.offsetY
 
-    private fun worldRectToPx(r: RectF, out: RectF): RectF {
+    internal fun worldRectToPx(r: RectF, out: RectF): RectF {
         out.set(screenX(r.left), screenY(r.top), screenX(r.right), screenY(r.bottom))
         return out
     }
@@ -1182,14 +1151,14 @@ class BoardInteractionController(
     }
 
     fun onPen(event: MotionEvent) {
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) cancelCardCleanup("pen-down")
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) trailCleanup.cancel("pen-down")
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> penDown(event)
             MotionEvent.ACTION_MOVE -> penMove(event)
             MotionEvent.ACTION_UP -> penUp(event, cancelled = false)
             MotionEvent.ACTION_CANCEL -> penUp(event, cancelled = true)
         }
-        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) resumeCardCleanup("pen-up")
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) trailCleanup.resume("pen-up")
     }
 
     fun onPenHover(event: MotionEvent) {
@@ -2808,7 +2777,7 @@ class BoardInteractionController(
             }
         }
         presentation.release(BoardPresentation.Reason.TRANSFORM)
-        scheduleCardCleanup(m.cleanupTrail, "card-transform")
+        trailCleanup.schedule(m.cleanupTrail, "card-transform")
     }
 
     private fun recordCardCleanupPosition(m: MoveSession) {
@@ -2863,54 +2832,6 @@ class BoardInteractionController(
         }
     }
 
-    private fun scheduleCardCleanup(oldPositions: Region, reason: String) {
-        if (!surface.showsBoardChrome) return
-        cardCleanupBacklog.add(oldPositions)
-        if (cardCleanupBacklog.isEmpty) return
-        queueCardCleanup(reason, GESTURE_SETTLE_MS)
-    }
-
-    private fun queueCardCleanup(reason: String, delayMs: Long) {
-        cancelCardCleanup("reschedule:$reason")
-        cardCleanupQueued = true
-        val ticket = cardCleanupBacklog.capture()
-        val revision = cardCleanup.revision
-        val scale = BoardEngine.scale; val panX = BoardEngine.panX; val panY = BoardEngine.panY
-        val trail = ticket.region
-        Log.i("MosaicEinkCleanup", "queued owner=board-card reason=$reason bounds=${trail.bounds}")
-        // Presentation restores the normal scene after its gesture linger. Wait
-        // for that restoration before requesting the final settled content frame.
-        handler.postDelayed({
-            if (revision != cardCleanup.revision) return@postDelayed
-            content.runWhenSettled(Runnable {
-                if (revision != cardCleanup.revision) return@Runnable
-                cardCleanupQueued = false
-                cardCleanupTicket = ticket
-                cardCleanup.schedule {
-                    val exposed = Region(trail)
-                    if (!surface.showsBoardChrome || chrome.blocksPen || penContact ||
-                        fingers.isNotEmpty() || sliderTwoDown || scale != BoardEngine.scale || panX != BoardEngine.panX || panY != BoardEngine.panY) {
-                        exposed.setEmpty()
-                    } else {
-                        val bounds = Rect()
-                        synchronized(BoardEngine.lock) {
-                            for (card in BoardEngine.cards.values) {
-                                worldRectToPx(BoardEngine.cardDirtyBounds(card), RectF()).roundOut(bounds)
-                                exposed.op(bounds, Region.Op.DIFFERENCE)
-                            }
-                        }
-                        chrome.cleanupExclusionBounds().forEach { exposed.op(it, Region.Op.DIFFERENCE) }
-                        overlay.cleanupExclusionBounds().forEach {
-                            it.roundOut(bounds); exposed.op(bounds, Region.Op.DIFFERENCE)
-                        }
-                    }
-                    Log.i("MosaicEinkCleanup", "ready owner=board-card reason=$reason bounds=${exposed.bounds}")
-                    exposed
-                }
-            })
-        }, delayMs)
-    }
-
     private fun cancelMoveSession(m: MoveSession) {
         when (m) {
             is MoveSession.CardResize -> {
@@ -2961,7 +2882,7 @@ class BoardInteractionController(
     }
 
     override fun onTouch(frame: InputRouter.TouchFrame) {
-        if (frame.action == InputRouter.ACTION_DOWN || frame.action == InputRouter.ACTION_POINTER_DOWN) cancelCardCleanup("touch-down")
+        if (frame.action == InputRouter.ACTION_DOWN || frame.action == InputRouter.ACTION_POINTER_DOWN) trailCleanup.cancel("touch-down")
         if (maybeCloseFromLauncherPull(frame)) return
         trackToolbarToggleTap(frame)
         // Count raw contacts even when another finger lands on chrome or is
@@ -3337,7 +3258,7 @@ class BoardInteractionController(
         }
         if (fingers.isEmpty()) {
             fingerGesture = FingerGesture.Idle
-            resumeCardCleanup("touch-up")
+            trailCleanup.resume("touch-up")
         }
     }
 
@@ -3657,7 +3578,7 @@ class BoardInteractionController(
     }
 
     private fun beginPanZoom(a: Finger, b: Finger) {
-        cancelCardCleanup("panzoom-begin")
+        trailCleanup.cancel("panzoom-begin")
         val view = viewWorld()
         val activeRegion = currentRegions().let { SparseNavigation.findActiveRegion(it, view) }
         val neighbors = if (activeRegion == null) SparseNavigation.Neighbors.NONE else SparseNavigation.findNeighbors(currentRegions(), activeRegion)
@@ -3866,7 +3787,7 @@ class BoardInteractionController(
         updateLassoOverlay()
         panZoomArmed = false
         presentation.release(BoardPresentation.Reason.PAN_ZOOM)
-        if (cleanOldPositions) scheduleCardCleanup(g.cleanupTrail, "pan-zoom")
+        if (cleanOldPositions) trailCleanup.schedule(g.cleanupTrail, "pan-zoom")
         if (!surface.showsBoardChrome) {
             handler.removeCallbacks(noteScrollResetTask)
             handler.postDelayed(noteScrollResetTask, NOTE_SCROLL_SETTLE_MS)
@@ -3927,7 +3848,7 @@ class BoardInteractionController(
     }
 
     override fun onManualRefresh() {
-        cancelCardCleanup("manual-refresh")
+        trailCleanup.cancel("manual-refresh")
         if (surfaceSwitching) return
         host.flushInkHandoff("manual-refresh")
         Log.i(TAG, "manual full refresh: exit lasso/eraser/gesture states ${arbiter.describe()} lasso=${lasso != null}")
@@ -3943,7 +3864,7 @@ class BoardInteractionController(
 
     override fun onSlider(gesture: String, side: Int) {
         if (side != settings.sliderSide) return
-        cancelCardCleanup("slider")
+        trailCleanup.cancel("slider")
         host.flushInkHandoff("slider")
         Log.i(TAG, "[Slider] $gesture side=$side")
         when (gesture) {
@@ -3969,7 +3890,7 @@ class BoardInteractionController(
             }
             "twoLongPressEnd" -> applyTransition(arbiter.releaseOverride(ToolArbiter.Source.SLIDEBAR), "slider-long-press-end")
         }
-        resumeCardCleanup("slider-finished")
+        trailCleanup.resume("slider-finished")
     }
 
     private fun currentRegions(): List<SparseNavigation.Region> {
@@ -4453,4 +4374,6 @@ class BoardInteractionController(
     override fun onDeleteNoteLink(shotId: String) = noteShots.deleteLink(shotId)
 
     internal val inkling = InklingBridge(this)
+
+    internal val trailCleanup = CardTrailCleanup(this)
 }
