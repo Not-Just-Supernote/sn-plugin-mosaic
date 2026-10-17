@@ -12,7 +12,6 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
-import android.widget.FrameLayout
 import com.facebook.react.bridge.WritableMap
 import java.util.UUID
 import kotlin.math.abs
@@ -103,7 +102,6 @@ class BoardInteractionController(
         private const val EDGE_SWIPE_ZONE_DP = 72f
 
         private const val RECOGNIZE_CARD_MIN_DP = 120f
-        private val FONT_LEVELS = floatArrayOf(0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1f, 1.15f, 1.3f, 1.5f, 1.75f, 2f, 2.5f, 3f, 4f, 5f, 6f)
 
         const val NOTE_CARD_BOARD_WIDTH = 450f
 
@@ -145,9 +143,9 @@ class BoardInteractionController(
 
     internal var suspendedBoard: SuspendedBoard? = null
 
-    private var currentNoteHeader: String? = null
-    private var currentNoteHeaderPlaceholder = false
-    private var currentNoteHeaderHeight = 0f
+    internal var currentNoteHeader: String? = null
+    internal var currentNoteHeaderPlaceholder = false
+    internal var currentNoteHeaderHeight = 0f
     // View scale of the open note page; the header is laid out at screen size inside it.
     internal var notePageScale = 1f
 
@@ -322,7 +320,7 @@ class BoardInteractionController(
         if (surfaceSwitching) return
         inkling.invalidateClipboardWork("close-note")
         surfaceSwitching = true
-        closeCardEditor()
+        textEditing.close()
         cancelActiveInteractions("note-close")
 
         val liveStrokes = synchronized(BoardEngine.lock) { BoardEngine.strokes.values.toList() }
@@ -374,9 +372,6 @@ class BoardInteractionController(
     private var penWidth = PenPopup.WIDTHS[PenPopup.DEFAULT_INDEX]
 
     private var markerInk = MarkerInk.BLACK
-    private var cardEditorOverlay: FrameLayout? = null
-
-    private var editorKeyboardShift = 0f
 
     fun setPenStyle(style: PenStyle, width: Float) {
         penStyle = style
@@ -727,7 +722,7 @@ class BoardInteractionController(
         // The view drops its suspend request itself once the system ink is released.
         releasePenForJsScene("detach", notifyHost = false)
         resetNoteScrollMode()
-        closeCardEditor()
+        textEditing.close()
         releasePaintHold("detach")
         noteShots.reset()
 
@@ -824,9 +819,9 @@ class BoardInteractionController(
     private fun isOnDarkCard(wx: Float, wy: Float): Boolean =
         InkBackdrop.darkAt(wx, wy)
 
-    private fun screenX(world: Float): Float = (world * BoardEngine.scale + BoardEngine.panX) * density
+    internal fun screenX(world: Float): Float = (world * BoardEngine.scale + BoardEngine.panX) * density
 
-    private fun screenY(world: Float): Float = (world * BoardEngine.scale + BoardEngine.panY) * density
+    internal fun screenY(world: Float): Float = (world * BoardEngine.scale + BoardEngine.panY) * density
 
     private fun penX(e: MotionEvent): Float = e.x + InkAlign.offsetX
 
@@ -2140,7 +2135,7 @@ class BoardInteractionController(
             "shot" -> noteShots.insertSelection()
             "edit-text" -> {
                 val card = lasso?.cardIds?.singleOrNull()?.let { BoardEngine.cards[it] }
-                if (card?.kind == "text" || card?.kind == "note") editTextCard(card)
+                if (card?.kind == "text" || card?.kind == "note") textEditing.editCard(card)
             }
             "square" -> convertShape(action) { Shapes.toSquare(it) }
             "circle" -> convertShape(action) { Shapes.toCircle(it) }
@@ -2371,13 +2366,6 @@ class BoardInteractionController(
         }
         CardSizeConstraints.constrainRect(m.card, m.preview, m.handle,
             proportional = m.card.kind == "image" && m.handle.isCorner)
-    }
-
-    // Steps of the text editor's smaller and larger buttons.
-    private fun nextFontLevel(current: Float, step: Int): Float {
-        val levels = FONT_LEVELS
-        return if (step > 0) levels.firstOrNull { it > current + 0.01f } ?: levels.last()
-        else levels.lastOrNull { it < current - 0.01f } ?: levels.first()
     }
 
     private fun isTextCard(card: BoardEngine.CardRec): Boolean = card.kind != "image" && card.kind != "note"
@@ -3048,7 +3036,7 @@ class BoardInteractionController(
                 val pending = fingerGesture as? FingerGesture.CardPending ?: return@Runnable
                 if (pending.fingerId != id || pending.cardId != NOTE_HEADER_PENDING) return@Runnable
                 fingerGesture = FingerGesture.Idle
-                editPageNoteHeader()
+                textEditing.editPageHeader()
             }
             cardLongPressTask = task
             handler.postDelayed(task, CARD_FINGER_MOVE_HOLD_MS)
@@ -3262,120 +3250,9 @@ class BoardInteractionController(
         }
     }
 
-    private fun dp(value: Float): Float = value * density
+    internal fun dp(value: Float): Float = value * density
 
-    private fun editTextCard(card: BoardEngine.CardRec) {
-        closeCardEditor()
-        host.inkEnabled = false
-        val original = card.content
-        val note = card.kind == "note"
-
-        val below = if (note) cardsBelow(card) else emptyList()
-        var finished = false
-
-        val darkText = !note && card.colored
-        val editor = CardTextEditor(
-            host.context,
-            if (note) BoardContentView.noteHeaderText(card) else original,
-            darkText,
-            fill = if (card.colored) Color.BLACK else content.cardFillColor,
-            contentScale = if (note) card.width / ScrollingDocument.WIDTH else card.fontScale,
-            headerMode = note,
-            onFontStep = if (note) null else { step ->
-                val current = BoardEngine.cards[card.id]
-                if (current == null) null else {
-                    val next = grownToFit(current.withFontScale(nextFontLevel(current.fontScale, step)), current.height)
-                    val change = BoardHistory.Change("card-font-live")
-                    if (!next.sameGeometry(current)) change.card(current, next)
-                    pushCardsBelow(change, below, next.height - card.height)
-                    applyChange(change, record = false)
-                    next.fontScale
-                }
-            },
-            onKeyboard = { obscuredTop -> avoidKeyboard(editRegionWorld(card.id), obscuredTop) },
-            cardFrame = { availableBottom ->
-                val r = editRegionWorld(card.id) ?: card.rect(RectF())
-                val top = screenY(r.top)
-                val bottom = screenY(r.bottom).coerceAtMost(availableBottom.toFloat())
-                RectF(screenX(r.left), top, screenX(r.right), bottom.coerceAtLeast(top + dp(72f)))
-            },
-            onChange = { markdown ->
-                val current = BoardEngine.cards[card.id]
-                if (current != null) {
-                    val next = if (note) withNoteHeader(current, markdown) else grownToFit(current.withContent(markdown), card.height)
-                    val change = BoardHistory.Change("card-text-edit-live")
-                    if (!next.sameGeometry(current)) change.card(current, next)
-                    pushCardsBelow(change, below, next.height - card.height)
-                    applyChange(change, record = false)
-                }
-            },
-            onFinish = {
-                if (!finished) {
-                    finished = true
-                    val current = BoardEngine.cards[card.id]
-                    closeCardEditor()
-                    if (current != null && (current.content != original || current.fontScale != card.fontScale)) {
-                        val change = BoardHistory.Change("card-text-edit").card(card, current)
-                        for (b in below) {
-                            val moved = BoardEngine.cards[b.id] ?: continue
-                            if (!moved.sameGeometry(b)) change.card(b, moved)
-                        }
-                        applyChange(change, record = true)
-                    }
-                }
-            },
-        )
-        cardEditorOverlay = editor
-        host.addView(editor, FrameLayout.LayoutParams(-1, -1))
-        host.bringChildToFront(editor)
-    }
-
-    private fun avoidKeyboard(region: RectF?, obscuredTop: Int?) {
-        val r = region ?: return
-        val shiftPx = editorKeyboardShift * density
-        val baseTop = screenY(r.top) + shiftPx
-        val baseBottom = screenY(r.bottom) + shiftPx
-        val wantPx = if (obscuredTop != null && baseBottom > obscuredTop) {
-            minOf((host.height - obscuredTop).toFloat(), baseTop.coerceAtLeast(0f)).coerceAtLeast(0f)
-        } else 0f
-        val want = wantPx / density
-        if (want == editorKeyboardShift) return
-        Log.i(TAG, "card editor keyboard shift ${editorKeyboardShift}->$want obscuredTop=$obscuredTop")
-        BoardEngine.setViewport(BoardEngine.panX, BoardEngine.panY + editorKeyboardShift - want, BoardEngine.scale)
-        editorKeyboardShift = want
-        scheduleChromeUpdate()
-    }
-
-    private fun grownToFit(card: BoardEngine.CardRec, minHeight: Float): BoardEngine.CardRec {
-        val needed = BoardContentView.measureTextCardSize(card.content, card.width, CardTextFormat.metricsFor(card)).y
-        val height = max(minHeight, needed)
-        return if (height == card.height) card else card.withRect(RectF(card.x, card.y, card.x + card.width, card.y + height))
-    }
-
-    private fun editRegionWorld(cardId: String): RectF? {
-        val card = BoardEngine.cards[cardId] ?: return null
-        val r = card.rect(RectF())
-        if (card.kind == "note") {
-            val k = card.width / ScrollingDocument.WIDTH
-            r.bottom = r.top + BoardContentView.noteHeaderHeight(BoardContentView.noteHeaderOf(card)) * k
-        }
-        return r
-    }
-
-    private fun withNoteHeader(card: BoardEngine.CardRec, plain: String): BoardEngine.CardRec {
-        val k = card.width / ScrollingDocument.WIDTH
-        val oldH = BoardContentView.noteHeaderHeight(BoardContentView.noteHeaderOf(card)) * k
-
-        val probe = BoardEngine.CardRec(card.id, card.x, card.y, card.width, card.height, card.zIndex, card.kind, plain,
-            card.imagePath, card.noteRef, card.bgColor, card.textColor, "")
-        val lines = BoardContentView.noteHeaderLines(probe)
-        val newH = BoardContentView.noteHeaderHeight(BoardContentView.noteHeaderMarkdown(lines)) * k
-        val height = (card.height - oldH + newH).coerceAtLeast(BoardGeometry.MIN_CARD_SIZE)
-        return BoardEngine.CardRec(card.id, card.x, card.y, card.width, height, card.zIndex, card.kind, plain,
-            card.imagePath, card.noteRef, card.bgColor, card.textColor, lines.firstOrNull().orEmpty())
-    }
-
-    private fun cardsBelow(anchor: BoardEngine.CardRec): List<BoardEngine.CardRec> {
+    internal fun cardsBelow(anchor: BoardEngine.CardRec): List<BoardEngine.CardRec> {
         val column = arrayListOf(anchor.rect(RectF()))
         val result = ArrayList<BoardEngine.CardRec>()
         val candidates = synchronized(BoardEngine.lock) { BoardEngine.cards.values.filter { it.id != anchor.id } }
@@ -3391,7 +3268,7 @@ class BoardInteractionController(
         return result
     }
 
-    private fun pushCardsBelow(change: BoardHistory.Change, below: List<BoardEngine.CardRec>, grow: Float) {
+    internal fun pushCardsBelow(change: BoardHistory.Change, below: List<BoardEngine.CardRec>, grow: Float) {
         val dy = max(0f, grow)
         for (b in below) {
             val current = BoardEngine.cards[b.id] ?: continue
@@ -3400,95 +3277,13 @@ class BoardInteractionController(
         }
     }
 
-    private fun setPageNoteHeader(markdown: String) {
+    internal fun setPageNoteHeader(markdown: String) {
         currentNoteHeaderPlaceholder = markdown.isBlank()
         currentNoteHeader = if (currentNoteHeaderPlaceholder) MosaicStrings.t(MosaicStrings.Key.noteHeaderPlaceholder) else markdown
         currentNoteHeaderHeight = BoardContentView.noteHeaderHeight(currentNoteHeader.orEmpty(), notePageScale)
     }
 
-    private fun pageHeaderRegionWorld(): RectF = RectF(0f, -currentNoteHeaderHeight, ScrollingDocument.WIDTH, 0f)
-
-    private fun editPageNoteHeader(recognized: String? = null) {
-        if (surface.showsBoardChrome) return
-        val ref = noteController.document?.ref ?: return
-        val source = suspendedBoard?.scene?.cards?.firstOrNull { it.noteRef == ref } ?: return
-        closeCardEditor()
-        host.inkEnabled = false
-        val header = BoardContentView.noteHeaderText(source)
-
-        var initial = header
-        var selection: IntRange? = null
-        if (recognized != null) {
-            val text = recognized.replace(Regex("\\s*\\n\\s*"), " ").trim()
-            val split = header.indexOf('\n')
-            val title = if (split < 0) header else header.substring(0, split)
-            val body = if (split < 0) "" else header.substring(split + 1)
-            if (title.isBlank()) {
-                initial = text + if (body.isNotEmpty()) "\n" + body else ""
-                selection = 0 until text.length
-            } else {
-                val prefix = title + "\n" + body + if (body.isNotBlank()) " " else ""
-                initial = prefix + text
-                selection = prefix.length until initial.length
-            }
-        }
-        val editor = CardTextEditor(
-            host.context,
-            initial,
-            false,
-            initialSelection = selection,
-            initialDirty = recognized != null,
-            fill = Color.WHITE,
-            headerMode = true,
-            onKeyboard = { obscuredTop -> avoidKeyboard(pageHeaderRegionWorld(), obscuredTop) },
-            cardFrame = { availableBottom ->
-                val r = pageHeaderRegionWorld()
-                val top = screenY(r.top)
-                val bottom = screenY(r.bottom).coerceAtMost(availableBottom.toFloat())
-                RectF(screenX(r.left), top, screenX(r.right), bottom.coerceAtLeast(top + dp(72f)))
-            },
-            onChange = { plain -> updatePageNoteHeader(ref, plain) },
-            onFinish = { closeCardEditor() },
-        )
-        cardEditorOverlay = editor
-        host.addView(editor, FrameLayout.LayoutParams(-1, -1))
-        host.bringChildToFront(editor)
-        Log.i(TAG, "note header edit ref=$ref")
-    }
-
-    private fun updatePageNoteHeader(ref: String, plain: String) {
-        val suspended = suspendedBoard ?: return
-        val card = suspended.scene.cards.firstOrNull { it.noteRef == ref } ?: return
-        val next = withNoteHeader(card, plain)
-        if (next.sameGeometry(card)) return
-        suspendedBoard = SuspendedBoard(
-            suspended.scene.copy(cards = suspended.scene.cards.map { if (it.id == card.id) next else it }),
-            suspended.history, suspended.lasso,
-        )
-        val oldH = currentNoteHeaderHeight
-        setPageNoteHeader(BoardContentView.noteHeaderOf(next))
-        content.setNoteHeader(currentNoteHeader, currentNoteHeaderPlaceholder, notePageScale)
-
-        val d = (currentNoteHeaderHeight - oldH) * BoardEngine.scale
-        if (d != 0f) BoardEngine.setViewport(BoardEngine.panX, BoardEngine.panY + d, BoardEngine.scale)
-
-        emitter.begin()
-        emitter.cardUpsert(next)
-        emitter.commit()
-    }
-
-    private fun closeCardEditor() {
-        val overlay = cardEditorOverlay ?: return
-        if (overlay is CardTextEditor) overlay.release()
-        host.removeView(overlay)
-        cardEditorOverlay = null
-        if (editorKeyboardShift != 0f) {
-            BoardEngine.setViewport(BoardEngine.panX, BoardEngine.panY + editorKeyboardShift, BoardEngine.scale)
-            editorKeyboardShift = 0f
-            scheduleChromeUpdate()
-        }
-        refreshHostToolFlags()
-    }
+    internal fun pageHeaderRegionWorld(): RectF = RectF(0f, -currentNoteHeaderHeight, ScrollingDocument.WIDTH, 0f)
 
     private fun firstTwo(): Pair<Finger, Finger> {
         val it = fingers.values.iterator()
@@ -4236,7 +4031,7 @@ class BoardInteractionController(
         if (trimmed.isEmpty()) { Log.i(TAG_LASSO, "recognize empty text; scene unchanged"); return }
         if (!surface.showsBoardChrome) {
             setLasso(null)
-            editPageNoteHeader(recognized = trimmed)
+            textEditing.editPageHeader(recognized = trimmed)
             Log.i(TAG_LASSO, "recognize note header strokes=${pending.strokeIds.size} chars=${trimmed.length}")
             return
         }
@@ -4376,4 +4171,6 @@ class BoardInteractionController(
     internal val inkling = InklingBridge(this)
 
     internal val trailCleanup = CardTrailCleanup(this)
+
+    internal val textEditing = CardTextEditing(this)
 }
