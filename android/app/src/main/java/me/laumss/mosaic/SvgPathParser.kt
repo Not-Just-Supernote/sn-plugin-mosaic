@@ -2,9 +2,7 @@ package me.laumss.mosaic
 
 import android.graphics.Path
 
-
 object SvgPathParser {
-
     fun parse(data: String): Path {
         val path = Path()
         var index = 0
@@ -14,7 +12,6 @@ object SvgPathParser {
         var currentY = 0f
         var startX = 0f
         var startY = 0f
-        
 
         fun skipSeparators() {
             while (index < length) {
@@ -34,7 +31,6 @@ object SvgPathParser {
                 val ch = data[index]
                 when {
                     ch == '-' || ch == '+' -> {
-                        
                         if (index != begin && !(seenExp && (data[index - 1] == 'e' || data[index - 1] == 'E'))) break
                         index += 1
                     }
@@ -67,7 +63,7 @@ object SvgPathParser {
                 command = ch
                 index += 1
             }
-            
+
             when (command) {
                 'M', 'm' -> {
                     val relative = command == 'm'

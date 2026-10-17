@@ -26,11 +26,9 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-
 class MosaicImageModule(
     reactContext: ReactApplicationContext,
 ) : ReactContextBaseJavaModule(reactContext) {
-
     companion object {
         private const val TAG = "MosaicImage"
         private const val TEMP_SUFFIX = ".tmp"
@@ -41,7 +39,6 @@ class MosaicImageModule(
 
     override fun getName(): String = "MosaicImage"
 
-    
     @ReactMethod
     fun importImage(source: String, destPath: String, maxLongSide: Int, promise: Promise) {
         Thread {
@@ -54,7 +51,7 @@ class MosaicImageModule(
                     throw IllegalArgumentException("undecodable image: $source")
                 }
                 val rotation = readExifRotation(source)
-                
+
                 var sample = 1
                 val longSide = max(bounds.outWidth, bounds.outHeight)
                 while (longSide / (sample * 2) >= limit) sample *= 2
@@ -132,7 +129,6 @@ class MosaicImageModule(
                 }
             }
         } catch (error: Throwable) {
-            
             0
         }
     }
@@ -152,7 +148,6 @@ class MosaicImageModule(
         return Bitmap.createScaledBitmap(bitmap, width, height, true)
     }
 
-    
     private fun toGray(bitmap: Bitmap): ByteArray {
         val width = bitmap.width
         val height = bitmap.height
@@ -168,15 +163,13 @@ class MosaicImageModule(
                 val g = (pixel shr 8) and 0xff
                 val b = pixel and 0xff
                 var luma = (r * 77 + g * 150 + b * 29) shr 8
-                
+
                 if (alpha < 255) luma = (luma * alpha + 255 * (255 - alpha)) / 255
                 gray[base + x] = luma.toByte()
             }
         }
         return gray
     }
-
-    
 
     private fun encodeGrayPng(gray: ByteArray, width: Int, height: Int): ByteArray {
         val out = ByteArrayOutputStream(gray.size / 2 + 64)
@@ -185,11 +178,11 @@ class MosaicImageModule(
         val ihdr = ByteArray(13)
         writeIntBE(ihdr, 0, width)
         writeIntBE(ihdr, 4, height)
-        ihdr[8] = 8 
-        ihdr[9] = 0 
-        ihdr[10] = 0 
-        ihdr[11] = 0 
-        ihdr[12] = 0 
+        ihdr[8] = 8
+        ihdr[9] = 0
+        ihdr[10] = 0
+        ihdr[11] = 0
+        ihdr[12] = 0
         writeChunk(out, "IHDR", ihdr)
 
         val deflated = ByteArrayOutputStream(gray.size / 2 + 64)
@@ -213,7 +206,6 @@ class MosaicImageModule(
         return out.toByteArray()
     }
 
-    
     private fun chooseFilter(row: ByteArray, prior: ByteArray?, scratch: ByteArray, best: ByteArray): Int {
         val width = row.size
         var bestType = 0

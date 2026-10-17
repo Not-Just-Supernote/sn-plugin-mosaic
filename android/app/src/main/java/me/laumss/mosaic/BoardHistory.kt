@@ -1,8 +1,6 @@
 package me.laumss.mosaic
 
-
 class BoardHistory(private val limit: Int = MAX_UNDO_STACK) {
-
     companion object {
         const val MAX_UNDO_STACK = 200
     }
@@ -21,7 +19,6 @@ class BoardHistory(private val limit: Int = MAX_UNDO_STACK) {
         fun card(before: BoardEngine.CardRec?, after: BoardEngine.CardRec?) = apply { diffs.add(Diff.Card(before, after)) }
         fun connection(before: BoardEngine.ConnectionRec?, after: BoardEngine.ConnectionRec?) = apply { diffs.add(Diff.Connection(before, after)) }
 
-        
         fun absorb(other: Change) = apply { diffs.addAll(other.diffs) }
     }
 

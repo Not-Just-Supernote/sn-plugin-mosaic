@@ -7,20 +7,17 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
-
 object SparseNavigation {
-
     const val CHUNK_SIZE = 512f
     const val MAX_ISLAND_GAP_CHUNKS = 3
-    
+
     const val PAN_MARGIN = CHUNK_SIZE * MAX_ISLAND_GAP_CHUNKS
-    
+
     const val JUMP_TRIGGER_PX = 96f
 
     enum class Direction { LEFT, RIGHT, UP, DOWN }
 
     class Region(
-        
         val bounds: RectF,
         val cardIds: List<String>,
     )
@@ -53,15 +50,12 @@ object SparseNavigation {
 
     class Item(val id: String, val x: Float, val y: Float, val width: Float, val height: Float)
 
-    
-
     private fun chunkOf(coord: Float): Int = floor(coord / CHUNK_SIZE).toInt()
 
     private fun key(cx: Int, cy: Int): Long = (cx.toLong() shl 32) or (cy.toLong() and 0xffffffffL)
     private fun keyX(key: Long): Int = (key shr 32).toInt()
     private fun keyY(key: Long): Int = key.toInt()
 
-    
     fun detectRegions(items: List<Item>): List<Region> {
         if (items.isEmpty()) return emptyList()
         val occupied = HashMap<Long, MutableList<Item>>()
@@ -112,15 +106,12 @@ object SparseNavigation {
         return regions
     }
 
-    
-
     private fun overlapArea(a: RectF, b: RectF): Float {
         val ox = max(0f, min(a.right, b.right) - max(a.left, b.left))
         val oy = max(0f, min(a.bottom, b.bottom) - max(a.top, b.top))
         return ox * oy
     }
 
-    
     fun findActiveRegion(regions: List<Region>, viewportWorld: RectF): Region? {
         var best: Region? = null
         var bestArea = 0f
@@ -146,7 +137,6 @@ object SparseNavigation {
         return best
     }
 
-    
     fun findNeighbors(regions: List<Region>, active: Region): Neighbors {
         val acx = active.bounds.centerX()
         val acy = active.bounds.centerY()
@@ -175,7 +165,6 @@ object SparseNavigation {
         )
     }
 
-    
     fun findRegionJumps(regions: List<Region>, viewportWorld: RectF, margin: Float): List<RegionJump> {
         val expanded = RectF(viewportWorld).apply { inset(-margin, -margin) }
         val jumps = arrayOfNulls<RegionJump>(4)
@@ -202,8 +191,6 @@ object SparseNavigation {
         return jumps.filterNotNull()
     }
 
-    
-
     fun viewportWorldRect(panX: Float, panY: Float, scale: Float, viewW: Float, viewH: Float, out: RectF): RectF {
         val s = if (scale > 0f) scale else 1f
         val left = -panX / s
@@ -212,7 +199,6 @@ object SparseNavigation {
         return out
     }
 
-    
     fun panToCenterRect(rect: RectF, viewW: Float, viewH: Float, scale: Float): FloatArray {
         val cx = rect.centerX()
         val cy = rect.centerY()
@@ -222,9 +208,6 @@ object SparseNavigation {
         )
     }
 
-    
-
-    
     fun constrainPan(
         panX: Float,
         panY: Float,
@@ -252,8 +235,6 @@ object SparseNavigation {
         var dist = 0f
 
         if (maxWorldX < minWorldX) {
-            
-            
             clampedX = worldX.coerceIn(maxWorldX, minWorldX)
         } else if (worldX < minWorldX) {
             clampedX = minWorldX
@@ -265,7 +246,6 @@ object SparseNavigation {
             if (neighbors.right != null && d > dist) { dir = Direction.RIGHT; dist = d }
         }
         if (maxWorldY < minWorldY) {
-            
             clampedY = worldY.coerceIn(maxWorldY, minWorldY)
         } else if (worldY < minWorldY) {
             clampedY = minWorldY

@@ -7,7 +7,6 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 
-
 object ToolIcons {
     private fun u(v: Float, s: Float) = v / 24f * s
     private fun fill(p: Paint) = Paint(p).apply { style = Paint.Style.FILL }
@@ -25,66 +24,54 @@ object ToolIcons {
     fun redo(c: Canvas,s: Float,p: Paint) = arrow(c,s,p,true)
     private fun arrow(c: Canvas,s: Float,p: Paint,flip: Boolean) { c.save(); if(flip){c.translate(s,0f);c.scale(-1f,1f)}; val r=u(5f,s); c.drawPath(Path().apply { moveTo(u(18.4f,s),u(18f,s)); lineTo(u(18.4f,s),u(11f,s)); arcTo(RectF(u(13.4f,s)-r,u(11f,s)-r,u(13.4f,s)+r,u(11f,s)+r),0f,-180f,false); lineTo(u(8.4f,s),u(17f,s)) },p); c.drawLine(u(5.2f,s),u(13.8f,s),u(8.4f,s),u(17f,s),p); c.drawLine(u(8.4f,s),u(17f,s),u(11.6f,s),u(13.8f,s),p); c.restore() }
 
-    
     fun close(c: Canvas,s: Float,p: Paint){ c.drawCircle(u(12f,s),u(12f,s),u(8.6f,s),p); c.drawLine(u(8.7f,s),u(8.7f,s),u(15.3f,s),u(15.3f,s),p); c.drawLine(u(15.3f,s),u(8.7f,s),u(8.7f,s),u(15.3f,s),p) }
 
-    
     fun more(c: Canvas,s: Float,p: Paint){ val f=fill(p); for(i in 0..2) c.drawCircle(u(12f,s),u(6.5f+5.5f*i,s),u(1.55f,s),f) }
 
-    
     fun template(c: Canvas,s: Float,p: Paint){ c.drawRoundRect(RectF(u(5f,s),u(3f,s),u(19f,s),u(21f,s)),u(1.5f,s),u(1.5f,s),p); val f=fill(p); for(r in 0..2) for(col in 0..2) c.drawCircle(u(8f+col*4f,s),u(8f+r*4f,s),u(.9f,s),f) }
 
-    
     fun shape(c: Canvas,s: Float,p: Paint){ c.drawPath(Path().apply { moveTo(u(9f,s),u(3.5f,s)); lineTo(u(15.5f,s),u(14f,s)); lineTo(u(2.5f,s),u(14f,s)); close() },p); c.drawCircle(u(15.5f,s),u(15.5f,s),u(5.2f,s),p) }
-    
+
     fun shapeLine(c: Canvas,s: Float,p: Paint){ c.drawLine(u(4.5f,s),u(19.5f,s),u(19.5f,s),u(4.5f,s),p) }
-    
+
     fun shapeRect(c: Canvas,s: Float,p: Paint){ c.drawRect(RectF(u(4f,s),u(6f,s),u(20f,s),u(18f,s)),p) }
-    
+
     fun shapeTriangle(c: Canvas,s: Float,p: Paint){ c.drawPath(Path().apply { moveTo(u(12f,s),u(4.5f,s)); lineTo(u(20f,s),u(19f,s)); lineTo(u(4f,s),u(19f,s)); close() },p) }
-    
+
     fun shapeEllipse(c: Canvas,s: Float,p: Paint){ c.drawOval(RectF(u(4f,s),u(5.5f,s),u(20f,s),u(18.5f,s)),p) }
 
-    
     private fun page(c: Canvas,s: Float,p: Paint)= c.drawRoundRect(RectF(u(4f,s),u(3f,s),u(20f,s),u(21f,s)),u(1.5f,s),u(1.5f,s),p)
-    
+
     fun templateNone(c: Canvas,s: Float,p: Paint)= page(c,s,p)
-    
+
     fun templateDots(c: Canvas,s: Float,p: Paint){ page(c,s,p); val f=fill(p); for(r in 0..2) for(col in 0..2) c.drawCircle(u(7f+col*5f,s),u(7f+r*5f,s),u(.9f,s),f) }
-    
+
     fun templateLines(c: Canvas,s: Float,p: Paint){ page(c,s,p); for(r in 0..2) c.drawLine(u(7f,s),u(8f+r*4.5f,s),u(17f,s),u(8f+r*4.5f,s),p) }
-    
+
     fun templateCross(c: Canvas,s: Float,p: Paint){ page(c,s,p); val h=u(1.2f,s); for(r in 0..2) for(col in 0..2){ val x=u(7f+col*5f,s); val y=u(7f+r*5f,s); c.drawLine(x-h,y,x+h,y,p); c.drawLine(x,y-h,x,y+h,p) } }
-    
+
     fun templateSpacing(c: Canvas,s: Float,p: Paint,gapU: Float){ var y=u(6f,s); val bottom=u(18f,s); val left=u(6f,s); val right=u(18f,s); while(y<=bottom){ c.drawLine(left,y,right,y,p); y+=u(gapU,s) } }
 
-    
     fun nibWidth(c: Canvas,s: Float,p: Paint,strokePx: Float){ val q=Paint(p).apply{ strokeWidth=strokePx }; c.drawLine(u(7f,s),u(17f,s),u(17f,s),u(7f,s),q) }
 
-    
     fun nibDot(c: Canvas,s: Float,p: Paint,radiusU: Float){ c.drawCircle(u(12f,s),u(12f,s),u(radiusU,s),fill(p)) }
-    
+
     fun colorSwatch(c: Canvas,s: Float,p: Paint,argb: Int){ c.drawCircle(u(12f,s),u(12f,s),u(7f,s),fill(p).apply { color = argb }); c.drawCircle(u(12f,s),u(12f,s),u(7f,s),p) }
 
-    
     fun caret(c: Canvas,s: Float,p: Paint){
         val path=Path().apply{ moveTo(0f,s); lineTo(s,s); lineTo(s,0f); close() }
         c.drawPath(path, fill(p))
     }
 
-    
-    
     private const val FINGER_HAND =
         "m 19.7812,40.7711 c -5.723,-1.787 -10.5000276,-7.9 -12.8870276,-11.482 -0.23652,-0.3715 -0.3943,-0.7875 -0.46358,-1.2224 -0.06928,-0.4349 -0.04859,-0.8794 0.0608,-1.306 0.10939,-0.4266 0.30514,-0.8262 0.57515,-1.1741 0.27001,-0.3479 0.60853,-0.6367 0.99463,-0.8485 0.93179,-0.5997 2.0272276,-0.8945 3.1341276,-0.8432 1.107,0.0512 2.1705,0.4459 3.0429,1.1292 l 1.905,1.589 v -12.923 c 0,-1.4 1.356,-2.375 3.028,-2.375 0.6827,-0.0467 1.3598,0.1504 1.9108,0.5562 0.551,0.4058 0.9402,0.994 1.0982,1.6598 -0.021,-0.123 0,0 0.019,0.128 -0.006,-0.155 0,8.579 0,8.673 V 8.483106 c 0.0723,-0.7341972 0.4302,-1.4105948 0.9967,-1.8833444 0.5664,-0.47271 1.296,-0.70388 2.0313,-0.64366 0.7353,-0.06022 1.4648,0.17095 2.0312,0.64366 0.5665,0.4727496 0.9245,1.1491472 0.9968,1.8833444 V 23.0711 c 0,0 0,-10.216 0,-10.236 0.0789,-0.7294 0.4396,-1.399 1.0053,-1.8661 0.5657,-0.467 1.2916,-0.6945 2.0227,-0.6339 0.7353,-0.0602 1.4648,0.1709 2.0312,0.6437 0.5665,0.4727 0.9245,1.1491 0.9968,1.8833 v 11.449 c 0,-0.042 0,-4.8 0.032,-5.082 0.05,-1.094 1.374,-2.159 3,-2.159 0.7353,-0.0602 1.4648,0.1709 2.0312,0.6437 0.5665,0.4727 0.9245,1.1491 0.9968,1.8833 v 13.454 c 0.019,1.1072 -0.36,2.1845 -1.068,3.036 -1.6427,2.0541 -3.7744,3.6632 -6.2,4.68 -4.239,1.516 -8.03,1.652 -13.322,0.004 z"
     private const val FINGER_SLASH = "M 9.3700024,13.955 43.37,41.955"
     private val fingerHand by lazy { SvgPathParser.parse(FINGER_HAND) }
     private val fingerSlash by lazy { SvgPathParser.parse(FINGER_SLASH) }
 
-    
     fun touch(c: Canvas,s: Float,p: Paint,enabled: Boolean){
         val bg = if (p.color == Color.WHITE) Color.BLACK else Color.WHITE
-        
-        
+
         val k = s / 48f
         val stroke = Paint(p).apply { strokeWidth = p.strokeWidth / k }
         c.save(); c.scale(k,k)

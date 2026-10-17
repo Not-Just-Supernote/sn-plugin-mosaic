@@ -7,16 +7,14 @@ import android.util.Log
 import java.io.File
 import kotlin.math.max
 
-
 object CardImageCache {
     private const val TAG = "MosaicCardImage"
     private const val BUDGET_BYTES = 48L * 1024 * 1024
-    
+
     private const val FAILURE_RETRY_MS = 5000L
 
     private class Entry(val bitmap: Bitmap, val sampleSize: Int)
 
-    
     private val cache = object : LinkedHashMap<String, Entry>(16, 0.75f, true) {}
     private val failedAt = HashMap<String, Long>()
     private val naturalSizes = HashMap<String, PointF>()
@@ -33,7 +31,6 @@ object CardImageCache {
         PointF(size.x, size.y)
     }
 
-    
     fun get(path: String, targetLongPx: Int, alpha: Boolean = false): Bitmap? = synchronized(this) {
         if (path.isEmpty()) return null
         val existing = cache[path]

@@ -5,25 +5,21 @@ import kotlin.math.abs
 import kotlin.math.acos
 import kotlin.math.hypot
 
-
 object TwoFingerToolGuard {
-
     private const val TAG = "MosaicTwoFinger"
 
-    
     const val EVENT_TIME_DEV_MS = 500L
-    
+
     const val EVENT_DISTANCE_MAX_PX = 600f
-    
+
     const val EVENT_DISTANCE_MOVE_PX = 100f
-    
+
     private const val SECTOR_HALF_ANGLE_DEG = 75.0
-    
+
     private const val ERASER_RECT_SIZE = 300f
 
     class Decision(val accept: Boolean, val reason: String)
 
-    
     fun evaluate(
         x1: Float, y1: Float,
         x2: Float, y2: Float,
@@ -34,8 +30,7 @@ object TwoFingerToolGuard {
     ): Decision {
         val distance = hypot(x2 - x1, y2 - y1)
         if (distance >= EVENT_DISTANCE_MAX_PX) return Decision(false, "distance=$distance")
-        
-        
+
         if (penX == null || penY == null || tilt == null) return Decision(false, "pen-far")
 
         val in1 = inSector(penX, penY, tilt, x1, y1)
@@ -56,7 +51,6 @@ object TwoFingerToolGuard {
         return angle <= SECTOR_HALF_ANGLE_DEG
     }
 
-    
     private fun checkSpecialScenario(
         in1: Boolean, in2: Boolean,
         x1: Float, y1: Float, x2: Float, y2: Float,
@@ -65,12 +59,10 @@ object TwoFingerToolGuard {
         screenW: Float, screenH: Float,
     ): String? {
         if (!leftHand) {
-            
             if (((penX - x1) >= ERASER_RECT_SIZE && penX > x2) || ((penX - x2) >= ERASER_RECT_SIZE && penX > x1)) {
                 return "fingers-left-of-pen"
             }
             if (in1 != in2) {
-                
                 if ((penX > x1 || penX > x2) && (penY > y1 || penY > y2)) return "finger-top-left-of-pen"
             }
         } else {
@@ -79,7 +71,6 @@ object TwoFingerToolGuard {
             }
         }
 
-        
         val left = if (leftHand) screenW - ERASER_RECT_SIZE else 0f
         val right = if (leftHand) screenW else ERASER_RECT_SIZE
         val inStrip = x1 >= left && x1 <= right && x2 >= left && x2 <= right &&
@@ -95,7 +86,6 @@ object TwoFingerToolGuard {
         return null
     }
 
-    
     fun moved(startX: Float, startY: Float, x: Float, y: Float): Boolean =
         abs(x - startX) > EVENT_DISTANCE_MOVE_PX || abs(y - startY) > EVENT_DISTANCE_MOVE_PX
 }

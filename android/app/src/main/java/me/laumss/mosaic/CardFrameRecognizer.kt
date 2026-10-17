@@ -11,9 +11,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-
 object CardFrameRecognizer {
-
     class Options(
         val viewportScale: Float = 1f,
         val minShortSidePx: Float = 60f,
@@ -62,10 +60,9 @@ object CardFrameRecognizer {
     }
 
     class Evaluation(
-        
         val rect: RectF?,
         val metrics: Metrics?,
-        
+
         val reason: String?,
     )
 
@@ -78,7 +75,6 @@ object CardFrameRecognizer {
 
     private class Progression(val coverage: Float, val backtrackRatio: Float, val forwardDistance: Float)
 
-    
     fun evaluate(points: FloatArray, options: Options = Options()): Evaluation {
         val scale = if (options.viewportScale.isFinite() && options.viewportScale > 0f) options.viewportScale else 1f
         val sanitized = sanitize(points, scale)
@@ -164,8 +160,6 @@ object CardFrameRecognizer {
         )
     }
 
-    
-
     private fun sanitize(points: FloatArray, scale: Float): FloatArray {
         val out = ArrayList<Float>(points.size)
         var i = 0
@@ -192,7 +186,6 @@ object CardFrameRecognizer {
         return length
     }
 
-    
     private fun resample(pts: FloatArray, requestedSpacing: Float, maxSamples: Int): FloatArray {
         val count = pts.size / 2
         if (count <= 1) return pts
@@ -234,25 +227,22 @@ object CardFrameRecognizer {
         return out.toFloatArray()
     }
 
-    
-
     private fun projectToPerimeter(px: Float, py: Float, left: Float, top: Float, right: Float, bottom: Float): Projection {
         val width = right - left
         val height = bottom - top
         val perimeter = 2f * (width + height)
 
-        
         var cx = clamp(px, left, right)
         val topDist = hypot(px - cx, py - top)
         val topRatio = if (right <= left) 0f else (cx - left) / width
-        
+
         val bottomDist = hypot(px - cx, py - bottom)
         val bottomRatio = topRatio
-        
+
         var cy = clamp(py, top, bottom)
         val rightDist = hypot(px - right, py - cy)
         val rightRatio = if (bottom <= top) 0f else (cy - top) / height
-        
+
         val leftDist = hypot(px - left, py - cy)
         val leftRatio = rightRatio
 
@@ -368,8 +358,6 @@ object CardFrameRecognizer {
             1f,
         )
     }
-
-    
 
     private fun clamp(v: Float, lo: Float, hi: Float): Float = min(hi, max(lo, v))
 

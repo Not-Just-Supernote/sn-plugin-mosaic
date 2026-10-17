@@ -5,11 +5,9 @@ import android.util.Log
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-
 object DrawPathGate {
     private const val TAG = "MosaicPenGate"
 
-    
     val writeLock = Any()
 
     private val executor = Executors.newSingleThreadScheduledExecutor { r ->
@@ -27,13 +25,12 @@ object DrawPathGate {
     @Volatile private var postedSeq = 0
     @Volatile private var handledSeq = 0
 
-    
     @Volatile var inkExpected = false
-    
+
     @Volatile var stylusNearBlocks = true
-    
+
     @Volatile var sliderToolSide = 0
-    
+
     @Volatile var onReleased: (() -> Unit)? = null
 
     fun attach(binder: IBinder, appName: String) {
@@ -53,9 +50,6 @@ object DrawPathGate {
 
     private fun shouldBlock(): Boolean = blocked() || !inkExpected
 
-    
-
-    
     fun onStylus(pressed: Boolean, near: Boolean) {
         val blocks = pressed && (!near || stylusNearBlocks)
         if (blocks == stylusHeld) return
@@ -69,10 +63,7 @@ object DrawPathGate {
         if (active) blockNow("rubber")
     }
 
-    
     fun penSwitchPosted(): Int = ++postedSeq
-
-    
 
     fun onSliderGesture(gesture: String, side: Int) {
         if (side != sliderToolSide) return
@@ -92,15 +83,12 @@ object DrawPathGate {
         handledSeq = postedSeq
     }
 
-    
-
     fun penSwitchHandled(seq: Int) {
         val was = blocked()
         if (seq - handledSeq > 0) handledSeq = seq
         if (was && !blocked()) onReleased?.invoke()
     }
 
-    
     fun reblock(reason: String, delays: LongArray) {
         for (delay in delays) schedule(delay, "$reason+${delay}ms")
     }

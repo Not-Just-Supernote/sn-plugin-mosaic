@@ -7,7 +7,6 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
 
-
 object TchFile {
     private val MAGIC = byteArrayOf(77, 79, 83, 78, 79, 84, 69, 3)
     private const val IO_BUFFER = 64 * 1024

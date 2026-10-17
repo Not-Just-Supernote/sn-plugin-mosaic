@@ -8,7 +8,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 
-
 object PortraitLock {
     private const val TAG = "MosaicPortraitLock"
 

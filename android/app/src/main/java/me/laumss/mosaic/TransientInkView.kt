@@ -6,14 +6,12 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.view.View
 
-
 class TransientInkView(context: Context) : View(context) {
-
     companion object {
         private const val CLEAR_DELAY_MS = 160L
         private const val LASSO_DOT_RADIUS_DP = 1.5f
         private const val LASSO_DOT_SPACING_DP = 6f
-        
+
         private const val LASSO_DOT_HALO_DP = 0.8f
     }
 
@@ -24,9 +22,8 @@ class TransientInkView(context: Context) : View(context) {
     private var dirty = false
     private var pendingClear: Runnable? = null
 
-    
-    private val lassoDots = mutableListOf<FloatArray>() 
-    
+    private val lassoDots = mutableListOf<FloatArray>()
+
     private var allMinX = Float.MAX_VALUE
     private var allMinY = Float.MAX_VALUE
     private var allMaxX = -Float.MAX_VALUE
@@ -60,7 +57,6 @@ class TransientInkView(context: Context) : View(context) {
         dirty = true
     }
 
-    
     private fun invalidateDots(minX: Float, minY: Float, maxX: Float, maxY: Float) {
         if (minX < allMinX) allMinX = minX; if (maxX > allMaxX) allMaxX = maxX
         if (minY < allMinY) allMinY = minY; if (maxY > allMaxY) allMaxY = maxY
@@ -83,7 +79,6 @@ class TransientInkView(context: Context) : View(context) {
         postDelayed(task, CLEAR_DELAY_MS)
     }
 
-    
     fun clearImmediately() {
         cancelPendingClear()
         clearNow()

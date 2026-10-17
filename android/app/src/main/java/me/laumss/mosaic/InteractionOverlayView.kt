@@ -10,32 +10,29 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.view.View
 
-
 class InteractionOverlayView(context: Context) : View(context) {
-
     companion object {
         const val LASSO_ACTION_SIZE_DP = 52f
         const val LASSO_ACTION_GAP_DP = 14f
         const val LASSO_ACTION_MARGIN_DP = 12f
-        
+
         const val LASSO_ACTION_SPACING_DP = 16f
         private const val LASSO_CORNER_DP = 28f
         private const val HANDLE_DP = 18f
-        
+
         const val MOVE_HANDLE_RADIUS_DP = 17f
         private const val ERASER_RADIUS_DP = 12f
-        
+
         private const val ERASER_LIGHT_FILL = 0xFFB7B7B7.toInt()
         private const val ERASER_LIGHT_BORDER = 0xFF7F7F7F.toInt()
         private const val ERASER_DARK_FILL = 0xFF7F7F7F.toInt()
         private const val ERASER_DARK_BORDER = 0xFFB7B7B7.toInt()
-        
+
         const val ROTATE_HANDLE_GAP_DP = 30f
         const val ROTATE_HANDLE_RADIUS_DP = 15f
-        
+
         private const val INK = 0xFF111111.toInt()
 
-        
         fun rotateHandleCenter(framePx: RectF, density: Float, topInsetPx: Float, out: FloatArray) {
             val reach = (ROTATE_HANDLE_GAP_DP + 2f * ROTATE_HANDLE_RADIUS_DP) * density
             out[0] = framePx.centerX()
@@ -47,44 +44,38 @@ class InteractionOverlayView(context: Context) : View(context) {
         }
     }
 
-    
     var topInsetPx = 0f
 
     private val density: Float get() = resources.displayMetrics.density.coerceAtLeast(1f)
 
-    
     private var cardPreview: RectF? = null
     private var cardPreviewHandles: List<BoardGeometry.Handle> = emptyList()
 
-    
     private var framePreview: RectF? = null
 
-    
     private val shapePreview = Path()
     private var shapePreviewVisible = false
     private val shapePreviewBounds = RectF()
 
-    
     private var lassoFrame: RectF? = null
-    
+
     private val lassoActionRects = ArrayList<RectF>()
-    
+
     private val lassoActionTypes = ArrayList<String>()
 
     fun cleanupExclusionBounds(): List<RectF> = if (lassoVisible) lassoActionRects.map { RectF(it) } else emptyList()
     private var lassoVisible = true
-    
+
     private var lassoCornerHandles = false
-    
+
     private var lassoEdgeHandles = false
-    
+
     private var lassoHorizontalEdgesOnly = false
-    
+
     private var lassoOnDark = false
-    
+
     private var lassoRotateHandle = false
 
-    
     data class PreviewInk(val path: Path, val color: Int, val width: Float, val filled: Boolean)
     private val moveInk = ArrayList<PreviewInk>()
     private var moveStrokeWidth = 1f
@@ -94,11 +85,11 @@ class InteractionOverlayView(context: Context) : View(context) {
     private var moveActive = false
     private var moveDx = 0f
     private var moveDy = 0f
-    
+
     private var moveAngleDeg = 0f
     private var movePivotX = 0f
     private var movePivotY = 0f
-    
+
     private var moveScaled = false
     private val moveScaleMatrix = Matrix()
     private val movePathScaled = Path()
@@ -115,14 +106,13 @@ class InteractionOverlayView(context: Context) : View(context) {
     private val movePath = Path()
     private val moveMatrix = Matrix()
 
-    
     private var eraserVisible = false
     private var eraserX = 0f
     private var eraserY = 0f
     private var eraserRadiusPx = 0f
-    
+
     private var eraserOnDark = false
-    
+
     private val eraserTrail = Path()
     private var eraserTrailVisible = false
     private var eraserTrailRadiusPx = 0f
@@ -157,7 +147,7 @@ class InteractionOverlayView(context: Context) : View(context) {
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
-    
+
     private val eraserFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = ERASER_LIGHT_FILL
@@ -179,7 +169,7 @@ class InteractionOverlayView(context: Context) : View(context) {
     private val eraserTrailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = Color.WHITE
-        
+
         alpha = 255
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
@@ -202,8 +192,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         eraserBorderDark.strokeWidth = 2f * d
     }
 
-    
-
     fun showCardPreview(rectPx: RectF, kind: String, colored: Boolean) {
         val r = cardPreview ?: RectF().also { cardPreview = it }
         r.set(rectPx)
@@ -218,8 +206,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         invalidate()
     }
 
-    
-
     fun showFramePreview(rectPx: RectF) {
         val r = framePreview ?: RectF().also { framePreview = it }
         r.set(rectPx)
@@ -232,9 +218,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         invalidate()
     }
 
-    
-
-    
     fun showShapePreview(pathPx: Path, onDark: Boolean = false) {
         shapeOnDark = onDark
         val old = RectF(shapePreviewBounds)
@@ -266,13 +249,10 @@ class InteractionOverlayView(context: Context) : View(context) {
         )
     }
 
-    
-
     fun setLassoFrame(framePx: RectF?, actions: List<Pair<RectF, String>> = emptyList(),
                       cornerHandles: Boolean = false, edgeHandles: Boolean = false,
                       onDark: Boolean = false, rotateHandle: Boolean = false,
                       horizontalEdgesOnly: Boolean = false) {
-        
         if (framePx == null && lassoFrame == null && lassoActionRects.isEmpty()) return
         lassoFrame = framePx?.let { RectF(it) }
         lassoActionRects.clear(); lassoActionTypes.clear()
@@ -286,7 +266,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         invalidate()
     }
 
-    
     fun moveHandleHit(x: Float, y: Float, slopPx: Float): Boolean {
         if (!lassoVisible) return false
         val frame = lassoFrame ?: return false
@@ -296,7 +275,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         return dx * dx + dy * dy <= r * r
     }
 
-    
     fun rotateHandleHit(x: Float, y: Float, slopPx: Float): Boolean {
         if (!lassoRotateHandle || !lassoVisible) return false
         val frame = lassoFrame ?: return false
@@ -313,7 +291,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         invalidate()
     }
 
-    
     fun lassoActionHit(x: Float, y: Float, slopPx: Float): String? {
         for (i in lassoActionRects.indices) {
             val r = lassoActionRects[i]
@@ -322,8 +299,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         }
         return null
     }
-
-    
 
     fun beginMovePreview(framePx: RectF?, cardsPx: List<RectF>, inkPx: Path, strokeWidthPx: Float, grayCards: List<Boolean> = emptyList(), grayBridges: List<Path> = emptyList(), ink: List<PreviewInk> = emptyList()) {
         moveInk.clear()
@@ -356,7 +331,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         invalidate()
     }
 
-    
     fun updateRotatePreview(angleDeg: Float, pivotXPx: Float, pivotYPx: Float) {
         if (!moveActive) return
         moveAngleDeg = angleDeg
@@ -365,7 +339,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         invalidate()
     }
 
-    
     fun updateScalePreview(sx: Float, sy: Float, pivotXPx: Float, pivotYPx: Float) {
         if (!moveActive) return
         moveScaled = true
@@ -394,9 +367,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         invalidate()
     }
 
-    
-
-    
     fun showEraserCursor(xPx: Float, yPx: Float, worldScale: Float, onDark: Boolean = false) {
         val wasVisible = eraserVisible
         val oldX = eraserX
@@ -417,7 +387,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         invalidateCircle(eraserX, eraserY, eraserRadiusPx)
     }
 
-    
     fun beginEraserStroke(xPx: Float, yPx: Float, onDark: Boolean = false) {
         eraserTrail.reset()
         eraserTrail.moveTo(xPx, yPx)
@@ -427,7 +396,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         invalidateCircle(xPx, yPx, eraserTrailRadiusPx)
     }
 
-    
     fun appendEraserStroke(xPx: Float, yPx: Float, onDark: Boolean = eraserTrailOnDark) {
         if (!eraserTrailVisible) {
             beginEraserStroke(xPx, yPx, onDark)
@@ -442,7 +410,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         invalidateTrailUnion(oldBounds, newBounds)
     }
 
-    
     fun endEraserStroke() {
         if (!eraserTrailVisible) return
         val bounds = RectF()
@@ -455,7 +422,6 @@ class InteractionOverlayView(context: Context) : View(context) {
     private fun invalidateTrailUnion(a: RectF, b: RectF) {
         val u = RectF(a)
         if (u.isEmpty && b.isEmpty) {
-            
             invalidateCircle(a.centerX(), a.centerY(), eraserTrailRadiusPx)
             return
         }
@@ -503,8 +469,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         invalidate()
     }
 
-    
-
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val d = density
@@ -525,7 +489,7 @@ class InteractionOverlayView(context: Context) : View(context) {
 
         if (lassoVisible && cardPreview == null) {
             lassoFrame?.let { frame ->
-                
+
                 if (lassoOnDark) setLassoInk(Color.WHITE, INK)
                 drawLassoFrame(canvas, frame, d)
                 if (lassoOnDark) setLassoInk(INK, Color.WHITE)
@@ -595,7 +559,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         }
     }
 
-    
     private fun drawMovingCardFill(canvas: Canvas, rect: RectF) {
         movingCardFill.color = CardGrayRecipe.MOVING.low
         movingCardFill.shader = CardGrayPattern.shader(canvas, CardGrayRecipe.MOVING)
@@ -634,7 +597,7 @@ class InteractionOverlayView(context: Context) : View(context) {
 
     private fun drawLassoFrame(canvas: Canvas, r: RectF, d: Float) {
         canvas.drawRect(r, thinDashPaint)
-        
+
         val hr = MOVE_HANDLE_RADIUS_DP * d
         val move = moveHandleCenter(r)
         canvas.drawCircle(move.x, move.y, hr, fillWhite)
@@ -644,7 +607,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         drawHandles(canvas, r, d,
             ResizeHandles.forSelection(lassoCornerHandles, lassoEdgeHandles, lassoHorizontalEdgesOnly))
         if (!lassoCornerHandles && !lassoEdgeHandles) {
-            
             val len = LASSO_CORNER_DP * d
             val off = 4f * d
             canvas.drawLine(r.right + off - len, r.top - off, r.right + off, r.top - off, solidPaint)
@@ -656,7 +618,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         }
     }
 
-    
     private fun drawRotateHandle(canvas: Canvas, r: RectF, d: Float) {
         val c = FloatArray(2)
         rotateHandleCenter(r, d, topInsetPx, c)
@@ -665,11 +626,11 @@ class InteractionOverlayView(context: Context) : View(context) {
         else canvas.drawLine(c[0], r.bottom, c[0], c[1] - radius, thinDashPaint)
         canvas.drawCircle(c[0], c[1], radius, fillWhite)
         canvas.drawCircle(c[0], c[1], radius, thinDashPaint)
-        
+
         val ar = radius * 0.55f
         val oval = RectF(c[0] - ar, c[1] - ar, c[0] + ar, c[1] + ar)
         canvas.drawArc(oval, -60f, 270f, false, solidPaint)
-        
+
         val endRad = Math.toRadians(210.0)
         val ex = c[0] + ar * Math.cos(endRad).toFloat()
         val ey = c[1] + ar * Math.sin(endRad).toFloat()
@@ -678,7 +639,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         canvas.drawLine(ex, ey, ex - ah * 0.2f, ey - ah, solidPaint)
     }
 
-    
     private fun drawShapeButton(canvas: Canvas, r: RectF, d: Float, type: String) {
         val radius = r.width() / 2f
         val cx = r.centerX(); val cy = r.centerY()
@@ -703,7 +663,7 @@ class InteractionOverlayView(context: Context) : View(context) {
                 val p = Path()
                 p.moveTo(cx - s * 0.9f, cy - s); p.lineTo(cx - s * 0.9f, cy + s); p.lineTo(cx + s * 1.1f, cy + s); p.close()
                 canvas.drawPath(p, solidPaint)
-                
+
                 val m = 4f * d
                 canvas.drawLine(cx - s * 0.9f + m, cy + s, cx - s * 0.9f + m, cy + s - m, solidPaint)
                 canvas.drawLine(cx - s * 0.9f + m, cy + s - m, cx - s * 0.9f, cy + s - m, solidPaint)
@@ -711,7 +671,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         }
     }
 
-    
     private fun drawPaintBucketButton(canvas: Canvas, r: RectF, d: Float, fill: Boolean) {
         val radius = r.width() / 2f
         val cx = r.centerX(); val cy = r.centerY()
@@ -758,7 +717,7 @@ class InteractionOverlayView(context: Context) : View(context) {
         val radius = r.width() / 2f
         canvas.drawCircle(r.centerX(), r.centerY(), radius, fillWhite)
         canvas.drawCircle(r.centerX(), r.centerY(), radius, thinDashPaint)
-        
+
         val cx = r.centerX()
         val top = r.centerY() - 14f * d
         canvas.drawRect(cx - 4.5f * d, top, cx + 4.5f * d, top + 3f * d, solidPaint)
@@ -768,7 +727,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         canvas.drawLine(cx + 3f * d, top + 11f * d, cx + 3f * d, top + 24f * d, solidPaint)
     }
 
-    
     private fun drawNoteButton(canvas: Canvas, r: RectF, d: Float) {
         val radius = r.width() / 2f
         canvas.drawCircle(r.centerX(), r.centerY(), radius, fillWhite)
@@ -776,7 +734,7 @@ class InteractionOverlayView(context: Context) : View(context) {
         val cx = r.centerX(); val cy = r.centerY()
         val hw = 10f * d; val hh = 12f * d
         val fold = 5f * d
-        
+
         val path = Path()
         path.moveTo(cx - hw, cy + hh)
         path.lineTo(cx - hw, cy - hh)
@@ -785,24 +743,22 @@ class InteractionOverlayView(context: Context) : View(context) {
         path.lineTo(cx + hw, cy + hh)
         path.close()
         canvas.drawPath(path, solidPaint)
-        
+
         canvas.drawLine(cx + hw - fold, cy - hh, cx + hw - fold, cy - hh + fold, solidPaint)
         canvas.drawLine(cx + hw - fold, cy - hh + fold, cx + hw, cy - hh + fold, solidPaint)
-        
+
         canvas.drawLine(cx - hw + 3f * d, cy - 2f * d, cx + hw - 3f * d, cy - 2f * d, solidPaint)
         canvas.drawLine(cx - hw + 3f * d, cy + 4f * d, cx + hw - 3f * d, cy + 4f * d, solidPaint)
     }
 
-    
     private fun drawBlackButton(canvas: Canvas, r: RectF, d: Float) {
         val radius = r.width() / 2f
         canvas.drawCircle(r.centerX(), r.centerY(), radius, fillWhite)
         canvas.drawCircle(r.centerX(), r.centerY(), radius, thinDashPaint)
-        
+
         canvas.drawCircle(r.centerX(), r.centerY(), 11f * d, fillBlack)
     }
 
-    
     private fun drawEditTextButton(canvas: Canvas, r: RectF, d: Float) {
         val radius = r.width() / 2f
         canvas.drawCircle(r.centerX(), r.centerY(), radius, fillWhite)
@@ -820,7 +776,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         canvas.drawLine(cx - 6f * d, cy + 4f * d, cx + 4f * d, cy + 1f * d, thinDashPaint)
     }
 
-    
     private fun drawShotButton(canvas: Canvas, r: RectF, d: Float) {
         val radius = r.width() / 2f
         canvas.drawCircle(r.centerX(), r.centerY(), radius, fillWhite)
@@ -838,7 +793,6 @@ class InteractionOverlayView(context: Context) : View(context) {
         canvas.drawCircle(cx + 4f * d, cy - 6f * d, 2.4f * d, fillBlack)
     }
 
-    
     private fun drawRecognizeButton(canvas: Canvas, r: RectF, d: Float) {
         val radius = r.width() / 2f
         canvas.drawCircle(r.centerX(), r.centerY(), radius, fillWhite)

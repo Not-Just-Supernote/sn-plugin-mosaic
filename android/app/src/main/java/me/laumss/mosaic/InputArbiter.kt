@@ -2,16 +2,14 @@ package me.laumss.mosaic
 
 import android.os.SystemClock
 
-
 object InputArbiter {
-    
     const val PEN_PRIORITY_TAIL_MS = 300L
-    
+
     const val SLIDER_BLOCK_MS = 600L
 
     @Volatile private var penContact = false
     @Volatile private var penHover = false
-    
+
     @Volatile private var penLeftAt = 0L
     @Volatile private var sliderBlockUntil = 0L
 

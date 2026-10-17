@@ -7,47 +7,41 @@ import android.os.Build
 import android.util.Log
 import kotlin.math.roundToInt
 
-
 object DrawPathClient {
     private const val TAG = "MosaicDrawPath"
 
-    
     private val SERVICE_NAME_CANDIDATES = arrayOf("service_myservice", "service.myservice")
 
-    
     private const val INTERFACE_TOKEN = "android.demo.IMyService"
     private const val WRITE_INFO_TRANSACTION = 0
     private const val DISABLE_AREA_TRANSACTION = 1
     private const val PEN_INFO_TRANSACTION = 2
-    
+
     private const val SHIFT_INFO_TRANSACTION = 3
-    
+
     private const val SYNC_BACKGROUND_TRANSACTION = 6
-    
+
     private const val ADDRESS_MODE_TRANSACTION = 10
     private const val PRESSURE_MAPPING_TRANSACTION = 11
-    
+
     private const val PEN_BUTTON_STYLE_TRANSACTION = 12
     private const val PEN_TYPE_GRID_LINE = 3
     private const val PEN_TYPE_SELECTION_LINE = 4
     private const val PEN_BUTTON_DOUBLE_CLICK_MS = 500
-    
+
     private const val HOST_ERASER_WIDTH = 1300
     private const val HOST_ERASER_COLOR = 255
     const val PRIME_SIZE = 18888
     const val DISABLE_SIZE = 19999
 
-    
     val MOSAIC_APP_NAME: String = BuildConfig.APPLICATION_ID
 
-    
     const val PEN_TYPE_NEEDLE = 10
     const val PEN_TYPE_MARKER = 11
     const val PEN_TYPE_CALLIGRAPHY = 15
     const val PEN_TYPE_BRUSH = 15
     const val PEN_TYPE_PRESSURE = 16
 
-    
     private data class PaletteTable(val needle: IntArray, val marker: Int)
 
     private val paletteTable = when {
@@ -69,7 +63,6 @@ object DrawPathClient {
         )
     }
 
-    
     private fun paletteSteps(style: PenStyle): IntArray = when (style) {
         PenStyle.MARKER -> intArrayOf(paletteTable.marker)
         PenStyle.BRUSH -> paletteTable.needle
@@ -81,10 +74,8 @@ object DrawPathClient {
         return steps.minByOrNull { kotlin.math.abs(it - raw) } ?: steps[0]
     }
 
-    
     private const val NOTE_CALLIGRAPHY_START = 4
 
-    
     fun noteCalligraphyThickness(drawPathWidth: Int): Int {
         val mosaicSteps = paletteSteps(PenStyle.PEN)
         val steps = paletteTable.needle.copyOfRange(NOTE_CALLIGRAPHY_START, paletteTable.needle.size)
@@ -103,14 +94,12 @@ object DrawPathClient {
         return paletteSteps(PenStyle.PEN)[index]
     }
 
-    
     fun widthArgument(style: PenStyle, stdWidth: Float): Int =
         nearestPaletteWidth(style, (stdWidth.coerceIn(1f, 40f) * 100f).roundToInt())
 
     fun widthArgumentFromStdHundredths(stdWidth: Int, style: PenStyle = PenStyle.PEN): Int =
         nearestPaletteWidth(style, stdWidth.coerceIn(50, 4000))
 
-    
     fun liveWidthArgumentFromStdHundredths(stdWidth: Int, style: PenStyle = PenStyle.PEN): Int {
         val rawWidth = widthArgumentFromStdHundredths(stdWidth, style)
         return when (style) {
@@ -121,7 +110,6 @@ object DrawPathClient {
         }
     }
 
-    
     private const val ABS_PRESSURE_MAX_A5X2 = 4095
     private const val LAMY_BAD_PRESSURE = 6991
     private const val LAMY_LINE_TYPE_PEN = 0
@@ -134,19 +122,15 @@ object DrawPathClient {
     /** Increase the previous 0.84 board display scale by another 20%. */
     private const val PEN_CANVAS_OUTPUT_SCALE = 1.008f
     private const val LIVE_PEN_WIDTH_SCALE = 1.5f
-    
+
     private const val MARKER_CANVAS_CALIBRATION = 3.6f
-    
-    
-    
+
     private const val BRUSH_LIVE_WIDTH_SCALE = 1f
     private const val BRUSH_CANVAS_WIDTH_SCALE = 3.6f
     private const val LAMY_MIN_X1000 = 1500
     private const val DRAW_PATH_MIN_WIDTH = 2
 
     private fun lamyX1000Width(lineType: Int, pressureRaw: Int, baseWidth: Float): Int {
-        
-        
         require(lineType == LAMY_LINE_TYPE_PEN) { "Unsupported Lamy line type: $lineType" }
         val pressure = pressureRaw.coerceIn(0, ABS_PRESSURE_MAX_A5X2)
         if (pressure >= LAMY_BAD_PRESSURE) return LAMY_MIN_X1000
@@ -154,10 +138,9 @@ object DrawPathClient {
         val pressureIndex = (pressure / 10).coerceIn(0, 699)
         val belowOffset = pressureIndex < LAMY_PEN_OFFSET
         val tableIndex = if (belowOffset) LAMY_PEN_OFFSET else pressureIndex
-        
+
         val logIndex = (1000.0 * kotlin.math.ln((tableIndex + 1).toDouble())).roundToInt()
-        
-        
+
         val factorTerm = (logIndex * LAMY_PEN_FACTOR_1 + LAMY_PEN_FACTOR_0 * 1000) / 100
         val value = baseWidth * 296.20255f * factorTerm.toFloat() / 1000f -
             if (belowOffset) 1f else 0f
@@ -211,20 +194,18 @@ object DrawPathClient {
             "drawPath pressure sample is invalid: $pressure01"
         }
         if (drawPathType == PEN_TYPE_MARKER) {
-            
             return drawPathWidth * 0.254f / 100f * MARKER_CANVAS_CALIBRATION
         }
         if (drawPathType == PEN_TYPE_BRUSH) {
-            
             return drawPathWidth * BRUSH_CANVAS_WIDTH_SCALE * 0.254f / 100f
         }
         if (drawPathType == PEN_TYPE_PRESSURE) {
             return drawPathPressureWidth(drawPathWidth, pressure01)
         }
-        
+
         return drawPathWidth * 0.254f / 100f
     }
-    
+
     const val PEN_COLOR_BLACK = 0
     const val PEN_COLOR_WHITE = 0xfe
     const val PEN_COLOR_LIGHT_GRAY = -0x66
@@ -245,8 +226,6 @@ object DrawPathClient {
                 val getService = serviceManager.getMethod("getService", String::class.java)
                 getService.invoke(null, name) as? IBinder
             } catch (error: Throwable) {
-                
-                
                 Log.w(TAG, "getBinder reflection failed for $name: ${error.message}")
                 continue
             }
@@ -255,7 +234,6 @@ object DrawPathClient {
         return null
     }
 
-    
     @Volatile private var writeGateClosed = false
     private var pressureCurveBinder: IBinder? = null
     private var pressureCurveAppName: String? = null
@@ -330,18 +308,13 @@ object DrawPathClient {
             return
         }
         sendDisableAreas(binder, appName, listOf(DisableArea(0, 0, PRIME_SIZE, PRIME_SIZE)))
-        
-        
+
         sendDisableAreas(binder, appName, listOf(DisableArea(0, 0, DISABLE_SIZE, DISABLE_SIZE)))
         writeGateClosed = true
-        
-        
+
         sendDisableAreas(binder, appName, emptyList())
     }
 
-    
-    
-    
     fun configure(
         binder: IBinder,
         appName: String,
@@ -353,15 +326,13 @@ object DrawPathClient {
     ) {
         writeGateClosed = false
         sendDisableAreas(binder, appName, listOf(DisableArea(0, 0, PRIME_SIZE, PRIME_SIZE)))
-        
-        
+
         sendDisableAreas(binder, appName, emptyList())
         sendPenInfo(binder, appName, penType, penWidth, penColor, pressureCurveEnabled)
         sendIdentityAddressMode(binder, appName)
         if (areas.isNotEmpty()) sendDisableAreas(binder, appName, areas)
     }
 
-    
     fun sendStylusCalibration(binder: IBinder, appName: String, diffX: Int, diffY: Int, leftHand: Boolean) {
         val labeled = appName + if (leftHand) "_LeftHand" else "_RightHand"
         val data = Parcel.obtain()
@@ -382,21 +353,20 @@ object DrawPathClient {
         }
     }
 
-    
     fun sendIdentityAddressMode(binder: IBinder, appName: String) {
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
         try {
             data.writeInterfaceToken(INTERFACE_TOKEN)
             data.writeString(appName)
-            data.writeInt(0) 
-            data.writeInt(0) 
-            data.writeInt(0) 
-            data.writeInt(0) 
-            data.writeInt(0) 
-            data.writeInt(0) 
-            data.writeInt(0) 
-            data.writeFloat(1.0f) 
+            data.writeInt(0)
+            data.writeInt(0)
+            data.writeInt(0)
+            data.writeInt(0)
+            data.writeInt(0)
+            data.writeInt(0)
+            data.writeInt(0)
+            data.writeFloat(1.0f)
             val accepted = binder.transact(ADDRESS_MODE_TRANSACTION, data, reply, 0)
             val response = readReply(reply, "sendAddressMode")
             Log.i(TAG, "sendAddressMode app=$appName identity transact=$accepted reply=$response")
@@ -408,7 +378,6 @@ object DrawPathClient {
         }
     }
 
-    
     fun sendPenButtonOverride(binder: IBinder, appName: String, penType: Int, penWidth: Int, penColor: Int) {
         sendPenButtonStyle(
             binder, appName,
@@ -417,7 +386,6 @@ object DrawPathClient {
         )
     }
 
-    
     fun restoreHostPenButtonStyle(binder: IBinder, appName: String, hostLasso: Boolean) {
         if (hostLasso) {
             sendPenButtonStyle(
@@ -471,14 +439,12 @@ object DrawPathClient {
         }
     }
 
-    
     fun release(binder: IBinder, appName: String) {
         restoreDefaultPressureCurve(binder, appName)
         writeGateClosed = false
         sendDisableAreas(binder, appName, listOf(DisableArea(0, 0, PRIME_SIZE, PRIME_SIZE)))
     }
 
-    
     fun sendWriteInfo(binder: IBinder, appName: String, pageNum: Int, layer: Int) {
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
@@ -501,7 +467,6 @@ object DrawPathClient {
         }
     }
 
-    
     fun syncBackground(binder: IBinder, appName: String, isA6X2: Boolean) {
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
@@ -585,8 +550,6 @@ object DrawPathClient {
 
     private fun readReply(reply: Parcel, operation: String): String? {
         return try {
-            
-            
             reply.setDataPosition(0)
             reply.readString().also { value ->
                 Log.d(TAG, "$operation reply-read=$value")

@@ -8,11 +8,9 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 
-
 class MosaicHandwritingModule(
     reactContext: ReactApplicationContext,
 ) : ReactContextBaseJavaModule(reactContext) {
-
     companion object {
         private const val TAG = "MosaicHandwriting"
     }
@@ -26,12 +24,9 @@ class MosaicHandwritingModule(
     @ReactMethod
     fun attachInput(deviceType: Int, promise: Promise) {
         try {
-            
-            
             inputReader = InputReader.ensureBoardReader(reactApplicationContext)
             Log.i(TAG, "attachInput: native board reader reused")
             if (refreshKeyReader == null) {
-                
                 val refresh = RefreshKeyReader()
                 refresh.start()
                 refreshKeyReader = refresh
@@ -58,13 +53,11 @@ class MosaicHandwritingModule(
         refreshKeyReader?.stop()
         refreshKeyReader = null
         InputArbiter.reset()
-        
-        
+
         Log.i(TAG, "detachInput: reader + slider stopped")
         promise.resolve(true)
     }
 
-    
     @ReactMethod
     fun readGestureSettings(promise: Promise) {
         try {
@@ -95,5 +88,4 @@ class MosaicHandwritingModule(
             promise.reject("LOCK_STATUSBAR_FAILED", e)
         }
     }
-
 }

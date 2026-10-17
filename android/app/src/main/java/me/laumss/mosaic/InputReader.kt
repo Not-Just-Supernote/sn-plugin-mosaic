@@ -18,15 +18,13 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
-
 class InputReader(
     private val context: Context,
-    
+
     private val routeToBoard: Boolean = true,
     private val readPenEvents: Boolean = true,
     private val rawEventListener: ((action: Int, x: Float, y: Float, toolType: Int, pointerCount: Int) -> Unit)? = null,
 ) {
-
     companion object {
         private const val TAG = "MosaicInput"
 
@@ -41,7 +39,7 @@ class InputReader(
         private const val BTN_DIGI = 320
         private const val BTN_TOOL_RUBBER = 321
         private const val BTN_STYLUS = 331
-        
+
         private const val NEAR_PRESS_MIN_HOVER_MS = 50L
         private const val ABS_TILT_X = 26
         private const val ABS_TILT_Y = 27
@@ -62,7 +60,6 @@ class InputReader(
         private val boardReaderLock = Any()
         @Volatile private var boardReader: InputReader? = null
 
-        
         @JvmStatic
         fun ensureBoardReader(context: Context): InputReader = synchronized(boardReaderLock) {
             boardReader ?: InputReader(context).also {
@@ -86,33 +83,31 @@ class InputReader(
 
         @Volatile private var hostDisplay: HostDisplay? = null
 
-        
         @Volatile
         var penTiltDirection: FloatArray? = null
             private set
 
-        
         @Volatile var penRawX = -1
             private set
         @Volatile var penRawY = -1
             private set
         @Volatile var penRawPressure = -1
             private set
-        
+
         @Volatile var penPressure01 = -1f
             private set
         @Volatile private var penPressureUpdatedAtMs = 0L
         @Volatile private var penPressureMin = 0
-        
+
         @Volatile private var penPressureMax = 0
         private const val PRESSURE_HISTORY_SIZE = 2048
-        
+
         private const val PRESSURE_SAMPLE_WAIT_MS = 20L
         private const val PRESSURE_SAMPLE_MAX_AGE_MS = 8L
         private val pressureHistory = ArrayDeque<PressureSample>(PRESSURE_HISTORY_SIZE)
         private val pressureSignal = java.lang.Object()
         private data class PressureSample(val timeMs: Long, val pressure: Float, val nibAngle: Float)
-        
+
         @Volatile private var pressureClockOffsetMs = 0L
         @Volatile private var pressureClockOffsetReady = false
         @Volatile private var penCalligraphySampleAvailable = false
@@ -125,7 +120,6 @@ class InputReader(
             "raw=($penRawX,$penRawY) pressure=$penRawPressure pressure01=$penPressure01 " +
                 "tilt=($penRawTiltX,$penRawTiltY)"
 
-        
         @JvmStatic
         fun pressureForMotionEvent(event: MotionEvent): Float? {
             return sampleAt(event.eventTime, event.actionMasked == MotionEvent.ACTION_DOWN)?.pressure
@@ -207,9 +201,6 @@ class InputReader(
             synchronized(pressureSignal) {
                 val deadline = SystemClock.uptimeMillis() + PRESSURE_SAMPLE_WAIT_MS
                 while (true) {
-                    
-                    
-                    
                     val match = pressureHistory.minByOrNull { abs(it.timeMs - eventTimeMs) }
                     val delta = match?.let { abs(it.timeMs - eventTimeMs) }
                     val remaining = deadline - SystemClock.uptimeMillis()
@@ -244,9 +235,7 @@ class InputReader(
         fun setPluginViewVisible(visible: Boolean) {
             pluginViewVisible = visible
             Log.i(TAG, "plugin view visible=$visible")
-            
-            
-            
+
             if (!visible) {
                 InputArbiter.onPenContact(false)
                 InputArbiter.onPenHover(false)
@@ -260,7 +249,6 @@ class InputReader(
             Log.i(TAG, "host display rotation=$rotation size=${width}x$height")
         }
 
-        
         @JvmStatic
         fun isPenHovering(): Boolean = boardReader?.penHover == true
 
@@ -270,7 +258,6 @@ class InputReader(
         @JvmStatic
         fun isPenStylusButtonDown(): Boolean = boardReader?.penStylusButton == true
 
-        
         @JvmStatic
         fun isPenStylusPressNear(): Boolean = boardReader?.penStylusPressNear == true
     }
@@ -283,7 +270,6 @@ class InputReader(
     private var framePressure: Float? = null
     private var firstPressureFrame = true
 
-    
     private val fingerX = IntArray(MAX_SLOTS) { -1 }
     private val fingerY = IntArray(MAX_SLOTS) { -1 }
     private val rawFingerX = IntArray(MAX_SLOTS) { -1 }
@@ -298,12 +284,11 @@ class InputReader(
     private var touchGeneration = 0
     private var touchStreamDropped = false
 
-    
     @Volatile private var penHover = false
     @Volatile private var penRubber = false
     @Volatile private var penStylusButton = false
     @Volatile private var penStylusPressNear = false
-    
+
     private var penHoverSinceMs = 0L
     private var penTiltX = 0
     private var penTiltY = 0
@@ -457,8 +442,6 @@ class InputReader(
         return seconds * 1000L + micros / 1000L
     }
 
-    
-
     private fun handleTouchEvent(type: Int, code: Int, value: Int) {
         when (type) {
             EV_ABS -> when (code) {
@@ -483,7 +466,6 @@ class InputReader(
         }
     }
 
-    
     private fun updateTouchCoordinates(slot: Int) {
         val rawX = rawFingerX[slot]
         val rawY = rawFingerY[slot]
@@ -535,7 +517,6 @@ class InputReader(
     }
 
     private fun flushTouch() {
-        
         for (i in 0 until MAX_SLOTS) {
             if (!fingerUpPending[i]) continue
             if (isReportedFinger(i)) {
@@ -553,7 +534,7 @@ class InputReader(
             lastFingerX[i] = -1; lastFingerY[i] = -1
             fingerDownPending[i] = false
         }
-        
+
         var isFirst = countReportedFingers() == 0
         for (i in 0 until MAX_SLOTS) {
             if (!fingerDownPending[i]) continue
@@ -568,7 +549,7 @@ class InputReader(
             lastFingerX[i] = fingerX[i]
             lastFingerY[i] = fingerY[i]
         }
-        
+
         var anyMoved = false
         for (i in 0 until MAX_SLOTS) {
             if (isReportedFinger(i) && (fingerX[i] != lastFingerX[i] || fingerY[i] != lastFingerY[i])) {
@@ -609,7 +590,7 @@ class InputReader(
         if (!routeToBoard || !pluginViewVisible) return
 
         val now = SystemClock.uptimeMillis()
-        
+
         if (action == InputRouter.ACTION_DOWN) {
             touchStreamDropped = InputArbiter.touchBlockedBySlider(now)
             if (!touchStreamDropped) touchGeneration++
@@ -650,8 +631,6 @@ class InputReader(
         )
     }
 
-    
-
     private fun handlePenEvent(type: Int, code: Int, value: Int, eventTimeMs: Long) {
         if (type == EV_SYN && code == SYN_REPORT) {
             val pressure = framePressure ?: return
@@ -687,11 +666,11 @@ class InputReader(
                 }
                 BTN_TOOL_RUBBER -> {
                     val active = value == 1
-                    
+
                     if (active && !penHover) setHover(true, eventTimeMs)
                     if (active != penRubber) {
                         penRubber = active
-                        
+
                         if (routeToBoard) DrawPathGate.onRubber(active)
                         emitPenState(InputRouter.PenState.RUBBER, active)
                     }
@@ -755,7 +734,6 @@ class InputReader(
         )
     }
 
-    
     private fun transformPenTilt(rawTiltX: Int, rawTiltY: Int): FloatArray {
         val tiltX = signedTilt(rawTiltX)
         val tiltY = signedTilt(rawTiltY)
@@ -784,9 +762,7 @@ class InputReader(
                 else -> { quadX = -tiltY; quadY = -tiltX }
             }
         }
-        
-        
-        
+
         return floatArrayOf(quadX.toFloat(), quadY.toFloat())
     }
 
@@ -797,8 +773,6 @@ class InputReader(
         Log.i(TAG, "penState type=$state value=$value")
         InputRouter.postPenState(state, value)
     }
-
-    
 
     private fun scanDevicePaths(): Map<String, String> {
         val result = mutableMapOf<String, String>()

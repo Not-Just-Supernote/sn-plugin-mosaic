@@ -8,16 +8,13 @@ import android.graphics.RectF
 import kotlin.math.ceil
 import kotlin.math.floor
 
-
 enum class TemplateStyle { NONE, DOTS, LINES, CROSS }
-
 
 enum class TemplateSpacing(val pitch: Float) {
     NARROW(36f),
     MEDIUM(56f),
     WIDE(84f),
 }
-
 
 data class BackgroundTemplate(
     val style: TemplateStyle = TemplateStyle.NONE,
@@ -40,18 +37,16 @@ data class BackgroundTemplate(
     }
 }
 
-
-
 object TranslucentStore {
     private const val PREFS = "mosaic_translucent"
-    
+
     private const val KEY_LEVEL = "level_v2"
     const val MIN_LEVEL = 0
     const val MAX_LEVEL = 100
     const val STEP = 5
     const val MIN_SEE_THROUGH = 15f
     const val MAX_SEE_THROUGH = 40f
-    
+
     const val DEFAULT_LEVEL = 15
 
     fun seeThroughPercent(level: Int): Float =
@@ -91,7 +86,6 @@ object TemplateStore {
     }
 }
 
-
 object TemplatePaper {
     private const val LINE_W = 0.9f
     private const val DOT_R = 1.5f
@@ -104,15 +98,11 @@ object TemplatePaper {
         val pitch = template.spacing.pitch * k
         if (pitch <= 0f) return
         val dotR = DOT_R * k
-        
-        
-        
+
         val linePaint = Paint().apply { color = if (bounded) Color.BLACK else Color.LTGRAY; style = Paint.Style.STROKE; strokeWidth = LINE_W * k }
         val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (bounded) Color.BLACK else Color.GRAY; style = Paint.Style.FILL }
         val crossPaint = Paint().apply { color = if (bounded) Color.BLACK else Color.GRAY; style = Paint.Style.STROKE; strokeWidth = CROSS_W * k }
 
-        
-        
         // On a page, ruled lines stop at the page edges so the white around a zoomed-out page stays blank.
         val rowLeft = if (bounded) maxOf(world.left, 0f) else world.left
         val rowRight = if (bounded) minOf(world.right, pageWidth) else world.right

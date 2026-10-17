@@ -14,13 +14,12 @@ import java.lang.ref.WeakReference
 class MosaicEinkRefreshModule(
     reactContext: ReactApplicationContext,
 ) : ReactContextBaseJavaModule(reactContext) {
-
     companion object {
         private const val TAG = "MosaicEinkRefresh"
         const val MODE_DTH = 5
-        
+
         const val MODE_DEFAULT = 7
-        
+
         const val MODE_A2 = 4
 
         @Volatile private var instance: WeakReference<MosaicEinkRefreshModule>? = null
@@ -32,28 +31,10 @@ class MosaicEinkRefreshModule(
             else -> 0
         }
 
-        
         @JvmStatic
         fun applyNative(mode: Int, owner: String) {
             val module = instance?.get() ?: return
             runOnUiImmediate { module.applyOwned(mode, owner) }
-        }
-
-        fun applyLabMode(mode: Int, owner: String, result: (Boolean, Int?) -> Unit) {
-            require(mode == MODE_DEFAULT || mode == MODE_A2)
-            runOnUiImmediate {
-                val module = instance?.get()
-                if (module == null) result(false, null)
-                else result(module.applyOwned(mode, owner), module.effectiveMode())
-            }
-        }
-
-        fun releaseLabMode(owner: String, result: (Boolean, Int?) -> Unit) {
-            runOnUiImmediate {
-                val module = instance?.get()
-                if (module == null) result(false, null)
-                else result(module.resetOwned(owner), module.effectiveMode())
-            }
         }
 
         @JvmStatic
@@ -62,7 +43,6 @@ class MosaicEinkRefreshModule(
             runOnUiImmediate { module.resetOwned(owner) }
         }
 
-        
         private fun runOnUiImmediate(block: () -> Unit) {
             if (UiThreadUtil.isOnUiThread()) block() else UiThreadUtil.runOnUiThread(block)
         }
@@ -85,23 +65,6 @@ class MosaicEinkRefreshModule(
             root.postInvalidateOnAnimation()
             Log.i(TAG, "full refresh requested reason=$reason via=root.forceEinkFullUpdate")
             return true
-        }
-
-        fun requestRegionRefresh(view: View, region: Rect, reason: String): Boolean {
-            val rect = Rect(region)
-            if (!view.isAttachedToWindow || !rect.intersect(0, 0, view.width, view.height)) return false
-            return try {
-                // Verified on the device framework: invalidate(Rect, einkMode) forwards
-                // the rectangle and explicit waveform to the view's E-ink dirty-region path.
-                val gcMode = View::class.java.getField("EINK_SHOW_MODE_GC").getInt(null)
-                View::class.java.getMethod("invalidate", Rect::class.java, Int::class.javaPrimitiveType)
-                    .invoke(view, rect, gcMode)
-                Log.i(TAG, "region refresh requested reason=$reason rect=$rect mode=$gcMode")
-                true
-            } catch (error: Exception) {
-                Log.w(TAG, "region refresh failed reason=$reason rect=$rect", error)
-                false
-            }
         }
 
         /** One submission with explicit gray conversion, leaving gesture ownership intact. */
@@ -134,7 +97,7 @@ class MosaicEinkRefreshModule(
 
     private var activeMode: Int? = null
     private var modeView: WeakReference<View>? = null
-    
+
     private val requests = LinkedHashMap<String, Int>()
 
     init {
@@ -151,7 +114,7 @@ class MosaicEinkRefreshModule(
     private fun applyOwned(mode: Int, owner: String): Boolean {
         requests.remove(owner)
         requests[owner] = mode
-        
+
         return applyRefreshMode(effectiveMode())
     }
 
@@ -261,7 +224,6 @@ class MosaicEinkRefreshModule(
         UiThreadUtil.runOnUiThread {
             requests.clear()
             applyRefreshMode(null)
-            EinkRegal.restore(reactApplicationContext, "module-invalidate")
         }
         super.invalidate()
     }

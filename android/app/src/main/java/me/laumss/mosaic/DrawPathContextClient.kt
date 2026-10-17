@@ -8,7 +8,6 @@ import com.ratta.supernote.pluginlib.api.HostDataCacheAPI
 import com.ratta.supernote.pluginlib.core.PluginAppAPI
 import com.ratta.supernote.pluginlib.modules.PluginModule
 
-
 object DrawPathContextClient {
     private const val TAG = "MosaicDrawPathContext"
 
@@ -58,7 +57,6 @@ object DrawPathContextClient {
                 }
 
                 try {
-                    
                     host.getLayers(app, notePath, sdkPage) { layerResponse ->
                         val layerId = if (layerResponse.isSuccess) {
                             currentLayerId(layerResponse.getResult())
@@ -104,11 +102,7 @@ object DrawPathContextClient {
     private fun currentLayerId(result: Any?): Int? {
         val layers = result as? List<*> ?: return null
         val typedLayers = layers.filterIsInstance<Layer>()
-        
-        
-        
-        
-        
+
         return typedLayers.firstOrNull { it.isCurrentLayer }?.layerId
             ?: typedLayers.firstOrNull { it.layerId == 0 }?.layerId
     }

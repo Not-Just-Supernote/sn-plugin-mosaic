@@ -5,9 +5,7 @@ import android.net.Uri
 import android.provider.Settings
 import android.util.Log
 
-
 object GestureSettings {
-
     private const val TAG = "MosaicSettings"
     private const val HOST_EMPTY_SCREEN_GESTURE = "1"
     private const val HOST_EMPTY_SLIDEBAR_GESTURE = "0"
@@ -15,16 +13,15 @@ object GestureSettings {
     enum class GestureTool { ERASER, LASSO, OFF }
 
     class Resolved(
-        
         val screenGesture: GestureTool,
-        
+
         val slidebarGesture: GestureTool,
-        
+
         val penButton: GestureTool,
         val leftHand: Boolean,
-        
+
         val sliderSide: Int,
-        
+
         val calibX: Int,
         val calibY: Int,
         val raw: Map<String, String>,
@@ -123,7 +120,6 @@ object GestureSettings {
         RegexOption.IGNORE_CASE,
     )
 
-    
     fun dumpCalibrationHints(context: Context) {
         val resolver = context.contentResolver
         var printed = 0
@@ -149,7 +145,6 @@ object GestureSettings {
         Log.i(TAG, "[Calib] dump done rows=$printed")
     }
 
-    
     private fun mapTool(value: String?): GestureTool = when (value) {
         "0" -> GestureTool.ERASER
         "1" -> GestureTool.LASSO

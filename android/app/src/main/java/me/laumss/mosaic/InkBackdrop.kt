@@ -4,12 +4,10 @@ import android.graphics.RectF
 import kotlin.math.hypot
 import kotlin.math.max
 
-
 object InkBackdrop {
     const val INK_BLACK = BoardEngine.StrokeRec.INK_BLACK
     const val INK_WHITE = BoardEngine.StrokeRec.INK_WHITE
 
-    
     fun isAutoInk(s: BoardEngine.StrokeRec): Boolean =
         (s.color == INK_BLACK || s.color == INK_WHITE) &&
             s.penStyle != PenStyle.MARKER.objType &&
@@ -17,13 +15,11 @@ object InkBackdrop {
 
     private fun isMarker(s: BoardEngine.StrokeRec) = s.penStyle == PenStyle.MARKER.objType
 
-    
     private fun isDarkMarker(s: BoardEngine.StrokeRec, includeGray: Boolean = false) =
         isMarker(s) && (includeGray || MarkerInk.fromArgb(s.color).darkBackdrop)
 
     private fun isFill(s: BoardEngine.StrokeRec) = s.penStyle == PenStyle.FILLED_SHAPE.objType && s.isShape
 
-    
     private fun strokesIn(space: String): Collection<BoardEngine.StrokeRec> {
         if (space.startsWith("card:")) return BoardEngine.cardStrokes[space.substring(5)] ?: emptyList()
         return BoardEngine.strokes.values.filter { it.space == space }
@@ -35,7 +31,6 @@ object InkBackdrop {
         return override ?: (BoardEngine.cards[space.substring(5)]?.colored == true)
     }
 
-    
     /** World-space background hit; use the filled neck, including its curved edges. */
     fun darkAt(x: Float, y: Float): Boolean = synchronized(BoardEngine.lock) {
         val top = BoardGeometry.topCardAt(BoardEngine.cardsByZ, x, y)
@@ -71,15 +66,12 @@ object InkBackdrop {
         return if (dark) INK_WHITE else INK_BLACK
     }
 
-    
     fun markersIn(space: String, includeGray: Boolean = false): List<BoardEngine.StrokeRec> =
         strokesIn(space).filter { isDarkMarker(it, includeGray) }
 
-    
     fun isOverMarkers(s: BoardEngine.StrokeRec, markers: List<BoardEngine.StrokeRec>): Boolean =
         overMarker(s, markers)
 
-    
     private fun overMarker(s: BoardEngine.StrokeRec, spaceMarkers: List<BoardEngine.StrokeRec>): Boolean {
         if (spaceMarkers.isEmpty()) return false
         val markers = spaceMarkers.filter { it.id != s.id && RectF.intersects(markerBounds(it), s.bounds) }
@@ -106,7 +98,6 @@ object InkBackdrop {
         return r
     }
 
-    
     private fun nearMarker(m: BoardEngine.StrokeRec, x: Float, y: Float, pad: Float): Boolean {
         if (m.isOutline) return ContourGeometry.containsOrNear(m.points, m.contourOffsets, x, y, pad)
         val reach = markerHalfWidth(m) + pad
@@ -129,7 +120,6 @@ object InkBackdrop {
         return hypot(px - (ax + t * dx), py - (ay + t * dy))
     }
 
-    
     private inline fun forEachSample(s: BoardEngine.StrokeRec, block: (Float, Float) -> Unit) {
         val p = s.points
         if (!s.isShape) {
@@ -149,11 +139,9 @@ object InkBackdrop {
 
     private const val SHAPE_EDGE_SAMPLES = 8
 
-    
     fun layerDarkAt(space: String, x: Float, y: Float, penRadius: Float): Boolean =
         layerAt(space, x, y, penRadius) != null
 
-    
     fun layerAt(space: String, x: Float, y: Float, penRadius: Float): String? {
         synchronized(BoardEngine.lock) {
             for (s in strokesIn(space)) {
@@ -167,7 +155,6 @@ object InkBackdrop {
         }
     }
 
-    
     private fun insideOrNearPolygon(p: FloatArray, x: Float, y: Float, pad: Float): Boolean {
         val n = p.size / 2
         if (n < 3) return false
@@ -183,7 +170,6 @@ object InkBackdrop {
         return inside
     }
 
-    
     fun reconcile(change: BoardHistory.Change): BoardHistory.Change? {
         val candidates = LinkedHashMap<String, BoardEngine.StrokeRec>()
         synchronized(BoardEngine.lock) {

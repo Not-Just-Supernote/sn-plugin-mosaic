@@ -33,27 +33,26 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 
-
 class CardTextEditor(
     context: Context,
     initial: String,
     private val dark: Boolean,
-    
+
     private val fill: Int = if (dark) Color.BLACK else BoardContentView.CARD_FILL_COLOR,
-    
+
     private var contentScale: Float = 1f,
-    
+
     private val headerMode: Boolean = false,
     // Smaller (-1) or larger (+1) text; returns the card's new font scale, or null when nothing changed.
     private val onFontStep: ((Int) -> Float?)? = null,
     private val cardFrame: (availableBottom: Int) -> RectF,
-    
+
     private val onKeyboard: (obscuredTop: Int?) -> Unit,
     private val onChange: (String) -> Unit,
     private val onFinish: () -> Unit,
-    
+
     initialSelection: IntRange? = null,
-    
+
     initialDirty: Boolean = false,
 ) : FrameLayout(context) {
     private val d = resources.displayMetrics.density
@@ -64,20 +63,19 @@ class CardTextEditor(
     private var keyboardSeen = false
     private var textScale = 1f
     private val caretPaint = Paint()
-    
+
     private var lineSpans = ArrayList<LineSpans?>()
     private val staleSpans = ArrayList<Any>()
-    
+
     private var headerSpans: Array<EditorSpan>? = null
     private var headerScale = 0f
-    
+
     private var baseSize = 0f
-    
+
     private var commitPending = false
     private var committedLayoutHeight = -1
     private val commitRunnable = Runnable { commit() }
     private val input = object : EditText(context) {
-        
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             val layout = layout ?: return
@@ -104,11 +102,11 @@ class CardTextEditor(
         }
     }
     private val buttons = mutableMapOf<String, FormatIcon>()
-    
+
     private val dock = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(11f), dp(9f), dp(11f), dp(9f)) 
+        setPadding(dp(11f), dp(9f), dp(11f), dp(9f))
         background = GradientDrawable().apply {
             setColor(Color.WHITE)
             setStroke(dp(1f), 0xffcccccc.toInt())
@@ -119,7 +117,6 @@ class CardTextEditor(
     private val layoutListener = ViewTreeObserver.OnGlobalLayoutListener { positionOnCanvas() }
 
     init {
-        
         input.apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             gravity = Gravity.TOP or Gravity.START
@@ -128,7 +125,7 @@ class CardTextEditor(
             setTextSize(TypedValue.COMPLEX_UNIT_PX, CardTextFormat.BODY_SIZE * d)
             includeFontPadding = false
             isCursorVisible = false
-            
+
             if (Build.VERSION.SDK_INT >= 23) {
                 breakStrategy = android.text.Layout.BREAK_STRATEGY_SIMPLE
                 hyphenationFrequency = android.text.Layout.HYPHENATION_FREQUENCY_NONE
@@ -147,7 +144,7 @@ class CardTextEditor(
                 contentDescription = label
                 isClickable = true
                 isFocusable = true
-                
+
                 isFocusableInTouchMode = false
                 setOnClickListener {
                     document.toggle(input.selectionStart.coerceAtLeast(0), kind)
@@ -202,8 +199,8 @@ class CardTextEditor(
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 if (styling || headerMode) return
                 val (first, removed, added) = document.replace(start, before, s?.subSequence(start, start + count)?.toString().orEmpty())
-                
-                if (lineSpans.size < first + removed) { lineSpans.clear(); return } 
+
+                if (lineSpans.size < first + removed) { lineSpans.clear(); return }
                 val keep = lineSpans[first]
                 for (i in 1 until removed) lineSpans[first + i]?.let { staleSpans.addAll(it.spans) }
                 repeat(removed) { lineSpans.removeAt(first) }
@@ -221,7 +218,6 @@ class CardTextEditor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        
         if (event.actionMasked == MotionEvent.ACTION_UP) finish()
         return true
     }
@@ -246,7 +242,7 @@ class CardTextEditor(
 
     fun release() {
         if (closed) return
-        
+
         flushCommit()
         closed = true
         if (viewTreeObserver.isAlive) viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
@@ -293,10 +289,7 @@ class CardTextEditor(
         }
     }
 
-    
     private fun keyboardInsetPx(): Int {
-        
-        
         val resizedBySystem = rootView.height - height > dp(120f)
         if (resizedBySystem) return 0
         if (Build.VERSION.SDK_INT >= 30) {
@@ -311,7 +304,6 @@ class CardTextEditor(
             .coerceAtMost(height)
     }
 
-    
     private fun finish() {
         flushCommit()
         onFinish()
@@ -319,7 +311,7 @@ class CardTextEditor(
 
     private fun scheduleCommit() {
         removeCallbacks(commitRunnable)
-        
+
         val height = input.layout?.height ?: -1
         if (height != committedLayoutHeight) commit() else { commitPending = true; postDelayed(commitRunnable, COMMIT_DELAY_MS) }
     }
@@ -332,7 +324,7 @@ class CardTextEditor(
         if (closed) return
         committedLayoutHeight = input.layout?.height ?: -1
         onChange(if (headerMode) input.text.toString() else document.markdown())
-        
+
         post { if (!closed) positionOnCanvas() }
     }
 
@@ -341,7 +333,6 @@ class CardTextEditor(
         buttons.forEach { (kind, button) -> button.active = style.active(kind) }
     }
 
-    
     private fun renderStyles() {
         styling = true
         try {
@@ -374,7 +365,7 @@ class CardTextEditor(
         val spans = ArrayList<EditorSpan>(6)
         spans += Size((CardTextFormat.textSize(style.heading) * textScale).toInt())
         spans += Face((if (style.bold || style.heading > 0) Typeface.BOLD else 0) or (if (style.italic) Typeface.ITALIC else 0))
-        
+
         if (style.black) { spans += BlackLine(if (dark) Color.WHITE else Color.BLACK); spans += Ink(if (dark) Color.BLACK else Color.WHITE) }
         if (style.indent.isNotEmpty()) spans += Indent((style.indent.length * CardTextFormat.BODY_SIZE * 0.25f * textScale).toInt())
         spans.forEach { editable.setSpan(it, start, end, SPAN_FLAGS) }
@@ -387,8 +378,6 @@ class CardTextEditor(
         input.setTextSize(TypedValue.COMPLEX_UNIT_PX, px)
     }
 
-    
-    
     private fun headerLineFilter() = InputFilter { source, start, end, dest, dstart, dend ->
         val inserted = source.subSequence(start, end)
         if (inserted.indexOf('\n') < 0) return@InputFilter null
@@ -401,7 +390,6 @@ class CardTextEditor(
         kept
     }
 
-    
     private fun renderHeaderStyles() {
         styling = true
         try {
@@ -467,7 +455,7 @@ class CardTextEditor(
             if (asset != null) {
                 asset.setTint(color); asset.setBounds(9, 9, 31, 31); asset.draw(canvas)
             } else {
-                canvas.translate(9f, 9f) 
+                canvas.translate(9f, 9f)
                 pen.color = color; pen.style = Paint.Style.STROKE; pen.strokeWidth = 2f
                 pen.strokeCap = Paint.Cap.ROUND; pen.strokeJoin = Paint.Join.ROUND
                 path.reset()

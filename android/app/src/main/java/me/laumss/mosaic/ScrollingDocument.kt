@@ -3,7 +3,6 @@ package me.laumss.mosaic
 import kotlin.math.ceil
 import kotlin.math.floor
 
-
 // A note is a 480-wide column scaled to the view width when opened, so every device shows the whole width.
 // Its thumbnail is cut into 480x640 tiles so a save only redraws the tiles that changed.
 class ScrollingDocument(

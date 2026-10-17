@@ -10,61 +10,46 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 
-
 object InklingLink {
-
     private const val TAG = "MosaicInklingLink"
 
-    
     const val ACTION_BOARD_STATE = "me.laumss.mosaic.BOARD_STATE"
 
-    
     const val ACTION_TOOLBAR_RECT = "me.laumss.mosaic.INKLING_TOOLBAR_RECT"
 
-    
     const val ACTION_OVERLAY_RECTS = "me.laumss.mosaic.INKLING_OVERLAY_RECTS"
 
     /** Notipal 浮窗拖动开始 / 结束，extra `active`。 */
     const val ACTION_OVERLAY_DRAG = "me.laumss.mosaic.INKLING_OVERLAY_DRAG"
-    
-    
+
     const val ACTION_REQUEST = "me.laumss.mosaic.INKLING_REQUEST"
     const val ACTION_PALETTE_RESULT = "me.laumss.mosaic.PALETTE_RESULT"
 
     const val SURFACE_BOARD = "board"
     const val SURFACE_NOTE = "note"
 
-    
     const val CLIP_DIR = "/sdcard/EXPORT/mosaic"
-    
+
     const val CLIP_LASSO_FILE = "$CLIP_DIR/clip_lasso.json"
-    
+
     const val PASTE_STROKES_FILE = "$CLIP_DIR/paste_strokes.json"
 
-
     interface Host {
-
         fun onInklingToolbarRectChanged()
-
 
         fun onInklingCloseRequested()
 
-        
         fun onInklingPasteStrokesRequested()
 
-        
         fun onInklingClearSelectionRequested(delete: Boolean)
 
-        
         fun onInklingTextCardRequested(text: String, anchorScreenX: Int, anchorScreenY: Int)
 
-        
         fun onInklingInboxReady()
 
         /** 调色盘读取选区；data 为非空时按冻结的选区应用笔形。 */
         fun onInklingPaletteRequested(requestId: String, data: String?)
 
-        
         fun onInklingSurfaceChanged(surface: String, noteRef: String?)
 
         /** Notipal 浮窗拖动开始 / 结束。 */
@@ -89,7 +74,6 @@ object InklingLink {
     private var receiver: BroadcastReceiver? = null
     private var appContext: Context? = null
 
-    
     fun attach(context: Context, host: Host) {
         this.host = host
         val app = context.applicationContext
@@ -126,12 +110,10 @@ object InklingLink {
         Log.i(TAG, "inkling link attached")
     }
 
-    
     fun detach(host: Host) {
         if (this.host !== host) return
         this.host = null
-        
-        
+
         surface = SURFACE_BOARD
         noteRef = null
         setBoardVisible(false, "detach")
@@ -149,12 +131,10 @@ object InklingLink {
         Log.i(TAG, "inkling link detached")
     }
 
-    
-
     fun setBoardVisible(visible: Boolean, reason: String) {
         if (boardVisible == visible) return
         boardVisible = visible
-        
+
         if (!visible) {
             surface = SURFACE_BOARD
             noteRef = null
@@ -185,7 +165,6 @@ object InklingLink {
 
     fun currentNoteRef(): String? = noteRef
 
-    
     fun isBoardSurface(): Boolean = boardVisible && surface == SURFACE_BOARD
 
     // Clipboard strokes work on the board and inside a note card.
@@ -211,8 +190,6 @@ object InklingLink {
             Log.e(TAG, "state publish failed", error)
         }
     }
-
-    
 
     private fun onToolbarRect(intent: Intent) {
         val next = if (intent.getBooleanExtra("present", false)) {
@@ -253,7 +230,7 @@ object InklingLink {
         if (next == overlayRects) return
         overlayRects = next
         Log.i(TAG, "overlay rects=$next")
-        
+
         host?.onInklingToolbarRectChanged()
     }
 
@@ -295,7 +272,6 @@ object InklingLink {
                 else if (text.isNotEmpty()) Log.i(TAG, "text-card ignored surface=$surface visible=$boardVisible")
             }
             "inbox" -> {
-                
                 if (isBoardSurface()) host?.onInklingInboxReady()
                 else Log.i(TAG, "inbox notification deferred surface=$surface visible=$boardVisible")
             }
@@ -303,9 +279,6 @@ object InklingLink {
         }
     }
 
-    
-
-    
     fun replyPalette(requestId: String, result: org.json.JSONObject) {
         val ctx = appContext ?: return
         ctx.sendBroadcast(Intent(ACTION_PALETTE_RESULT).apply {
@@ -317,24 +290,21 @@ object InklingLink {
 
     fun toolbarRect(): Rect? = toolbarRect
 
-    
     fun toolbarDisableArea(): DrawPathClient.DisableArea? {
         val r = toolbarRect ?: return null
         return DrawPathClient.DisableArea(r.left, r.top, r.width(), r.height())
     }
 
-    
     fun overlayDisableAreas(): List<DrawPathClient.DisableArea> =
         overlayRects.map { DrawPathClient.DisableArea(it.left, it.top, it.width(), it.height()) }
 
-    
     fun consumesScreenPoint(screenX: Float, screenY: Float): Boolean {
         toolbarRect?.let {
             if (screenX >= it.left && screenX < it.right && screenY >= it.top && screenY < it.bottom) {
                 return true
             }
         }
-        
+
         for (r in overlayRects) {
             if (screenX >= r.left && screenX < r.right && screenY >= r.top && screenY < r.bottom) {
                 return true

@@ -10,7 +10,6 @@ import com.facebook.react.bridge.ReactMethod
 import java.lang.reflect.Proxy
 import java.util.concurrent.atomic.AtomicBoolean
 
-
 class MosaicPermissionModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
     companion object {
         private const val TAG = "MosaicPermission"

@@ -13,13 +13,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-
 class ClipboardStrokeIo {
     companion object {
         private const val TAG = "MosaicClipboardIo"
-        
+
         private const val NOTE_COLOR_WHITE = 0xFE
-        
+
         /** SDK 185 Stroke.penType for calligraphy (same as Notipal). */
         private const val NOTE_PEN_TYPE_CALLIGRAPHY = 15
         // Blank space left between stacked pages before the note is compacted.
@@ -33,7 +32,7 @@ class ClipboardStrokeIo {
         val bboxCy: Float,
         val worldScale: Float,
         val sampleScale: Float,
-        
+
         val screenShortPx: Float,
     )
 
@@ -43,10 +42,10 @@ class ClipboardStrokeIo {
         val points: FloatArray,
         val pressures: FloatArray,
         val drawPathWidth: Int = 0,
-        
+
         val color: Int = BoardEngine.StrokeRec.INK_BLACK,
         val sampleScale: Float = 1f,
-        
+
         val noteWhite: Boolean = false,
         val nibAngle: Float = Float.NaN,
         val angles: IntArray = IntArray(0),
@@ -59,11 +58,10 @@ class ClipboardStrokeIo {
         val minY: Float,
         val maxX: Float,
         val maxY: Float,
-        
+
         val pageScale: Float,
     )
 
-    
     data class ExportStroke(
         val penStyle: Int,
         val width: Float,
@@ -79,7 +77,6 @@ class ClipboardStrokeIo {
         val contourOffsets: IntArray = IntArray(0),
     )
 
-    
     class NoteImport(
         val strokes: List<BoardEngine.StrokeRec>,
         val pageCount: Int,
@@ -112,12 +109,10 @@ class ClipboardStrokeIo {
         }
     }
 
-    
     fun submitNoteImport(source: File, callback: (Result<NoteImport>) -> Unit): Future<*> = pasteExecutor.submit {
         callback(runCatching { PreparedNoteImport.read(source) ?: parseNoteFile(source) })
     }
 
-    
     fun submitExport(
         target: File,
         strokes: List<ExportStroke>,
@@ -143,8 +138,7 @@ class ClipboardStrokeIo {
                     stream.fd.sync()
                 }
                 if (!isCurrent()) return@submit
-                
-                
+
                 java.nio.file.Files.move(
                     tmp.toPath(), target.toPath(),
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING,
@@ -169,7 +163,6 @@ class ClipboardStrokeIo {
             .onFailure { Log.w(TAG, "clipboard delete failed path=${file.path}", it) }
     }
 
-    
     private fun pastePenStyle(obj: JSONObject): Int {
         if (obj.has("sdkPenType")) {
             return when (obj.optInt("sdkPenType")) {
@@ -214,9 +207,7 @@ class ClipboardStrokeIo {
         val maxX = bounds[2]
         val maxY = bounds[3]
         if (!minX.isFinite() || !maxX.isFinite()) return null
-        
-        
-        
+
         val pageScale = notePageScale(root, array, transform.screenShortPx)
         val scale = transform.worldScale * pageScale
         val strokes = pageStrokes.map { source ->
@@ -242,7 +233,6 @@ class ClipboardStrokeIo {
         return PasteBatch(strokes, minX, minY, maxX, maxY, pageScale)
     }
 
-    
     private fun parsePageStrokes(array: JSONArray, bounds: FloatArray, noteSource: Boolean = false, logFirst: Boolean = true): List<TripleStroke> {
         var minX = bounds[0]
         var minY = bounds[1]
@@ -312,11 +302,10 @@ class ClipboardStrokeIo {
                     if (calligraphy) drawPathWidth / 100f else width,
                     pagePoints.copyOf(valid * 2),
                     pressures.copyOf(valid),
-                    
-                    
+
                     drawPathWidth,
                     noteInkColor(obj, penStyle),
-                    
+
                     penStyle != PenStyle.MARKER.objType && noteSource &&
                         obj.optInt("penColor", 0) == NOTE_COLOR_WHITE,
                     obj.optDouble("sampleScale", 1.0).toFloat()
@@ -499,7 +488,6 @@ class ClipboardStrokeIo {
         else -> error("Invalid note JSON token")
     }
 
-    
     private fun clipboardCoordinateSpace(root: JSONObject, strokes: JSONArray): String =
         root.optString("coordinateSpace").ifBlank {
             // Legacy native exports preserve these SDK fields; pen width is independent of coordinates.
@@ -532,7 +520,6 @@ class ClipboardStrokeIo {
         val contourOffsets: IntArray,
     )
 
-    
     private fun noteInkColor(obj: JSONObject, penStyle: Int): Int {
         val noteColor = obj.optInt("penColor", 0)
         if (obj.has("contours")) {
@@ -564,9 +551,7 @@ class ClipboardStrokeIo {
                 pts.put((stroke.pressures.getOrNull(point) ?: 1f).toDouble())
                 point++
             }
-            
-            
-            
+
             val sdkPenType = when (stroke.penStyle) {
                 PenStyle.BRUSH.objType -> DrawPathClient.PEN_TYPE_NEEDLE
                 PenStyle.MARKER.objType -> DrawPathClient.PEN_TYPE_MARKER
@@ -580,7 +565,7 @@ class ClipboardStrokeIo {
             val json = JSONObject()
                 .put("penStyle", stroke.penStyle)
                 .put("sdkPenType", sdkPenType)
-                
+
                 .put("width", (noteThickness / 100f).toDouble())
                 .put("drawPathWidth", stroke.drawPathWidth)
                 // Convert capture pixels per world unit to capture pixels per exported pixel.
@@ -608,8 +593,7 @@ class ClipboardStrokeIo {
                     json.put("tilt", JSONArray().put(stroke.angles[0]).put(stroke.angles[1]))
                 }
             }
-            
-            
+
             if (stroke.contourOffsets.isNotEmpty()) {
                 val gray = stroke.color and 0xFF
                 json.put("penColor", if (gray == 255) NOTE_COLOR_WHITE else gray)

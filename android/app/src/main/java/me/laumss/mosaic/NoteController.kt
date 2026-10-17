@@ -6,7 +6,6 @@ import android.util.Log
 import java.io.File
 import java.util.concurrent.Executors
 
-
 class NoteController {
     private val ui = Handler(Looper.getMainLooper())
     private val io = Executors.newSingleThreadExecutor { r -> Thread(r, "MosaicNoteIO") }
@@ -56,7 +55,7 @@ class NoteController {
             ui.post { result.onSuccess { document=it; previewed=it.strokes.associateBy { s -> s.id } }; done(result) }
         }
     }
-    
+
     fun create(dir: String, doc: ScrollingDocument, preparedPreview: File? = null, done: (Result<ScrollingDocument>) -> Unit) {
         require(doc.ref.matches(Regex("note-[a-zA-Z0-9-]+")))
         val target = File(dir)
@@ -103,7 +102,6 @@ class NoteController {
     fun previewPath(ref: String) = File(directory,ref).absolutePath
 }
 
-
 object MosaicSession {
     private const val PREFS = "mosaic_session"
     private const val KEY_NOTE_REF = "noteRef"
@@ -112,7 +110,6 @@ object MosaicSession {
     private const val KEY_PAN_Y = "panY"
     private const val KEY_SCALE = "scale"
 
-    
     class Viewport(val panX: Float, val panY: Float, val scale: Float)
 
     fun saveNoteRef(context: android.content.Context, ref: String?) {
@@ -134,7 +131,6 @@ object MosaicSession {
         context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
             .getString(KEY_NOTES_DIR, null)?.takeIf { java.io.File(it).isDirectory }
 
-    
     fun saveViewport(context: android.content.Context, panX: Float, panY: Float, scale: Float) {
         context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).edit()
             .putFloat(KEY_PAN_X, panX).putFloat(KEY_PAN_Y, panY).putFloat(KEY_SCALE, scale).apply()
@@ -148,7 +144,6 @@ object MosaicSession {
         return Viewport(prefs.getFloat(KEY_PAN_X, 0f), prefs.getFloat(KEY_PAN_Y, 0f), scale)
     }
 }
-
 
 object WhiteboardSceneGate {
     private val ui = Handler(Looper.getMainLooper())

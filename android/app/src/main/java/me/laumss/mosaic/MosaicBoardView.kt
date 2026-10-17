@@ -21,14 +21,11 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.ratta.supernote.pluginlib.api.HostDataCacheAPI
 import java.util.concurrent.atomic.AtomicLong
 
-
 @SuppressLint("ViewConstructor")
 class MosaicBoardView(
     private val reactContext: ReactContext,
 ) : FrameLayout(reactContext), InklingLink.Host {
-
     companion object {
-        
         private val PEN_BLOCK_REASSERT_MS = longArrayOf(0L, 60L, 200L, 500L)
         private const val TAG = "MosaicBoardView"
         private const val NATIVE_BUILD_TAG = "pressure-clock-20260928a"
@@ -38,14 +35,14 @@ class MosaicBoardView(
         private const val FAST_MAX_ATTEMPTS = 20
         private const val BOARD_VISIBILITY_EVENT = "MosaicBoardVisibility"
         private const val INBOX_READY_EVENT = "MosaicInboxReady"
-        
+
         private val REARM_DELAYS_MS = longArrayOf(400L, 900L, 1700L)
-        
+
         private const val HOVER_REARM_MIN_INTERVAL_MS = 1000L
         private const val WRITE_INFO_REFRESH_MIN_INTERVAL_MS = 1000L
-        
+
         private const val BACKGROUND_SYNC_PROMPT_DELAY_MS = 120L
-        
+
         private const val PEN_MODE_RESET_MAX_MS = 1500L
         private const val INK_HANDOFF_IDLE_MS = 3000L
         private const val INK_HANDOFF_RETRY_MS = 500L
@@ -56,21 +53,20 @@ class MosaicBoardView(
         private const val SYNC_HOLD_FOR_REFRESH_MAX_MS = 10_000L
         // 卡片手势抬笔后多久整屏刷新，清掉系统笔迹。
         private const val TRAIL_CLEAR_REFRESH_DELAY_MS = 600L
-        
+
         private const val CLOSE_WATCHDOG_MS = 3000L
-        
+
         private const val CLOSE_WATCHDOG_NOTE_SHOT_MS = 8000L
-        
+
         private const val HOST_PLUGIN_MANAGER_MODULE = "NativePluginManager"
-        
+
         private const val DEVICE_TYPE_A6X2 = 4
     }
 
-    
     private var penWidth: Int = (PenPopup.WIDTHS[PenPopup.DEFAULT_INDEX] * 100f).toInt()
-    
+
     private var penStyle: PenStyle = PenStyle.PEN
-    
+
     @Volatile private var penConfigDirty = true
 
     fun setPenStyle(style: PenStyle, width: Float) {
@@ -81,12 +77,10 @@ class MosaicBoardView(
         if (configured && !drawPathSuspended) rearmDrawPath("pen-style")
     }
 
-    
     var deviceType: Int = -1
     var notesDirectory: String = ""
         set(value) { field = value; controller.setNotesDirectory(value) }
 
-    
     private var stylusCalibX = 0
     private var stylusCalibY = 0
     private var stylusLeftHand = false
@@ -99,12 +93,10 @@ class MosaicBoardView(
         if (changed && configured) rearmDrawPath("calibration")
     }
 
-    
     var touchEnabled: Boolean
         get() = controller.touchEnabled
         set(value) = controller.setTouchEnabled(value, fromJs = true)
 
-    
     private var boardTranslucent = false
     fun setBoardTranslucent(translucent: Boolean) {
         if (boardTranslucent == translucent) return
@@ -115,15 +107,12 @@ class MosaicBoardView(
         Log.i(TAG, "board translucent=$translucent overlay")
     }
 
-    
     var inkEnabled: Boolean = true
         set(value) {
             if (field == value) return
             field = value
             if (stylusContact) applyPenRefreshMode()
             if (!value) {
-                
-                
                 inkAbort()
                 transientStrokeActive = false
                 releaseInkDefer()
@@ -131,20 +120,16 @@ class MosaicBoardView(
             } else if (configured && !lassoEnabled && !toolLassoActive && !drawPathSuspended) {
                 enableDrawPath("ink-enabled")
             } else if (stylusContact && lassoEnabled && !shapeDrag) {
-                
                 transientStrokeActive = true
                 inkBegin(lastStylusX, lastStylusY)
                 Log.i(TAG, "transient ink restarted on ink enable lasso=$lassoEnabled")
             }
         }
 
-    
     var shapeDrag: Boolean = false
 
-    
     var toolLassoActive: Boolean = false
 
-    
     var lassoEnabled: Boolean = false
         set(value) {
             if (field == value) return
@@ -167,7 +152,7 @@ class MosaicBoardView(
 
     private val contentView = BoardContentView(reactContext)
     private val grayRestore = EinkGrayRestore(contentView, "board", eligible = {
-        !isEinkLabOpen && InklingLink.isBoardSurface() && !stylusContact &&
+        InklingLink.isBoardSurface() && !stylusContact &&
             !contentView.isMovingCards && !contentView.isDeferringRefresh && !contentView.holdPaint
     })
     private val inkView = TransientInkView(reactContext)
@@ -180,63 +165,15 @@ class MosaicBoardView(
         }
     }
     val controller = BoardInteractionController(this, contentView, inkView, overlayView, chromeView, commandEmitter)
-    private var einkLab: EinkLabView? = null
-    val isEinkLabOpen: Boolean get() = einkLab != null
-
-    private fun openEinkLab() {
-        if (einkLab != null) return
-        controller.setEinkLabActive(true)
-        flushInkHandoff("eink-lab")
-        setDrawPathSuspended(true, "eink-lab")
-        try {
-            val lab = EinkLabView(context, contentView, ::syncEinkLabBackground) { closeEinkLab() }
-            einkLab = lab
-            addView(lab, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        } catch (error: Exception) {
-            einkLab?.let { it.dispose(); removeView(it) }
-            einkLab = null
-            controller.setEinkLabActive(false)
-            setDrawPathSuspended(false, "eink-lab-open-failed")
-            android.widget.Toast.makeText(context, "实验室打开失败：${error.message}", android.widget.Toast.LENGTH_LONG).show()
-            Log.e(TAG, "eink lab open failed", error)
-        }
-    }
-
-    private fun closeEinkLab() {
-        val lab = einkLab ?: return
-        lab.dispose()
-        removeView(lab)
-        einkLab = null
-        controller.setEinkLabActive(false)
-        setDrawPathSuspended(false, "eink-lab-close")
-        contentView.postInvalidateOnAnimation()
-    }
-
-    fun refreshEinkLabAfterHostRefresh() { einkLab?.afterHostRefresh() }
-
-    private fun syncEinkLabBackground(): Boolean {
-        if (!attached || einkLab == null) return false
-        val binder = ensureBinder() ?: return false
-        return try {
-            DrawPathClient.syncBackground(binder, drawPathAppName, deviceType == DEVICE_TYPE_A6X2)
-            Log.i(TAG, "eink lab white-region background synced")
-            true
-        } catch (error: Exception) {
-            drawPathBinder = null
-            Log.w(TAG, "eink lab background sync failed", error)
-            false
-        }
-    }
-    
     private var sceneChangeCounter = 0
     private var stylusContact = false
-    
+
     private var penModeApplied = false
     private var lastStylusX = 0f
     private var lastStylusY = 0f
-    
+
     private var transientStrokeActive = false
-    
+
     private var awaitingStrokeCommit = false
     private var fullRefreshPending = false
     private var inkHandoffPending = false
@@ -261,11 +198,11 @@ class MosaicBoardView(
     }
     private var trailDiscardedDuringContact = false
     private var strokeSceneChangedDuringContact = false
-    
+
     private var hoverRearmDeferred = false
-    
+
     private var holdPenRefreshUntilSettle = false
-    
+
     private val penModeResetFallback = Runnable {
         if (!stylusContact && penModeApplied) {
             holdPenRefreshUntilSettle = false
@@ -285,26 +222,24 @@ class MosaicBoardView(
             field = value
             DrawPathGate.inkExpected = value
         }
-    
+
     private var drawPathGateHeld = false
     private var drawPathBinder: IBinder? = null
-    
+
     private enum class SyncUrgency { NONE, IDLE, PROMPT }
     private var backgroundSyncUrgency = SyncUrgency.NONE
     private var backgroundSyncTask: Runnable? = null
-    
+
     private var discardSyncPending = false
     // 在这之前不同步背景，见 onPenTrailDiscarded。
     private var syncHoldUntil = 0L
-    
-    
+
     private var suspendRequested = false
-    
+
     private var regionBlocked = false
-    
+
     private val drawPathSuspended: Boolean get() = suspendRequested || regionBlocked
 
-    
     private data class WriteContext(
         val notePath: String,
         val sdkPage: Int,
@@ -316,13 +251,12 @@ class MosaicBoardView(
     private val writeInfoRequestId = AtomicLong(0L)
     private var lastWriteInfoSent: WriteContext? = null
 
-    
     private val drawPathAppName: String = DrawPathClient.MOSAIC_APP_NAME
-    
+
     private var trailWhite = false
-    
+
     private var markerInk = MarkerInk.BLACK
-    
+
     private val drawPathPenColor: Int
         get() = when {
             penStyle == PenStyle.MARKER -> markerInk.drawPathColor
@@ -339,7 +273,7 @@ class MosaicBoardView(
         override fun onDisplayRemoved(displayId: Int) = Unit
         override fun onDisplayChanged(displayId: Int) {
             if (!attached || displayId != display?.displayId) return
-            
+
             handler.post {
                 if (!attached) return@post
                 Log.i(TAG, "display changed: rotation=${display?.rotation}")
@@ -347,7 +281,7 @@ class MosaicBoardView(
             }
         }
     }
-    
+
     private val writeContextWatch = object : Runnable {
         override fun run() {
             if (!attached) return
@@ -369,8 +303,7 @@ class MosaicBoardView(
     private val configurationCallback = object : ComponentCallbacks {
         override fun onConfigurationChanged(newConfig: Configuration) {
             if (!attached) return
-            
-            
+
             handler.postDelayed({
                 requestRotationReconfigure("applicationConfigurationChanged")
             }, 100L)
@@ -380,9 +313,6 @@ class MosaicBoardView(
     }
 
     init {
-        
-        
-        
         addView(
             contentView,
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
@@ -391,7 +321,7 @@ class MosaicBoardView(
             inkView,
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
         )
-        
+
         addView(
             overlayView,
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
@@ -400,8 +330,6 @@ class MosaicBoardView(
             chromeView,
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
         )
-        chromeView.onCardGrayTrialColor = { color, brightPixels -> contentView.setCardGrayTrialColor(color, brightPixels) }
-        chromeView.onOpenEinkLab = { openEinkLab() }
         contentView.onContentChanged = { reason, moved ->
             if (Looper.myLooper() == Looper.getMainLooper()) {
                 sceneChangeCounter++
@@ -422,8 +350,7 @@ class MosaicBoardView(
         super.onAttachedToWindow()
         Log.i(TAG, "onAttachedToWindow nativeBuild=$NATIVE_BUILD_TAG")
         attached = true
-        
-        
+
         InputReader.ensureBoardReader(context)
         InklingLink.attach(context, this)
         publishBoardVisibility(true)
@@ -431,15 +358,13 @@ class MosaicBoardView(
             if (!attached) return@post
             PortraitLock.activate(this)
         }
-        
-        
+
         MosaicSession.savedViewport(context)?.let {
             BoardEngine.setViewport(it.panX, it.panY, it.scale)
             Log.i(TAG, "viewport restored pan=(${it.panX},${it.panY}) scale=${it.scale}")
         }
         controller.attach()
-        
-        
+
         contentView.requestInitialRaster()
         handler.postDelayed({
             if (attached) contentView.requestInitialRaster()
@@ -456,8 +381,6 @@ class MosaicBoardView(
 
     override fun onDetachedFromWindow() {
         attached = false
-        einkLab?.let { it.dispose(); removeView(it) }
-        einkLab = null
         InputReader.releaseBoardReader()
         publishBoardVisibility(false)
         InklingLink.detach(this)
@@ -507,8 +430,6 @@ class MosaicBoardView(
         super.onDetachedFromWindow()
     }
 
-    
-    
     fun reloadNoteLinks() {
         val file = NoteLinks.storeFile(reactContext) ?: return
         Thread({
@@ -550,7 +471,6 @@ class MosaicBoardView(
         super.onSizeChanged(w, h, oldw, oldh)
         if (!attached || (w == oldw && h == oldh)) return
         controller.cancelCardCleanup("size-change")
-        einkLab?.cancelAutomaticCleanup("size-change")
         Log.i(TAG, "onSizeChanged ${oldw}x$oldh -> ${w}x$h, reconfigure drawPath")
         contentView.requestInitialRaster()
         requestRotationReconfigure("sizeChanged")
@@ -569,9 +489,8 @@ class MosaicBoardView(
         Log.i(TAG, "window focus changed: hasFocus=$hasWindowFocus rotation=${display?.rotation}")
         if (attached && !hasWindowFocus) {
             controller.cancelCardCleanup("focus-lost")
-            einkLab?.cancelAutomaticCleanup("focus-lost")
+            restoreDrawPathPressureCurve()
         }
-        if (attached && !hasWindowFocus) restoreDrawPathPressureCurve()
         if (!attached || !hasWindowFocus) return
         controller.resumeCardCleanup("focus-gained")
         handler.postDelayed({
@@ -611,9 +530,6 @@ class MosaicBoardView(
         if (attached) scheduleConfigure("propsChanged")
     }
 
-    
-
-    
     private fun drawPathPenType(): Int = when (penStyle) {
         PenStyle.PEN -> DrawPathClient.PEN_TYPE_CALLIGRAPHY
         PenStyle.FILLED_SHAPE -> DrawPathClient.PEN_TYPE_PRESSURE
@@ -621,11 +537,9 @@ class MosaicBoardView(
         else -> penStyle.objType
     }
 
-    
     private fun drawPathPenWidth(): Int =
         DrawPathClient.liveWidthArgumentFromStdHundredths(penWidth, penStyle)
 
-    
     private fun drawPathDisableAreas(): List<DrawPathClient.DisableArea> {
         val areas = mutableListOf<DrawPathClient.DisableArea>()
         val loc = IntArray(2)
@@ -634,17 +548,12 @@ class MosaicBoardView(
         if (toolbarHeight > 0 && width > 0) {
             areas.add(DrawPathClient.DisableArea(loc[0], loc[1], width, toolbarHeight))
         }
-        
-        
+
         chromeView.touchToggleBounds()?.let { r ->
             areas.add(DrawPathClient.DisableArea(loc[0] + r.left, loc[1] + r.top, r.width(), r.height()))
         }
-        chromeView.grayTrialBounds()?.let { r ->
-            areas.add(DrawPathClient.DisableArea(loc[0] + r.left, loc[1] + r.top, r.width(), r.height()))
-        }
         InklingLink.toolbarDisableArea()?.let(areas::add)
-        
-        
+
         areas.addAll(InklingLink.overlayDisableAreas())
         // Around a zoomed-out note page; refreshed by the hover rearm before every stroke.
         for (r in controller.noteOffPageRectsPx()) {
@@ -747,8 +656,7 @@ class MosaicBoardView(
         if (!attached) return
         handler.post {
             if (!attached) return@post
-            
-            
+
             val data = Arguments.createMap().apply {
                 putBoolean("visible", true)
                 putString("surface", surface)
@@ -761,11 +669,7 @@ class MosaicBoardView(
         }
     }
 
-    
-
-    
     private val closeWatchdog = Runnable {
-        
         Log.i(TAG, "[CloseWatchdog] fired attached=$attached sinceArmMs=${SystemClock.uptimeMillis() - closeWatchdogArmedUptime}")
         if (!attached) return@Runnable
         Log.w(TAG, "[CloseWatchdog] JS did not close within ${closeWatchdogDelayMs}ms; forcing host closePluginView")
@@ -775,7 +679,6 @@ class MosaicBoardView(
     private var closeWatchdogArmedWall = 0L
     private var closeWatchdogDelayMs = CLOSE_WATCHDOG_MS
 
-    
     private val closeHeartbeat = object : Runnable {
         override fun run() {
             val up = SystemClock.uptimeMillis() - closeWatchdogArmedUptime
@@ -785,7 +688,6 @@ class MosaicBoardView(
         }
     }
 
-    
     fun armCloseWatchdog(reason: String, noteShotSession: Boolean = false) {
         if (!attached) return
         closeWatchdogArmedUptime = SystemClock.uptimeMillis()
@@ -798,7 +700,6 @@ class MosaicBoardView(
         Log.i(TAG, "[CloseWatchdog] armed reason=$reason delay=${closeWatchdogDelayMs}ms")
     }
 
-    
     private fun forceHostClosePluginView(reason: String) {
         try {
             val module = reactContext.catalystInstance?.getNativeModule(HOST_PLUGIN_MANAGER_MODULE)
@@ -823,13 +724,12 @@ class MosaicBoardView(
         }
     }
 
-    
     private fun noteContentChanged(reason: String, moved: Boolean) {
         val next = if (moved) SyncUrgency.PROMPT else SyncUrgency.IDLE
         if (next.ordinal > backgroundSyncUrgency.ordinal) backgroundSyncUrgency = next
-        
+
         cancelBackgroundSync()
-        
+
         if (stylusContact) strokeSceneChangedDuringContact = true
         when {
             plainStrokeCommit -> if (awaitingStrokeCommit || inkHandoffPending) holdInkHandoff()
@@ -855,8 +755,7 @@ class MosaicBoardView(
             lastHoverRearmAt = System.currentTimeMillis()
             rearmDrawPath("hoverEnter:settled")
         }
-        
-        
+
         if (backgroundSyncUrgency == SyncUrgency.NONE || (stylusContact && drawPathActive)) return
         if (discardSyncPending) {
             cancelBackgroundSync()
@@ -918,21 +817,16 @@ class MosaicBoardView(
         }
     }
 
-    
     fun onPenTrailDiscarded(reason: String) {
         if (stylusContact) trailDiscardedDuringContact = true
         if (backgroundSyncUrgency.ordinal < SyncUrgency.PROMPT.ordinal) backgroundSyncUrgency = SyncUrgency.PROMPT
         discardSyncPending = true
-        
-        
-        
+
         if (stylusContact) {
             cancelBackgroundSync()
             sendBackgroundSync(force = true)
         }
-        
-        
-        
+
         contentView.markSettleRequested()
         if (!contentView.isDeferringRefresh) contentView.postInvalidateOnAnimation()
         val fullRefresh = reason.startsWith("card-")
@@ -945,7 +839,6 @@ class MosaicBoardView(
         Log.i(TAG, "pen trail discarded: reason=$reason sync=${if (stylusContact) "now" else "deferred"} fullRefresh=$fullRefresh stylus=$stylusContact active=$drawPathActive")
     }
 
-    
     private fun requestFullRefreshWhenSettled(reason: String) {
         fullRefreshPending = true
         contentView.runWhenSettled(Runnable { runPendingFullRefresh(reason) })
@@ -963,14 +856,12 @@ class MosaicBoardView(
         if (backgroundSyncUrgency != SyncUrgency.NONE) scheduleBackgroundSync(SYNC_AFTER_FULL_REFRESH_MS)
     }
 
-    
     fun setTrailWhite(white: Boolean, reason: String) {
         val previous = drawPathPenColor
         trailWhite = white
         sendPenColorIfChanged(previous, reason)
     }
 
-    
     fun setMarkerInk(ink: MarkerInk, reason: String) {
         val previous = drawPathPenColor
         markerInk = ink
@@ -1005,7 +896,6 @@ class MosaicBoardView(
         }
     }
 
-    
     fun setDrawPathSuspended(suspended: Boolean, reason: String) {
         if (suspendRequested == suspended) return
         val was = drawPathSuspended
@@ -1013,7 +903,6 @@ class MosaicBoardView(
         applyDrawPathSuspension(was, reason)
     }
 
-    
     fun setDrawPathRegionBlocked(blocked: Boolean, reason: String) {
         if (regionBlocked == blocked) return
         val was = drawPathSuspended
@@ -1035,7 +924,6 @@ class MosaicBoardView(
         }
     }
 
-    
     private fun refreshWriteInfo(reason: String, force: Boolean = false) {
         if (!attached) return
         val now = android.os.SystemClock.uptimeMillis()
@@ -1098,7 +986,6 @@ class MosaicBoardView(
         }
     }
 
-    
     private fun reassertCachedWriteInfo(binder: IBinder, reason: String): Boolean {
         val context = writeContext ?: return false
         return try {
@@ -1122,7 +1009,6 @@ class MosaicBoardView(
             false
         }
     }
-
 
     private fun enableDrawPath(reason: String) {
         val binder = ensureBinder()
@@ -1148,12 +1034,10 @@ class MosaicBoardView(
         }
     }
 
-    
     fun reassertPenBlock(reason: String) {
         Log.i(TAG, "[MosaicPenButton] block reason=$reason ink=$inkEnabled lasso=$lassoEnabled active=$drawPathActive configured=$configured contact=$stylusContact")
         if (!attached || !configured || inkEnabled || drawPathActive) return
-        
-        
+
         DrawPathGate.reblock("pen-block:$reason", PEN_BLOCK_REASSERT_MS)
     }
 
@@ -1188,7 +1072,6 @@ class MosaicBoardView(
         lastWriteInfoSent = null
         attachDrawPathGate(binder)
         synchronized(DrawPathGate.writeLock) {
-            
             val held = active && DrawPathGate.blocked()
             drawPathGateHeld = held
             if (active && !held) {
@@ -1203,19 +1086,15 @@ class MosaicBoardView(
                 )
                 DrawPathClient.sendStylusCalibration(binder, drawPathAppName, stylusCalibX, stylusCalibY, stylusLeftHand)
             } else {
-                
-                
                 DrawPathClient.disableAll(binder, drawPathAppName)
                 if (held) Log.i(TAG, "drawPath enable held by pen gate reason=$reason ${DrawPathGate.describe()}")
             }
-            
+
             DrawPathClient.sendPenButtonOverride(binder, drawPathAppName, drawPathPenType(), drawPathPenWidth(), drawPathPenColor)
         }
         reassertCachedWriteInfo(binder, reason)
         refreshWriteInfo(reason, force = true)
     }
-
-    
 
     private fun inkBegin(x: Float, y: Float) = inkView.beginStroke(x, y)
 
@@ -1228,21 +1107,16 @@ class MosaicBoardView(
         inkView.abortStroke()
     }
 
-    
-
-    
     private fun beginStrokeCommitWait() {
         awaitingStrokeCommit = true
     }
 
-    
     private fun cancelStrokeCommitWait(): Boolean {
         val was = awaitingStrokeCommit
         awaitingStrokeCommit = false
         return was
     }
 
-    
     private fun holdInkHandoff() {
         if (fullRefreshPending) {
             finalizeInkSession("refresh-pending")
@@ -1285,9 +1159,6 @@ class MosaicBoardView(
         inkView.clearImmediately()
         if (fullRefreshPending) contentView.runWhenSettled(Runnable { runPendingFullRefresh("after-ink:$reason") })
         if (reason == "no-commit") {
-            
-            
-            
             contentView.runWhenSettled {
                 if (attached && !stylusContact) sendBackgroundSync(force = true)
             }
@@ -1295,7 +1166,6 @@ class MosaicBoardView(
         Log.i(TAG, "ink session finalize: reason=$reason")
     }
 
-    
     private fun releaseInkDefer() {
         val waiting = cancelStrokeCommitWait() or clearInkHandoff()
         if (waiting || contentView.isDeferringRefresh) {
@@ -1304,7 +1174,6 @@ class MosaicBoardView(
         }
     }
 
-    
     private fun requestRotationReconfigure(source: String) {
         publishHostRotation()
         refreshWriteInfo(source)
@@ -1409,7 +1278,7 @@ class MosaicBoardView(
                     "rotation=${display?.rotation} attempt=$attempt " +
                     "active=$drawPathActive width=$drawPathWidth color=$drawPathPenColor",
             )
-            
+
             REARM_DELAYS_MS.forEach { delay ->
                 handler.postDelayed({
                     if (!attached) return@postDelayed
@@ -1428,7 +1297,6 @@ class MosaicBoardView(
         }
     }
 
-    
     private fun rearmDrawPath(reason: String) {
         if (!configured) return
         val binder = drawPathBinder ?: return
@@ -1442,7 +1310,6 @@ class MosaicBoardView(
         }
     }
 
-    
     private fun scheduleRetry(generation: Int, attempt: Int, reason: String) {
         val delay = if (attempt < FAST_MAX_ATTEMPTS) RETRY_INTERVAL_MS else SLOW_RETRY_INTERVAL_MS
         Log.i(
@@ -1453,51 +1320,36 @@ class MosaicBoardView(
         handler.postDelayed({ configureWithRetry(generation, attempt + 1, reason) }, delay)
     }
 
-    
-
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
             controller.cancelCardCleanup("view-input")
-            einkLab?.cancelAutomaticCleanup("view-input")
         }
         return super.dispatchTouchEvent(event)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (isEinkLabOpen) return true
         val toolType = if (event.pointerCount > 0) event.getToolType(0) else MotionEvent.TOOL_TYPE_UNKNOWN
         val isPenTool = toolType == MotionEvent.TOOL_TYPE_STYLUS
             || toolType == MotionEvent.TOOL_TYPE_ERASER
-        
-        
-        
+
         if (!isPenTool) {
             Log.i(TAG, "[MosaicTwoFinger] framework touch consumed action=${event.actionMasked} pointers=${event.pointerCount}")
             return true
         }
         lastPenEventAt = SystemClock.uptimeMillis()
 
-        
-        
-        
-        
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            
-            
-            
             stylusContact = true
             InputArbiter.onPenContact(true)
             cancelBackgroundSync()
             lastStylusX = event.x
             lastStylusY = event.y
-            
-            
-            
+
             controller.preflightPenButtonState()
             controller.onPen(event)
-            
+
             feedInkView(event)
-            
+
             if (toolLassoActive && !inkEnabled) reassertPenBlock("lasso-down")
         } else {
             val counterBefore = sceneChangeCounter
@@ -1506,7 +1358,6 @@ class MosaicBoardView(
             if ((event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)
                 && awaitingStrokeCommit && sceneChangeCounter == counterBefore && !plainStrokeCommitted
             ) {
-                
                 finalizeInkSession("no-commit")
             }
         }
@@ -1514,11 +1365,10 @@ class MosaicBoardView(
             Log.i(TAG, "stylus DOWN before drawPath configured, immediate configure attempt")
             scheduleConfigure("stylusDown")
         }
-        
+
         return true
     }
 
-    
     private fun applyPenRefreshMode() {
         val mode = when {
             !inkEnabled && !lassoEnabled -> MosaicEinkRefreshModule.MODE_DEFAULT
@@ -1540,23 +1390,17 @@ class MosaicBoardView(
         val writing = inkEnabled && !lassoEnabled
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                
-                
                 applyPenRefreshMode()
                 if (writing) {
-                    
-                    
                     cancelStrokeCommitWait()
                     handler.removeCallbacks(inkHandoffTask)
                     plainStrokeCommitted = false
                     strokeSceneChangedDuringContact = false
                     contentView.setDeferRefresh(true)
                 } else {
-                    
                     releaseInkDefer()
                 }
-                
-                
+
                 transientStrokeActive = lassoEnabled && !shapeDrag
                 if (transientStrokeActive) {
                     inkBegin(event.x, event.y)
@@ -1578,11 +1422,8 @@ class MosaicBoardView(
                 stylusContact = false
                 InputArbiter.onPenContact(false)
                 if (penModeApplied) {
-                    
                     holdPenRefreshUntilSettle = true
                     if (!writing) {
-                        
-                        
                         contentView.markSettleRequested()
                         contentView.postInvalidateOnAnimation()
                     }
@@ -1592,15 +1433,12 @@ class MosaicBoardView(
                 if (transientStrokeActive) inkEnd()
                 transientStrokeActive = false
                 if (writing) {
-                    
-                    
                     if (trailDiscardedDuringContact) {
                         trailDiscardedDuringContact = false
                         finalizeInkSession("discard")
                     } else if (strokeSceneChangedDuringContact) finalizeInkSession("commit-before-up")
                     else beginStrokeCommitWait()
                 } else if (backgroundSyncUrgency != SyncUrgency.NONE) {
-                    
                     contentView.markSettleRequested()
                     contentView.postInvalidateOnAnimation()
                 }
@@ -1609,19 +1447,12 @@ class MosaicBoardView(
     }
 
     override fun onHoverEvent(event: MotionEvent): Boolean {
-        if (isEinkLabOpen) return true
-        
         val toolType = if (event.pointerCount > 0) event.getToolType(0) else MotionEvent.TOOL_TYPE_UNKNOWN
         if (toolType == MotionEvent.TOOL_TYPE_STYLUS
             || toolType == MotionEvent.TOOL_TYPE_ERASER
         ) {
             controller.onPenHover(event)
-            
-            
-            
-            
-            
-            
+
             val now = System.currentTimeMillis()
             when (event.actionMasked) {
                 MotionEvent.ACTION_HOVER_ENTER -> {
@@ -1633,7 +1464,6 @@ class MosaicBoardView(
                     }
                 }
                 MotionEvent.ACTION_HOVER_MOVE -> {
-                    
                     if (now - lastHoverRearmAt > HOVER_REARM_MIN_INTERVAL_MS || penConfigDirty) {
                         if (awaitingStrokeCommit) {
                             hoverRearmDeferred = true
@@ -1650,13 +1480,11 @@ class MosaicBoardView(
 
     private var lastHoverRearmAt = 0L
 
-    
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
         if (changed && attached && configured) rearmDrawPath("layout")
     }
 
-    
     private var layoutPassPosted = false
     private val manualLayoutPass = Runnable {
         layoutPassPosted = false

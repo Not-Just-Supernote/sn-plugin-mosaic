@@ -4,40 +4,33 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 
-
 interface BoardSurface {
     enum class CloseSource { TOOLBAR, LAUNCHER_PULL }
 
     val name: String
-    
+
     val emitsCommands: Boolean
-    
+
     val showsBoardChrome: Boolean
-    
+
     val singleFingerScrolls: Boolean
-    
+
     val allowsCardFrame: Boolean
 
-    
     fun constrainScale(next: Float, start: Float): Float
 
-    
     fun constrainPan(panX: Float, panY: Float, scale: Float, out: FloatArray)
 
-    
     fun onSceneMutated()
 
-    
     fun onViewportCommitted(panX: Float, panY: Float, scale: Float)
 
-    
     fun onCloseRequested(source: CloseSource)
 }
 
-
 class WhiteboardSurface(
     private val emitter: BoardCommandEmitter,
-    
+
     private val onCloseEmitted: () -> Unit = {},
 ) : BoardSurface {
     override val name = "board"
@@ -46,15 +39,11 @@ class WhiteboardSurface(
     override val singleFingerScrolls = false
     override val allowsCardFrame = true
 
-    
-    
-    
     override fun constrainScale(next: Float, start: Float): Float =
         if (start < BoardGeometry.GESTURE_MIN_ZOOM - ZOOM_EPS || start > BoardGeometry.GESTURE_MAX_ZOOM + ZOOM_EPS) start
         else next.coerceIn(BoardGeometry.GESTURE_MIN_ZOOM, BoardGeometry.GESTURE_MAX_ZOOM)
 
     companion object {
-        
         private const val ZOOM_EPS = 1e-3f
     }
 
@@ -70,26 +59,25 @@ class WhiteboardSurface(
     override fun onCloseRequested(source: BoardSurface.CloseSource) {
         Log.i("MosaicInteraction", "close requested source=$source surface=$name")
         emitter.begin()
-        
+
         emitter.action("close") { putDouble("emittedAt", System.currentTimeMillis().toDouble()) }
         emitter.commit()
-        
+
         onCloseEmitted()
     }
 }
 
-
 class NoteSurface(
     private val notes: NoteController,
     private val context: Context,
-    
+
     private val viewportHeightDp: () -> Float,
     private val viewportWidthDp: () -> Float,
     // Scale at which the note width fills the view; that is 100%.
     private val fitScale: () -> Float,
-    
+
     private val topInsetDp: () -> Float,
-    
+
     private val close: () -> Unit,
     // Leaves the plugin from inside the note; the next launch reopens this note.
     private val exitPlugin: () -> Unit,
@@ -97,12 +85,11 @@ class NoteSurface(
     override val name = "note"
     override val emitsCommands = false
     override val showsBoardChrome = false
-    
+
     override val singleFingerScrolls = false
     override val allowsCardFrame = false
 
     companion object {
-        
         private const val NOTE_OVERSCROLL_SCREENS = 6f
         // Pinch zoom inside a note runs from 50% to 150% of fit-width (100%).
         const val MIN_ZOOM = 0.5f
@@ -143,10 +130,9 @@ class NoteSurface(
             val minPan = minOf(viewportH - pageH, maxPan) - overdrag
             return value.coerceIn(minPan, maxPan + overdrag)
         }
-        
+
         val naturalMin = minOf(viewportH - contentH * scale, maxPan)
-        
-        
+
         val minPan = naturalMin - viewportH * NOTE_OVERSCROLL_SCREENS
         return value.coerceIn(minPan, maxPan)
     }
@@ -163,7 +149,6 @@ class NoteSurface(
     override fun onCloseRequested(source: BoardSurface.CloseSource) {
         if (source == BoardSurface.CloseSource.LAUNCHER_PULL) exitPlugin() else close()
         if (source == BoardSurface.CloseSource.LAUNCHER_PULL) {
-            
             context.sendBroadcast(Intent("com.ratta.supernote.launcher.BroadcastReceiver.slidebarstatusbar").putExtra("lockStatusbar", false))
         }
     }

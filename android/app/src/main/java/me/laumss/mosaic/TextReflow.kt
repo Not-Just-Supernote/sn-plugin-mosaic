@@ -1,11 +1,10 @@
 package me.laumss.mosaic
 
-
 object TextReflow {
     private const val VERTICAL_MIN_LINES = 8
     private const val VERTICAL_RATIO = 0.7f
     private const val FULL_LINE_RATIO = 0.85f
-    
+
     private const val FULL_LINE_MIN_WIDTH = 24
 
     private val LIST_START = Regex("^(?:[-*•·●○◆■□▪]\\s|\\d{1,3}[.、)）]|[（(]\\d{1,3}[)）]|[①-⑳]|第[一二三四五六七八九十百千0-9]+[章节回部篇卷])")
@@ -32,7 +31,7 @@ object TextReflow {
         if (lines.size >= VERTICAL_MIN_LINES && short >= lines.size * VERTICAL_RATIO) {
             return trimmed.fold("") { acc, s -> join(acc, s) }
         }
-        
+
         val widths = trimmed.map { visualWidth(it) }
         val maxWidth = (if (lines.size == 2) widths else widths.dropLast(1)).max()
         val out = StringBuilder(trimmed[0])
@@ -50,7 +49,6 @@ object TextReflow {
         return out.toString()
     }
 
-    
     private fun join(a: String, b: String): String {
         if (a.isEmpty()) return b
         if (b.isEmpty()) return a
@@ -63,7 +61,6 @@ object TextReflow {
     private fun isLatinWord(c: Char): Boolean =
         c.code < 0x3000 && (c.isLetterOrDigit() || c in ".,;:!?)]\"'%")
 
-    
     private fun visualWidth(s: String): Int {
         var w = 0
         for (c in s) w += if (c.code >= 0x2E80) 2 else 1

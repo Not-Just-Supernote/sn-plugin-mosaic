@@ -22,46 +22,42 @@ import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
-
 class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
-
     companion object {
         private const val TAG = "MosaicBoardContent"
-        
+
         private const val TILE_WORLD = 512f
-        
+
         private const val CACHE_BUDGET_BYTES = 64L * 1024 * 1024
         private const val CACHE_BUDGET_MAX_BYTES = 256L * 1024 * 1024
-        
+
         private const val PERF_LOG_INTERVAL_MS = 1000L
-        
+
         private const val GESTURE_FRAME_MIN_MS = 70L
         // 换样图块最多等这么久，超时就跟随视口，不让手势卡住。
         private const val LOOK_WAIT_MAX_MS = 400L
 
-        
-        
         const val CARD_FILL_COLOR = CardGrayRecipe.IDLE_LOW
         const val CARD_GRAY_BRIGHT_PIXELS = CardGrayRecipe.IDLE_BRIGHT_PIXELS
-        
+
         private const val CARD_COLORED_FILL_COLOR = 0xFF000000.toInt()
-        
+
         private const val CARD_SHADOW_COLOR = 0xFF77838D.toInt()
         private const val CARD_SHADOW_EDGE_COLOR = 0xFF9BA5B1.toInt()
-        
+
         private const val THREAD_COLOR = CARD_SHADOW_COLOR
         private const val CARD_SHADOW_OFFSET = 5f
         private const val CARD_SHADOW_EDGE = 2f
         private const val CARD_SHADOW_EXTENT = CARD_SHADOW_OFFSET + CARD_SHADOW_EDGE
-        
+
         private const val CARD_OUTLINE_WIDTH = 3f
         private const val CARD_PLACEHOLDER_COLOR = 0xFF8A8A8A.toInt()
-        
+
         private const val CARD_OUTLINE_EMPHASIS_COLOR = Color.BLACK
         private const val CARD_SELECTED_COLOR = Color.BLACK
         private const val CARD_SELECTED_WIDTH = 2f
         private const val CARD_RADIUS = 0f
-        
+
         private const val CARD_TEXT_SIZE = CardTextFormat.BODY_SIZE
         private const val CARD_TEXT_COLOR = Color.BLACK
         private const val CARD_PADDING_X = 16f
@@ -70,7 +66,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             isSubpixelText = true
         }
 
-        
         fun measureTextCardSize(
             raw: String,
             maxWidth: Float = BoardGeometry.DEFAULT_CARD_WIDTH,
@@ -91,25 +86,21 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             )
         }
 
-        
         fun noteHeaderLines(card: BoardEngine.CardRec): List<String> {
             val raw = card.content.ifBlank { card.title }
             val lines = raw.replace("\r\n", "\n").split('\n')
-            
+
             if (lines.size > 2) return noteHeaderFromText(raw).takeIf { it.isNotEmpty() }?.split('\n') ?: emptyList()
             val plain = lines.map { plainHeaderLine(it) }
             return if (plain.all { it.isEmpty() }) emptyList() else plain
         }
 
-        
         fun noteHeaderFromText(raw: String): String =
             raw.replace("\r\n", "\n").split('\n').map { plainHeaderLine(it) }.filter { it.isNotEmpty() }
                 .take(2).joinToString("\n")
 
-        
         fun noteHeaderText(card: BoardEngine.CardRec): String = noteHeaderLines(card).joinToString("\n")
 
-        
         fun noteHeaderMarkdown(lines: List<String>): String {
             if (lines.isEmpty()) return ""
             val body = lines.getOrNull(1).orEmpty()
@@ -125,14 +116,13 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             return t.trim()
         }
 
-        
         // pageScale > 1 lays the header out at screen size inside a page shown at that scale; the result is in page units.
         fun noteHeaderHeight(markdown: String, pageScale: Float = 1f): Float {
             if (markdown.isBlank()) return 0f
             val m = CardTextFormat.WEB
             val innerMax = ScrollingDocument.WIDTH * pageScale - m.padX * 2f
             var y = m.padTop + m.padBottom
-            
+
             synchronized(headerMeasurePaint) {
                 forEachTextRun(markdown, innerMax, headerMeasurePaint, m) { _, _, lineHeight, _ -> y += lineHeight }
             }
@@ -149,7 +139,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         private const val NOTE_HEADER_PLACEHOLDER_COLOR = 0xFF9A9A9A.toInt()
         private const val NOTE_PAGE_BORDER_DP = 2f
 
-        
         private fun forEachTextRun(
             raw: String,
             innerMax: Float,
@@ -157,7 +146,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             m: CardTextFormat.Metrics,
             emit: (text: String, width: Float, height: Float, blackBackground: Boolean) -> Unit,
         ) {
-            var prev = 0 
+            var prev = 0
             var prevSize = m.body
             var blank = false
             for (paragraph in raw.replace("\r\n", "\n").split('\n')) {
@@ -220,15 +209,12 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             paint.textSkewX = 0f
         }
 
-        
         private const val TRANSLUCENT_BG_COLOR = 0xD0FFFFFF.toInt()
     }
 
-    
     @Volatile
     private var translucentFogColor = TRANSLUCENT_BG_COLOR
 
-    
     fun setTranslucentLevel(level: Int) {
         val seeThrough = TranslucentStore.seeThroughPercent(level)
         val alpha = (255 * (100f - seeThrough) / 100f).roundToInt().coerceIn(0, 255)
@@ -241,48 +227,38 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private data class TileKey(val ix: Int, val iy: Int, val scaleBits: Int)
 
     private class TileEntry(var bitmap: Bitmap) {
-        
         var dirty = false
     }
 
-    
     private val cache = object : LinkedHashMap<TileKey, TileEntry>(32, 0.75f, true) {}
     private val cacheLock = Any()
     private var cacheBytes = 0L
     private val pending = LinkedHashSet<TileKey>()
 
-    
-    
     private var rasterThread: HandlerThread? = null
     private var rasterHandler: Handler? = null
-    
+
     private var rasterExecutor: ExecutorService? = null
     private var rasterScheduled = false
     private var rasterWorkers = 0
-    
+
     private var rasterGeneration = 0L
 
-    
-    
     private val rasteringKeys = HashSet<TileKey>()
     private val rasteringDirtyKeys = HashSet<TileKey>()
 
     private var lastScaleBits = 0
     private var lastPerfLogAt = 0L
 
-    
     @Volatile
     private var rasterScaleOverride: Float? = null
 
-    
     private val fallbackTiles = HashMap<Long, Bitmap>()
     private var fallbackScaleBits = 0
 
-    
     private val rasterScale: Float
         get() = rasterScaleOverride ?: BoardEngine.scale
 
-    
     @Volatile
     private var gestureFreezeTiles = false
 
@@ -290,8 +266,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         if (gestureFreezeTiles == active) return
         gestureFreezeTiles = active
         if (!active) {
-            
-            
             synchronized(cacheLock) {
                 forEachVisibleTileLocked { key ->
                     val entry = cache[key]
@@ -306,8 +280,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         postInvalidateOnAnimation()
     }
 
-    
-
     @Volatile
     private var gestureThrottle = false
     private var lastGestureFrameAt = 0L
@@ -317,7 +289,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         postInvalidateOnAnimation()
     }
 
-    
     fun setGestureThrottle(active: Boolean) {
         if (gestureThrottle == active) return
         gestureThrottle = active
@@ -343,7 +314,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         postDelayed(gestureFrameTask, GESTURE_FRAME_MIN_MS - elapsed)
     }
 
-    
     fun setZoomPreview(active: Boolean) {
         if (active) {
             if (rasterScaleOverride == null) rasterScaleOverride = BoardEngine.scale
@@ -357,7 +327,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         }
     }
 
-    
     private fun onScaleChanged(previousBits: Int, nextBits: Int) {
         if (previousBits == nextBits) return
         synchronized(cacheLock) {
@@ -388,7 +357,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     private fun cellKey(ix: Int, iy: Int): Long = (ix.toLong() shl 32) or (iy.toLong() and 0xffffffffL)
 
-    
     private fun tileOnScreen(ix: Int, iy: Int): Boolean {
         val densityValue = density
         val scalePx = BoardEngine.scale * densityValue
@@ -401,10 +369,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private val density: Float
         get() = resources.displayMetrics.density.coerceAtLeast(1f)
 
-    
-    
-    
-    
     private class RasterScratch {
         val strokePaint = Paint().apply {
             style = Paint.Style.STROKE
@@ -461,7 +425,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     private val cardTextPaint get() = rasterScratch.get().cardTextPaint
     private val flatShadowPaint get() = rasterScratch.get().flatShadowPaint
     private val strokeQueryScratch get() = rasterScratch.get().strokeQueryScratch
-    
+
     private val selectionBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = CARD_SELECTED_COLOR
@@ -531,50 +495,32 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         super.onDetachedFromWindow()
     }
 
-    
-
-    
     @Volatile
     private var deferRefresh = false
 
-    
     @Volatile
     private var invalidateWhenFresh = false
 
     val isDeferringRefresh: Boolean get() = deferRefresh
 
-    
     fun setDeferRefresh(defer: Boolean) {
         if (deferRefresh == defer) return
         deferRefresh = defer
         if (defer) {
-            
             invalidateWhenFresh = false
         } else {
             postInvalidateOnAnimation()
         }
     }
 
-    
-    
     @Volatile
     private var translucentOverlay = false
 
-    @Volatile private var idleCardRecipe = CardGrayRecipe.DEFAULT
-    val cardFillColor: Int get() = idleCardRecipe.low
+    val cardFillColor: Int get() = CardGrayRecipe.DEFAULT.low
     @Volatile private var movingCards = false
     internal val isMovingCards: Boolean get() = movingCards
     private val screenCardFill = Paint().apply { style = Paint.Style.FILL }
     private val screenCardRect = RectF()
-
-    fun setCardGrayTrialColor(color: Int, brightPixels: Int = 0) {
-        val next = CardGrayRecipe.trial(color, brightPixels)
-        if (idleCardRecipe == next) return
-        idleCardRecipe = next
-        markAllCachedTilesDirtyLocked()
-        onContentChanged?.invoke("card-gray-trial", false)
-        postInvalidateOnAnimation()
-    }
 
     fun setTranslucentOverlay(enabled: Boolean) {
         if (translucentOverlay == enabled) return
@@ -588,19 +534,15 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         postInvalidateOnAnimation()
     }
 
-    
     private fun translucentFogActive(): Boolean =
         (translucentOverlay || translucentBackground) && !suspendTranslucent
 
-    
     @Volatile
     private var backgroundTemplate = BackgroundTemplate.BLANK
 
-    
     @Volatile
     private var templatePageWidth = 0f
 
-    
     fun setBackgroundTemplate(template: BackgroundTemplate, pageWidth: Float) {
         if (backgroundTemplate == template && templatePageWidth == pageWidth) return
         backgroundTemplate = template
@@ -627,14 +569,13 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             cache.clear()
             pending.clear()
             cacheBytes = 0L
-            
+
             if (rasteringKeys.isNotEmpty()) rasteringDirtyKeys.addAll(rasteringKeys)
             releaseFallbackLocked()
         }
         postInvalidateOnAnimation()
     }
 
-    
     fun refreshAfterRaster() {
         deferRefresh = false
         var wait = false
@@ -654,7 +595,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         if (!wait) postInvalidateOnAnimation()
     }
 
-    
     fun hasPendingVisibleWork(): Boolean = synchronized(cacheLock) {
         if (pending.isNotEmpty() || rasteringKeys.isNotEmpty()) return true
         var stale = false
@@ -665,7 +605,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         stale
     }
 
-    
     private inline fun forEachVisibleTileLocked(block: (TileKey) -> Unit) {
         val densityValue = density
         val scalePx = BoardEngine.scale * densityValue
@@ -686,14 +625,11 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         }
     }
 
-    
     @Volatile
     var onContentChanged: ((reason: String, moved: Boolean) -> Unit)? = null
 
-    
     var onContentSettled: (() -> Unit)? = null
 
-    
     @Volatile
     var suspendTranslucent = false
         private set
@@ -704,7 +640,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     @Volatile
     private var settleRequested = false
 
-    
     @Volatile
     var holdPaint = false
         private set
@@ -715,14 +650,12 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         if (!hold) postInvalidateOnAnimation()
     }
 
+    fun setSuspendTranslucent(suspended: Boolean) {
+        if (suspendTranslucent == suspended) return
+        suspendTranslucent = suspended
 
-    fun setSuspendTranslucent(suspend: Boolean) {
-        if (suspendTranslucent == suspend) return
-        suspendTranslucent = suspend
-        
-        
         if (translucentOverlay || translucentBackground) {
-            setBackgroundColor(if (suspend) Color.WHITE else Color.TRANSPARENT)
+            setBackgroundColor(if (suspended) Color.WHITE else Color.TRANSPARENT)
         }
         postInvalidateOnAnimation()
     }
@@ -745,18 +678,15 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     private fun showsAccent(card: BoardEngine.CardRec): Boolean = card.colored
 
-    
     fun markSettleRequested() {
         settleRequested = true
     }
 
-    
     fun forceRedrawAfterHostRefresh() {
         settleRequested = true
         rerasterAllTiles(atomic = true)
     }
 
-    
     fun requestInitialRaster() {
         if (width <= 0 || height <= 0) {
             post { if (width > 0 && height > 0) requestInitialRaster() }
@@ -773,10 +703,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         postInvalidateOnAnimation()
     }
 
-    
-
     override fun onSceneChanged(dirtyWorld: RectF?, contentMoved: Boolean) {
-        
         val frameDirty = NoteLinks.refresh(dirtyWorld)
         synchronized(cacheLock) {
             if (dirtyWorld == null) {
@@ -792,7 +719,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         onContentChanged?.invoke("scene", contentMoved)
     }
 
-    
     fun markWorldDirty(rects: List<RectF>) {
         if (rects.isEmpty()) return
         synchronized(cacheLock) { for (rect in rects) markWorldDirtyLocked(rect) }
@@ -818,10 +744,10 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     override fun onViewportChanged() {
         settleRequested = true
-        
+
         invalidateWhenFresh = false
         onContentChanged?.invoke("viewport", true)
-        
+
         val scaleBits = rasterScale.toRawBits()
         if (scaleBits != lastScaleBits) {
             val previous = lastScaleBits
@@ -834,8 +760,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     override fun onSelectionChanged() {
         postInvalidateOnAnimation()
     }
-
-    
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
@@ -856,17 +780,12 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         if (width == 0 || height == 0 || tilePx <= 0f) return
 
         if (translucentFogActive()) {
-            
-            
-            
             canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
             canvas.drawColor(translucentFogColor)
         } else {
             canvas.drawColor(Color.WHITE)
         }
 
-        
-        
         val scaleBits = rasterScale.toRawBits()
         val previewing = rasterScaleOverride != null
         val minIx = floor((-panXPx) / tilePx).toInt()
@@ -885,7 +804,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         var stale = 0
         val src = Rect()
         val dst = RectF()
-        
+
         val freeze = gestureFreezeTiles
         synchronized(cacheLock) {
             tilePaint.isFilterBitmap = !movingCards && (previewing || fallbackTiles.isNotEmpty())
@@ -902,7 +821,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
                         canvas.drawBitmap(entry.bitmap, src, dst, tilePaint)
                         if (entry.dirty) {
                             stale += 1
-                            
+
                             if (!deferRefresh && !freeze && pending.add(key)) scheduleRasterLocked()
                         }
                     } else {
@@ -912,8 +831,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
                             src.set(0, 0, fallback.width, fallback.height)
                             canvas.drawBitmap(fallback, src, dst, tilePaint)
                         }
-                        
-                        
+
                         if (!freeze && pending.add(key)) scheduleRasterLocked()
                     }
                 }
@@ -949,19 +867,12 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         }
     }
 
-    
     @Volatile
     private var outlineEmphasis = false
-    
-    // Retained for existing ink-color handling; motion uses a separate BW recipe.
-    @Volatile
-    private var whiteCards = false
-    
+
     @Volatile
     private var gestureTemplateHidden = false
 
-    
-    
     @Volatile
     private var pageNoteHeader: String? = null
     @Volatile
@@ -970,7 +881,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
     @Volatile
     private var pageNoteHeaderHeight = 0f
 
-    
     fun setNoteHeader(markdown: String?, placeholder: Boolean = false, pageScale: Float = 1f) {
         val next = markdown?.takeIf { it.isNotBlank() }
         if (next == pageNoteHeader && placeholder == pageNoteHeaderPlaceholder && pageScale == pageNoteHeaderScale) return
@@ -991,7 +901,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         canvas.restoreToCount(save)
     }
 
-    
     private fun drawNoteHeader(canvas: Canvas, markdown: String, height: Float, fill: Int?, textColor: Int, pageScale: Float = 1f) {
         val save = canvas.save()
         canvas.scale(1f / pageScale, 1f / pageScale)
@@ -1011,13 +920,12 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         canvas.restoreToCount(save)
     }
 
-    fun setGesturePresentation(flatCards: Boolean, whiteCards: Boolean, hideTemplate: Boolean, moving: Boolean) {
-        if (outlineEmphasis == flatCards && this.whiteCards == whiteCards && gestureTemplateHidden == hideTemplate && movingCards == moving) return
-        val geometryChanged = outlineEmphasis != flatCards || this.whiteCards != whiteCards || gestureTemplateHidden != hideTemplate
+    fun setGesturePresentation(flatCards: Boolean, hideTemplate: Boolean, moving: Boolean) {
+        if (outlineEmphasis == flatCards && gestureTemplateHidden == hideTemplate && movingCards == moving) return
+        val geometryChanged = outlineEmphasis != flatCards || gestureTemplateHidden != hideTemplate
         movingCards = moving
-        Log.i(TAG, "card-recipe build=20261016v moving=$moving recipe=${CardGrayRecipe.forMotion(moving, idleCardRecipe)}")
+        Log.i(TAG, "card-recipe build=20261016v moving=$moving recipe=${CardGrayRecipe.forMotion(moving)}")
         outlineEmphasis = flatCards
-        this.whiteCards = whiteCards
         gestureTemplateHidden = hideTemplate
         if (!geometryChanged) { postInvalidateOnAnimation(); return }
         removeCallbacks(lookTimeoutTask)
@@ -1049,8 +957,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     val isLookPending: Boolean get() = lookPending
 
-    
-    
     private fun rerasterAllTiles(atomic: Boolean = false): Boolean {
         var wait = false
         synchronized(cacheLock) {
@@ -1114,9 +1020,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         }
     }
 
-    
-
-    
     private fun scheduleRasterLocked() {
         if (rasterScheduled) return
         val executor = rasterExecutor ?: return
@@ -1131,8 +1034,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         while (true) {
             val key = synchronized(cacheLock) {
                 if (generation != rasterGeneration) return@synchronized null
-                
-                
+
                 pending.removeAll { it in rasteringKeys }
                 val next = pending.firstOrNull()
                 if (next == null) {
@@ -1147,7 +1049,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
                 }
             } ?: return
 
-            
             if (!tileVisible(key)) {
                 synchronized(cacheLock) { rasteringKeys.remove(key); rasteringDirtyKeys.remove(key) }
                 notifyTileProcessed(produced = false)
@@ -1158,9 +1059,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             val bitmap = try {
                 rasterTile(key)
             } catch (error: Throwable) {
-                
-                
-                
                 Log.w(TAG, "raster tile failed key=$key", error)
                 null
             }
@@ -1178,8 +1076,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
                         previous.bitmap.recycle()
                     }
                     val entry = TileEntry(bitmap)
-                    
-                    
+
                     entry.dirty = rasteringDirtyKeys.remove(key)
                     if (entry.dirty && !deferRefresh) pending.add(key)
                     cache[key] = entry
@@ -1208,7 +1105,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         }
     }
 
-    
     private fun notifyTileProcessed(produced: Boolean) {
         if (lookPending) {
             // 换样期间不逐块出帧，全部画完一起上屏。
@@ -1228,14 +1124,10 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         } else if (produced) {
             postInvalidateOnAnimation()
         } else {
-            
-            
-            
             postInvalidateOnAnimation()
         }
     }
 
-    
     private fun markAllCachedTilesDirtyLocked() {
         synchronized(cacheLock) {
             for (entry in cache.values) entry.dirty = true
@@ -1263,7 +1155,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         return tileOnScreen(key.ix, key.iy)
     }
 
-    
     private fun tileWorldRect(key: TileKey): RectF = RectF(
         key.ix * TILE_WORLD,
         key.iy * TILE_WORLD,
@@ -1288,19 +1179,16 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             return null
         }
         val canvas = Canvas(bitmap)
-        
-        
+
         canvas.scale(scalePx, scalePx)
         val worldRect = tileWorldRect(key)
         canvas.translate(-worldRect.left, -worldRect.top)
 
-        
-        
         val scene = BoardEngine.renderSnapshot(worldRect)
         if (!gestureTemplateHidden) {
             TemplatePaper.draw(canvas, worldRect, backgroundTemplate, templatePageWidth)
         }
-        
+
         NoteLinks.draw(canvas, worldRect)
         drawPageNoteHeader(canvas, worldRect)
         drawCanvasStrokes(canvas, worldRect, scene)
@@ -1309,9 +1197,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         return bitmap
     }
 
-    
-
-    
     fun renderExport(world: RectF, scalePx: Float, headerPx: Int = 0, onDone: (Bitmap?) -> Unit) {
         val handler = rasterHandler
         if (handler == null || scalePx <= 0f || world.width() <= 0f || world.height() <= 0f) {
@@ -1341,7 +1226,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             canvas.translate(-world.left, -world.top)
             val scene = BoardEngine.renderSnapshot(world)
             drawCanvasStrokes(canvas, world, scene)
-            drawLiquidAndCards(canvas, world, scene, idleCardRecipe, emphasis = false, white = false)
+            drawLiquidAndCards(canvas, world, scene, CardGrayRecipe.DEFAULT, emphasis = false)
             drawConnectionStrokes(canvas, world, scene)
             val stillActive = synchronized(cacheLock) { generation == rasterGeneration }
             if (stillActive) onDone(bitmap) else {
@@ -1355,10 +1240,9 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         strokeQueryScratch.clear()
         strokeQueryScratch.addAll(scene.canvasStrokes)
         strokeQueryScratch.removeAll { it.connectionId != null }
-        TchRaster.drawLayer(canvas, strokeQueryScratch, strokePaint, colorOf = a2InkColor("canvas", scene))
+        TchRaster.drawLayer(canvas, strokeQueryScratch, strokePaint)
     }
 
-    
     private fun drawConnectionStrokes(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot) {
         // Keep bridge ink black on light portions, then resolve dark portions geometrically.
         val bridges = scene.canvasStrokes.filter { it.connectionId != null }
@@ -1404,29 +1288,12 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         canvas.restoreToCount(save)
     }
 
-
-    
-    private fun a2InkColor(
-        space: String,
-        scene: BoardEngine.RenderSnapshot,
-        cardDarkOverride: Boolean? = null,
-    ): (BoardEngine.StrokeRec) -> Int {
-        if (!whiteCards) return { it.color }
-        val markers = scene.markers[space] ?: emptyList()
-        if (markers.all { MarkerInk.fromArgb(it.color).darkBackdrop }) return { it.color }
-        return { stroke -> InkBackdrop.resolve(stroke, cardDarkOverride = cardDarkOverride, markers = markers) }
-    }
-
-    
-    
     private fun shadowedIntersects(bounds: RectF, world: RectF): Boolean =
         bounds.left < world.right && bounds.top < world.bottom &&
             bounds.right + CARD_SHADOW_EXTENT > world.left && bounds.bottom + CARD_SHADOW_EXTENT > world.top
 
-    
     private val shadowFarUnion get() = rasterScratch.get().shadowFarUnion
 
-    
     private fun shadowCopiesOf(rect: RectF?, path: Path?) {
         val off = CARD_SHADOW_OFFSET
         val far = CARD_SHADOW_OFFSET + CARD_SHADOW_EDGE
@@ -1441,13 +1308,12 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         }
     }
 
-    
     private fun drawSilhouetteShadow(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot) {
         val cardRect = RectF()
         shadowFarUnion.rewind()
         var any = false
         var unionOk = true
-        
+
         for (neck in scene.necks) {
             if (!shadowedIntersects(neck.bounds, world)) continue
             shadowCopiesOf(null, neck.path)
@@ -1466,8 +1332,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             any = true
         }
         if (!any) return
-        
-        
+
         val save = canvas.save()
         if (unionOk) canvas.clipPath(shadowFarUnion)
         for (neck in scene.necks) {
@@ -1499,7 +1364,7 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val saved = canvas.save()
         canvas.translate(panX, panY)
         canvas.scale(scale, scale)
-        val recipe = CardGrayRecipe.forMotion(movingCards, idleCardRecipe)
+        val recipe = CardGrayRecipe.forMotion(movingCards)
         screenCardFill.color = recipe.low
         screenCardFill.shader = CardGrayPattern.shader(canvas, recipe)
         for (neck in necks) canvas.drawPath(neck.path, screenCardFill)
@@ -1513,8 +1378,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     private fun drawLiquidAndCards(
         canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot,
-        recipe: CardGrayRecipe = CardGrayRecipe.forMotion(movingCards, idleCardRecipe),
-        emphasis: Boolean = outlineEmphasis, white: Boolean = whiteCards,
+        recipe: CardGrayRecipe = CardGrayRecipe.forMotion(movingCards),
+        emphasis: Boolean = outlineEmphasis,
         cutoutCardFill: Boolean = false,
     ) {
         val cardRect = RectF()
@@ -1545,12 +1410,8 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         drawThreads(canvas, world, scene, emphasis)
         for (neck in scene.necks) {
             if (!RectF.intersects(neck.bounds, world)) continue
-            neckFillPaint.color = when {
-                neck.dark -> CARD_COLORED_FILL_COLOR
-                white -> Color.WHITE
-                else -> recipe.low
-            }
-            neckFillPaint.shader = if (!neck.dark && !white) CardGrayPattern.shader(canvas, recipe) else null
+            neckFillPaint.color = if (neck.dark) CARD_COLORED_FILL_COLOR else recipe.low
+            neckFillPaint.shader = if (!neck.dark) CardGrayPattern.shader(canvas, recipe) else null
             canvas.drawPath(neck.path, if (cutoutCardFill && !neck.dark) rasterScratch.get().cardCutoutPaint else neckFillPaint)
             if (emphasis) {
                 drawNeckOutline(canvas, neck.path, neck.bounds, scene)
@@ -1560,48 +1421,20 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         for (card in scene.cardsByZ) {
             card.rect(cardRect)
             if (!RectF.intersects(cardRect, world)) continue
-            
-            
-            cardFillPaint.color = when {
-                showsAccent(card) -> CARD_COLORED_FILL_COLOR
-                white -> Color.WHITE
-                else -> recipe.low
-            }
-            cardFillPaint.shader = if (!showsAccent(card) && !white) CardGrayPattern.shader(canvas, recipe) else null
+
+            cardFillPaint.color = if (showsAccent(card)) CARD_COLORED_FILL_COLOR else recipe.low
+            cardFillPaint.shader = if (!showsAccent(card)) CardGrayPattern.shader(canvas, recipe) else null
             canvas.drawRoundRect(cardRect, CARD_RADIUS, CARD_RADIUS,
                 if (cutoutCardFill && !showsAccent(card)) rasterScratch.get().cardCutoutPaint else cardFillPaint)
         }
         cardFillPaint.shader = null
-        
+
         if (emphasis) drawCardOutlines(canvas, world, scene)
-        
+
         for (card in scene.cardsByZ) {
             card.rect(cardRect)
             if (!RectF.intersects(cardRect, world)) continue
             drawCardContent(canvas, card, cardRect, scene)
-        }
-    }
-
-    
-    fun drawEinkLabScene(canvas: Canvas, world: RectF, cards: List<BoardEngine.CardRec>, recipe: CardGrayRecipe) {
-        val neck = if (cards.size == 2) NeckGeometry.build(cards[0].rect(), cards[1].rect()) else null
-        val scene = BoardEngine.RenderSnapshot(
-            emptyList(), cards, cards.associateBy { it.id }, emptyMap(), emptyMap(), emptyMap(),
-            if (neck == null) emptyList() else listOf(BoardEngine.NeckRec("lab-neck", neck, false)), 1f,
-        )
-        drawLiquidAndCards(canvas, world, scene, recipe, emphasis = false, white = false)
-        // Sample ink stays visible throughout motion, in the same coordinates as each card.
-        val paint = rasterScratch.get().strokePaint
-        paint.color = Color.BLACK
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 2f
-        for (card in cards) {
-            val path = Path().apply {
-                moveTo(card.x + 20f, card.y + card.height - 35f)
-                cubicTo(card.x + 50f, card.y + card.height - 80f, card.x + 80f,
-                    card.y + card.height + 5f, card.x + card.width - 20f, card.y + card.height - 45f)
-            }
-            canvas.drawPath(path, paint)
         }
     }
 
@@ -1613,7 +1446,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         }
     }
 
-    
     private fun drawFlatShadow(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot) {
         val cardRect = RectF()
         val off = CARD_SHADOW_OFFSET
@@ -1648,7 +1480,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         canvas.restoreToCount(save)
     }
 
-    
     private fun drawCardOutlines(canvas: Canvas, world: RectF, scene: BoardEngine.RenderSnapshot) {
         outlineOccluders.rewind()
         val cardRect = RectF()
@@ -1675,16 +1506,12 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         }
     }
 
-    
-
-    
     private fun drawCardContent(canvas: Canvas, card: BoardEngine.CardRec, rect: RectF, scene: BoardEngine.RenderSnapshot) {
         val save = canvas.save()
         canvas.clipRect(rect)
         canvas.translate(card.x, card.y)
 
         if (card.kind == "image" || card.kind == "note") {
-            
             var headerH = 0f
             if (card.kind == "note") {
                 val header = noteHeaderOf(card)
@@ -1708,29 +1535,23 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
                 if (bitmap != null) {
                     drawCardImage(canvas, bitmap, rect.width(), imageH)
                 } else {
-
                     drawImagePlaceholder(canvas, rect.width(), imageH)
                 }
             }
             canvas.translate(0f, -headerH)
         } else if (card.content.isNotBlank()) {
-            
             val darkBase = showsAccent(card)
             cardTextPaint.color = if (darkBase) Color.WHITE else CARD_TEXT_COLOR
             drawTextBlock(canvas, card.content, rect.width(), darkBase, CardTextFormat.metricsFor(card))
         }
 
-        
         val attached = scene.cardStrokes[card.id]
         if (attached != null) {
-            
-            val a2Color = a2InkColor("card:${card.id}", scene, cardDarkOverride = card.colored)
-            TchRaster.drawLayer(canvas, attached, strokePaint) { stroke -> a2Color(stroke) }
+            TchRaster.drawLayer(canvas, attached, strokePaint)
         }
         canvas.restoreToCount(save)
     }
 
-    
     // Stacks the thumbnail tiles at the card width; only tiles inside the canvas clip are decoded.
     private fun drawNotePages(canvas: Canvas, card: BoardEngine.CardRec, width: Float, height: Float, scene: BoardEngine.RenderSnapshot): Boolean {
         if (card.imagePath.isEmpty()) return false
@@ -1773,7 +1594,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         canvas.drawLine(box.right, box.top, box.left, box.bottom, placeholderPaint)
     }
 
-    
     private fun drawTextBlock(canvas: Canvas, raw: String, width: Float, darkBase: Boolean, m: CardTextFormat.Metrics = CardTextFormat.WEB) {
         val innerMax = (width - m.padX * 2f).coerceAtLeast(1f)
         var top = m.padTop
@@ -1782,7 +1602,6 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
         val highlightText = if (darkBase) Color.BLACK else Color.WHITE
         forEachTextRun(raw, innerMax, cardTextPaint, m) { text, _, lineHeight, blackBackground ->
             if (text.isNotEmpty()) {
-                
                 val fm = cardTextPaint.fontMetrics
                 val baseline = top + (lineHeight - (fm.descent - fm.ascent)) / 2f - fm.ascent
                 if (blackBackground) {

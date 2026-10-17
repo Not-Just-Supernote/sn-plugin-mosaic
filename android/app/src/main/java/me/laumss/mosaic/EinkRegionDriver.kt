@@ -8,12 +8,7 @@ import android.view.Surface
 import android.view.View
 
 internal object EinkRegionDriver {
-    var lastResult: String = "waiting"
-        private set
     private val library = runCatching { System.loadLibrary("mosaic_eink_region") }
-    private external fun probeNative(rects: IntArray): String
-    private external fun testWhiteNative(rect: IntArray): String
-    private external fun testBlackWhiteNative(rect: IntArray): String
     private external fun beginBlackBatchNative(rects: IntArray): Long
     private external fun finishBlackBatchNative(token: Long): String
     private external fun batchBusyNative(token: Long): Int
@@ -78,61 +73,5 @@ internal object EinkRegionDriver {
     } catch (error: Throwable) {
         Log.w("MosaicEinkCleanup", "complete owner=$owner", error)
         "error: ${error.message}"
-    }
-
-    fun testBlackWhite(view: View, physicalRect: Rect): String {
-        if (!view.isAttachedToWindow || view.display?.rotation != Surface.ROTATION_0) return "skip: view or rotation"
-        return try {
-            library.getOrThrow()
-            // The bounded pair runs within this explicit manual action so a new
-            // scene/input command cannot intervene between black and white.
-            val result = testBlackWhiteNative(intArrayOf(physicalRect.left, physicalRect.top, physicalRect.right, physicalRect.bottom))
-            Log.i("MosaicEinkLab", "black-white test rect=$physicalRect result=$result")
-            result
-        } catch (error: Throwable) {
-            Log.w("MosaicEinkLab", "black-white test unavailable", error)
-            "error: ${error.message}"
-        }
-    }
-
-    fun testWhite(view: View, physicalRect: Rect): String {
-        if (!view.isAttachedToWindow || view.display?.rotation != Surface.ROTATION_0) return "skip: view or rotation"
-        return try {
-            library.getOrThrow()
-            val result = testWhiteNative(intArrayOf(physicalRect.left, physicalRect.top, physicalRect.right, physicalRect.bottom))
-            Log.i("MosaicEinkLab", "white-tag test rect=$physicalRect result=$result")
-            result
-        } catch (error: Throwable) {
-            Log.w("MosaicEinkLab", "white-tag test unavailable", error)
-            "error: ${error.message}"
-        }
-    }
-
-    fun probe(view: View, exposed: Region): Boolean {
-        if (!view.isAttachedToWindow || view.display?.rotation != Surface.ROTATION_0 || exposed.isEmpty) {
-            lastResult = "skip: view, orientation or region guard"
-            Log.w("MosaicEinkLab", "driver-probe skipped: view, orientation or region guard")
-            return false
-        }
-        return try {
-            library.getOrThrow()
-            val origin = IntArray(2)
-            view.getLocationOnScreen(origin)
-            val iterator = RegionIterator(exposed)
-            val rect = Rect()
-            val values = ArrayList<Int>()
-            while (iterator.next(rect)) {
-                rect.offset(origin[0], origin[1])
-                values.add(rect.left); values.add(rect.top); values.add(rect.right); values.add(rect.bottom)
-            }
-            val result = probeNative(values.toIntArray())
-            lastResult = result
-            Log.i("MosaicEinkLab", "driver-probe origin=${origin.toList()} rects=$values result=$result")
-            false // Read-only probe; the hardware cleanup experiment is withdrawn.
-        } catch (error: Throwable) {
-            lastResult = "error: ${error.message}"
-            Log.w("MosaicEinkLab", "driver-probe unavailable", error)
-            false
-        }
     }
 }

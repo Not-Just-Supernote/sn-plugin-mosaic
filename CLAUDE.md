@@ -14,11 +14,11 @@ Kotlin 处理画面和输入，改动后把结果发给 JS。JS 负责保存和�
 
 画面从下到上四层：`BoardContentView` 画内容，`TransientInkView` 画套索和图形的轨迹，`InteractionOverlayView` 画选框和手柄，`BoardChromeView` 画工具条和菜单。
 
-JS 依赖的 `React/src/` 不在仓库里，JS 部分现在无法编译。项目没有测试。
+JS 依赖的 `React/src/` 只有 `boardFormat.ts` 在仓库里，其余文件不在，JS 部分现在无法编译。项目没有测试。
 
 ## 工具条
 
-从左到右是更多、笔、笔刷、马克笔、橡皮、套索、图形，最右边是关闭。代码在 `InkToolbarView.kt`。
+从左到右是更多、笔、笔刷、马克笔、橡皮、套索、图形，最右边是关闭。代码在 `InkToolbar.kt`。
 
 再点一次当前的笔会弹出粗细。图形按钮弹出直线、矩形、三角、椭圆。
 
@@ -50,11 +50,13 @@ JS 依赖的 `React/src/` 不在仓库里，JS 部分现在无法编译。项目
 
 ## 刷新模式
 
-刷新模式在 `BoardPresentation.kt` 里按原因叠加，`MosaicEinkRefreshModule` 再和笔、滑条等其他来源合并，优先级 A2 > DTH > 其余，同级取最近的。DTH 在设备上效果不好，目前没有地方用。选中后拉手柄或四边任意位置都算改尺寸，角优先（`ResizeHandles.hit`）。双指平移缩放和 Notipal 浮窗拖动用 A2，期间灰卡和桥临时画成白底，文字和手写不反色，和笔记卡一样，黑卡照旧（`whiteCards`）；拖动、旋转选中内容（含长按拖卡片）和调整卡片或笔迹选区尺寸统一用 auto（模式 7，`TRANSFORM`）；单卡调整尺寸时通过拖动预览层持续显示附属手写，手写随卡片左上角平移，保持原尺寸；拉卡片手柄时系统笔迹服务停掉，和套索拖动一样；底纹和阴影照常；原位置的卡片（连同桥和线）和选中的笔迹从内容层拿掉（`BoardEngine.hiddenCardIds`、`hiddenStrokeIds`），只看叠加层的预览。橡皮和套索工具下也用 auto。选中后静止时不占 auto。
+刷新模式在 `BoardPresentation.kt` 里按原因叠加，`MosaicEinkRefreshModule` 再和笔、滑条等其他来源合并，优先级 A2 > DTH > 其余，同级取最近的。DTH 在设备上效果不好，目前没有地方用。选中后拉手柄或四边任意位置都算改尺寸，角优先（`ResizeHandles.hit`）。双指平移缩放（`PAN_ZOOM`）、Notipal 浮窗拖动（`INKLING_DRAG`）、拖动或旋转选中内容（含长按拖卡片）和调整卡片或选区尺寸（`TRANSFORM`）都用 A2。白板上这些手势期间浅灰卡和桥改用黑白抖动的运动配方（`CardGrayRecipe.MOVING`），配方那一帧画出来后才切 A2，松手时先放掉 A2 再画回灰卡；黑卡照旧；单卡调整尺寸时通过拖动预览层持续显示附属手写，手写随卡片左上角平移，保持原尺寸；拉卡片手柄时系统笔迹服务停掉，和套索拖动一样；底纹和阴影照常；原位置的卡片（连同桥和线）和选中的笔迹从内容层拿掉（`BoardEngine.hiddenCardIds`、`hiddenStrokeIds`），只看叠加层的预览。橡皮和套索工具下也用 auto。选中后静止时不占 auto。
 
 换样的图块没画完之前，内容层停在按下时的视口，不跟着手指出帧，否则灰卡以灰色在 A2 下移动，滑动开头留下残影。逻辑在 `BoardContentView` 的 `lookPending`。
 
-移动手势按系统 Note 的做法开关 regal（硬件清残影）：按下时开，第一次真正移动时关，松手再开。代码在 `EinkRegal.kt`，宿主有 Note 的 `HandWriteClient` 时调它，否则走 `sendHwcCmd(1020, [9, 0/1])`。
+regal（硬件清残影）由宿主管理，Mosaic 不开关它。
+
+卡片移动或双指平移后，旧位置在浅灰卡下留下的残影由 `EinkTrailCleanup` 清理：画面静止后对露出的白色区域先刷黑再刷白，直接写驱动，代码在 `cpp/eink_region.c` 和 `EinkRegionDriver.kt`。宿主整屏刷新后由 `EinkGrayRestore` 补一帧灰阶。
 
 ## 笔刷
 
@@ -82,7 +84,7 @@ JS 依赖的 `React/src/` 不在仓库里，JS 部分现在无法编译。项目
 
 文字卡由文字和手写叠成。支持标题、粗体、斜体。文字变多时卡片长高，并推开下方卡片。代码在 `CardTextFormat.kt` 和 `CardTextEditor.kt`。
 
-每张文字卡有字号倍数 `fontScale`（0.5 到 6），标题、正文和内边距一起缩放。拖边改卡片尺寸；拖角等比缩放卡片并同步改字号，换行位置不变。编辑文字时底部编辑条有缩小、放大字号两个按钮，按 `FONT_LEVELS` 逐档调整。手写识别成文字卡时，用手写各行的总长度对比同一段文字排成一行的宽度来估算字号，行高只作上限；卡片放在原来手写的位置。字号在 JS 里存为 `card.ext.fontScale`，同步协议因此升到 8。
+每张文字卡有字号倍数 `fontScale`（0.5 到 6），标题、正文和内边距一起缩放。拖边改卡片尺寸；拖角等比缩放卡片并同步改字号，换行位置不变。编辑文字时底部编辑条有缩小、放大字号两个按钮，按 `FONT_LEVELS` 逐档调整。手写识别成文字卡时，用手写各行的总长度对比同一段文字排成一行的宽度来估算字号，行高只作上限；卡片放在原来手写的位置。字号在 JS 里存为 `card.ext.fontScale`。Kotlin 和 JS 之间的场景协议版本是 9（`BoardEngine.PROTOCOL_VERSION` 和 `engineSync.ts`），两边要一起改。
 
 卡片默认浅灰，可切换成黑卡。只有同色卡片能连接，换色后不同色的连接会断开。
 

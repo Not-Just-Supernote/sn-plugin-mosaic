@@ -7,7 +7,6 @@ import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 
-
 object TchRaster {
     data class Run(val path: Path, val width: Float, val filled: Boolean = false,
         val minWidth: Float = width, val maxWidth: Float = width)
@@ -28,8 +27,6 @@ object TchRaster {
         }
         require(drawPathWidth > 0) { "drawPath width is unavailable" }
 
-        
-        
         if (Shapes.kindOf(points, pressures) != null) {
             val shapeWidth = DrawPathClient.nativePressureWidthUnits(type, drawPathWidth, pressures[0])
             return listOf(Run(BoardEngine.buildPolylinePath(points), shapeWidth / sampleScale))
@@ -56,7 +53,7 @@ object TchRaster {
             val y = points[2 * i + 1]
             val mx = (lastX + x) / 2f
             val my = (lastY + y) / 2f
-            
+
             if (widths[i] != runWidth) {
                 runs.add(Run(path, runWidth))
                 path = Path().apply { moveTo(midX, midY) }
@@ -73,11 +70,9 @@ object TchRaster {
         return runs
     }
 
-    
     private fun isGrayMarker(stroke: BoardEngine.StrokeRec): Boolean =
         stroke.penStyle == PenStyle.MARKER.objType && MarkerInk.fromArgb(stroke.color) != MarkerInk.BLACK
 
-    
     fun drawLayer(
         canvas: Canvas,
         strokes: List<BoardEngine.StrokeRec>,

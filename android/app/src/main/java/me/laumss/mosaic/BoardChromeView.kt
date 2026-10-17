@@ -23,7 +23,6 @@ import android.widget.TextView
 import kotlin.math.min
 
 class BoardChromeView(context: Context) : FrameLayout(context) {
-
     companion object {
         private const val INK = 0xFF111111.toInt()
         private const val MUTED = 0xFF555555.toInt()
@@ -31,32 +30,32 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         private const val REGION_JUMP_MARGIN_DP = 24f
         private const val TOUCH_TOGGLE_SIZE_DP = 64f
         private const val TOUCH_TOGGLE_MARGIN_DP = 12f
-        
+
         private const val TOP_PULL_START_PX = 120f
-        
+
         private const val TOP_PULL_STEAL_PX = 60f
-        
+
         private const val TOOLBAR_H_DP = InkToolbar.CELL_H_DP
         private const val TOOLBAR_CELL_W_DP = InkToolbar.CELL_W_DP
-        
+
         private const val MENU_SCREEN_MARGIN_DP = 20f
-        
+
         private const val LINKS_GAP_DP = 16f
-        
+
         private const val LINKS_MIN_HEIGHT_DP = 150f
-        
+
         private const val MENU_EXTRA_WIDTH_DP = 40f
-        
+
         private const val CLOSE_RIGHT_MARGIN_DP = 28f
         private const val CLOSE_BUTTON_SCALE = 0.65f * 1.10f
         private const val CLOSE_STROKE_SCALE = 0.65f
-        
+
         private const val WIDTH_POPUP_CELL_DP = 56f
         private const val WIDTH_POPUP_PAD_DP = 8f
         private const val WIDTH_POPUP_BORDER_DP = 2f
-        
+
         private const val POPUP_TITLE_SP = 11f
-        
+
         private const val POPUP_GAP_DP = 4f
         private const val POPUP_ROW_TOP_DP = 5f
     }
@@ -65,12 +64,12 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         fun onOpenMenu()
         fun onSaveArchive()
         fun onLoadArchive()
-        
+
         fun onSelectBelow()
-        
+
         fun onSync(enable: Boolean, address: String)
         fun onToggleTranslucent()
-        
+
         fun onTranslucentLevel(level: Int)
         fun onZoomStep(direction: Int)
         fun onZoomReset()
@@ -81,43 +80,35 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         fun onDeleteLassoSelection()
         fun onClose()
         fun onJumpToRegion(region: SparseNavigation.Region)
-        
+
         fun onOpenNoteCard(cardId: String)
-        
+
         fun onLocateNoteCard(cardId: String)
-        
+
         fun onLocateNoteLink(shotId: String)
         fun onDeleteNoteLink(shotId: String)
         fun onSwitcherDismissed()
-        
+
         fun onPenStyle(style: PenStyle, width: Float)
-        
+
         fun onMarkerInk(ink: MarkerInk)
-        
+
         fun onConvertCardToNote()
         fun onToggleEraser()
         fun onToggleLasso()
-        
+
         fun onShapeSelected(kind: Shapes.Kind)
-        
+
         fun onSelectWriteTool()
-        
+
         fun onTemplateSelected(template: BackgroundTemplate)
         fun onUndo()
         fun onRedo()
-        
+
         fun onPenBlockChanged()
     }
 
     var listener: Listener? = null
-
-    var onCardGrayTrialColor: ((Int, Int) -> Unit)? = null
-    var onOpenEinkLab: (() -> Unit)? = null
-    private val grayTrial = CardGrayTrialView(context).apply {
-        onColor = { color, brightPixels -> onCardGrayTrialColor?.invoke(color, brightPixels) }
-        onClosed = { listener?.onPenBlockChanged() }
-        addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> listener?.onPenBlockChanged() }
-    }
 
     private val density = resources.displayMetrics.density
     private fun dp(v: Float): Int = (v * density + 0.5f).toInt()
@@ -130,7 +121,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
     private val historyBar = LinearLayout(context)
     private val lassoEditButton = textButton("", 17f).apply { alpha = 0.35f; isEnabled = false }
     private val lassoDeleteButton = textButton("", 17f)
-    
+
     private val syncAddressInput = EditText(context).apply {
         isSingleLine = true
         textSize = 15f
@@ -149,9 +140,9 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
     }
     private var syncEnabled = false
     private var syncState = "off"
-    
+
     private val translucentButton = textButton("", 17f)
-    
+
     private val translucentSlider = TranslucentSeekBar(context).apply {
         max = (TranslucentStore.MAX_LEVEL - TranslucentStore.MIN_LEVEL) / TranslucentStore.STEP
     }
@@ -161,7 +152,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         gravity = Gravity.CENTER_VERTICAL
         minWidth = dp(40f)
     }
-    
+
     private val translucentLevelGroup = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
@@ -172,10 +163,9 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         isFillViewport = true
         setBackgroundColor(Color.WHITE)
     }
-    
+
     private val toolbarBand = View(context).apply { setBackgroundColor(Color.WHITE) }
 
-    
     private val closeButton = GlyphButton(
         context,
         { c, s, p -> ToolIcons.close(c, s, p) },
@@ -193,21 +183,21 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         transparent = true,
     )
     private val widthPopup = WidthPopupView(context)
-    
+
     private val widthPopupRoot = FrameLayout(context).apply {
         visibility = View.GONE
         isClickable = true
         setOnClickListener { hideWidthPopup() }
     }
     private val templatePopup = TemplatePopupView(context)
-    
+
     private val templatePopupRoot = FrameLayout(context).apply {
         visibility = View.GONE
         isClickable = true
         setOnClickListener { hideTemplatePopup() }
     }
     private val shapePopup = ShapePopupView(context)
-    
+
     private val shapePopupRoot = FrameLayout(context).apply {
         visibility = View.GONE
         isClickable = true
@@ -220,12 +210,12 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
 
     private val switcherRoot = FrameLayout(context)
     private val switcherPanel = LinearLayout(context)
-    
+
     private val switcherNotesTitle = TextView(context)
     private val switcherNotesList = LinearLayout(context)
     private val switcherNotesEmpty = TextView(context)
     private lateinit var switcherNotesScroll: ScrollView
-    
+
     private val linksPanel = LinearLayout(context)
     private val linksTitle = TextView(context)
     private val linksList = LinearLayout(context)
@@ -234,19 +224,13 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
     private var touchEnabled = false
     private var translucentActive = false
 
-    
     private var pullTrackStartY = Float.NaN
-    
+
     private var pullStealing = false
 
     init {
         buildSwitcher()
-        
-        
-        
-        
-        
-        
+
         inkToolbar.onPenStyle = { style, width -> listener?.onPenStyle(style, width); hidePopups() }
         inkToolbar.onMarkerInk = { ink -> listener?.onMarkerInk(ink); hidePopups() }
         inkToolbar.onTool = { tool ->
@@ -261,20 +245,15 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         inkToolbar.onSelectBelow = { hidePopups(); listener?.onSelectBelow() }
         inkToolbar.onNibWidthRequest = { cellLeft, cellWidth -> hideTemplatePopup(); hideShapePopup(); showWidthPopup(cellLeft, cellWidth) }
         inkToolbar.onShape = { cellLeft, cellWidth -> hideWidthPopup(); hideTemplatePopup(); showShapePopup(cellLeft, cellWidth) }
-        
-        
+
         val barH = dp(TOOLBAR_H_DP)
-        addView(grayTrial, LayoutParams(dp(360f), LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END).apply {
-            rightMargin = dp(12f)
-            bottomMargin = dp(12f)
-        })
         inkToolbarScroll.addView(inkToolbar, ViewGroup.LayoutParams(LayoutParams.WRAP_CONTENT, barH))
-        
+
         val closeW = dp(TOOLBAR_CELL_W_DP * CLOSE_BUTTON_SCALE)
         val closeH = dp(TOOLBAR_H_DP * CLOSE_BUTTON_SCALE)
         val closeTop = (barH - closeH) / 2
         val closeReserve = TOOLBAR_CELL_W_DP * CLOSE_BUTTON_SCALE + CLOSE_RIGHT_MARGIN_DP
-        
+
         addView(toolbarBand, LayoutParams(LayoutParams.MATCH_PARENT, barH, Gravity.TOP))
         addView(inkToolbarScroll, LayoutParams(LayoutParams.MATCH_PARENT, barH, Gravity.TOP).apply {
             rightMargin = dp(closeReserve)
@@ -298,7 +277,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             templatePopup,
             LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START),
         )
-        
+
         addView(templatePopupRoot, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.TOP))
         shapePopupRoot.addView(
             shapePopup,
@@ -311,12 +290,11 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         setWillNotDraw(true)
     }
 
-    
     override fun onInterceptTouchEvent(ev: android.view.MotionEvent): Boolean {
         when (ev.actionMasked) {
             android.view.MotionEvent.ACTION_DOWN -> {
                 pullStealing = false
-                
+
                 pullTrackStartY =
                     if (!blocksPen && ev.getToolType(0) != android.view.MotionEvent.TOOL_TYPE_STYLUS
                         && ev.getToolType(0) != android.view.MotionEvent.TOOL_TYPE_ERASER
@@ -326,14 +304,12 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             android.view.MotionEvent.ACTION_MOVE -> {
                 val start = pullTrackStartY
                 if (!start.isNaN() && ev.y - start > 8f) {
-                    
-                    
                     inkToolbar.cancelTransientPresses()
                 }
                 if (!start.isNaN() && ev.y - start > TOP_PULL_STEAL_PX) {
                     pullTrackStartY = Float.NaN
                     pullStealing = true
-                    return true 
+                    return true
                 }
             }
             android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL ->
@@ -342,8 +318,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         return super.onInterceptTouchEvent(ev)
     }
 
-    
-    
     @android.annotation.SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(ev: android.view.MotionEvent): Boolean {
         if (pullStealing) {
@@ -381,14 +355,12 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             cornerRadius = radiusDp * density
         }
 
-    
     private var toolbarHiddenByUser = false
-    
+
     private var toolbarHiddenByMenu = false
-    
+
     private var cachedSwitcherWidthPx = 0
 
-    
     val toolbarShown: Boolean get() = !toolbarHiddenByUser && !toolbarHiddenByMenu
 
     private fun applyToolbarVisibility() {
@@ -398,7 +370,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         closeButton.visibility = vis
     }
 
-    
     fun toggleToolbar() {
         if (toolbarHiddenByMenu) return
         toolbarHiddenByUser = !toolbarHiddenByUser
@@ -407,14 +378,11 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         listener?.onPenBlockChanged()
     }
 
-    
     fun toolbarHeightPx(): Int = if (toolbarShown) dp(TOOLBAR_H_DP) else 0
 
-    
     fun cancelTransientPresses() = inkToolbar.cancelTransientPresses()
 
     fun setNoteMode(active: Boolean) {
-        
         inkToolbar.setMoreVisible(!active)
         if (active) { hideSwitcher(); regionJumpViews.values.forEach { it.visibility = View.GONE } }
         else regionJumpViews.values.forEach { it.visibility = View.VISIBLE }
@@ -424,7 +392,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
 
     fun setZoom(scale: Float) {
         val text = "${Math.round(BoardGeometry.zoomPercentForScale(scale))}%"
-        
+
         if (zoomReadout.text.toString() != text) zoomReadout.text = text
         val atMin = scale <= BoardGeometry.ZOOM_LEVELS.first() + 1e-6f
         val atMax = scale >= BoardGeometry.ZOOM_LEVELS.last() - 1e-6f
@@ -434,10 +402,8 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         zoomIn.isEnabled = !atMax
     }
 
-    
     fun setInkTool(eraser: Boolean, lasso: Boolean, shape: Boolean = false) = inkToolbar.setTool(eraser, lasso, shape)
 
-    
     fun setSelectBelowActive(active: Boolean) = inkToolbar.setSelectBelowActive(active)
 
     fun setTouchEnabled(enabled: Boolean) {
@@ -446,11 +412,10 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         touchToggle.invalidate()
     }
 
-    
     fun setSyncState(enabled: Boolean, state: String, address: String) {
         syncEnabled = enabled
         syncState = state
-        
+
         if (!syncAddressInput.hasFocus() && syncAddressInput.text.toString() != address) syncAddressInput.setText(address)
         applySyncButton()
     }
@@ -510,8 +475,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         translucentButton.visibility = if (showGlobalTools) View.VISIBLE else View.GONE
         translucentLevelGroup.visibility = translucentButton.visibility
     }
-
-    
 
     private inner class RegionJumpView(val direction: SparseNavigation.Direction) : View(context) {
         var region: SparseNavigation.Region? = null
@@ -581,7 +544,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         return when (dir) {
             SparseNavigation.Direction.LEFT -> LayoutParams(size, size, Gravity.START or Gravity.CENTER_VERTICAL).apply { leftMargin = margin }
             SparseNavigation.Direction.RIGHT -> LayoutParams(size, size, Gravity.END or Gravity.CENTER_VERTICAL).apply { rightMargin = margin }
-            
+
             SparseNavigation.Direction.UP -> LayoutParams(size, size, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = toolbarHeightPx() + margin }
             SparseNavigation.Direction.DOWN -> LayoutParams(size, size, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = margin }
         }
@@ -593,8 +556,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         }
         return false
     }
-
-    
 
     private fun buildSwitcher() {
         switcherRoot.setBackgroundColor(Color.TRANSPARENT)
@@ -609,7 +570,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             setColor(Color.WHITE)
             setStroke(dp(2f), INK)
         }
-        
+
         switcherRoot.addView(
             switcherPanel,
             LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
@@ -641,17 +602,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         for (button in listOf(translucentButton, lassoEditButton, lassoDeleteButton)) {
             toolsRow.addView(button, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48f)).apply { marginEnd = dp(10f) })
         }
-        toolsRow.addView(textButton("灰阶测试", 17f).apply {
-            setOnClickListener {
-                hideSwitcher()
-                grayTrial.start()
-                grayTrial.bringToFront()
-                listener?.onPenBlockChanged()
-            }
-        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48f)))
-        toolsRow.addView(textButton("墨水屏实验室", 17f).apply {
-            setOnClickListener { hideSwitcher(); grayTrial.close(); onOpenEinkLab?.invoke() }
-        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48f)))
         translucentLevelGroup.addView(translucentSlider, LinearLayout.LayoutParams(dp(180f), dp(48f)))
         translucentLevelGroup.addView(translucentLevelText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48f)))
         toolsRow.addView(
@@ -659,7 +609,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             toolsRow.indexOfChild(translucentButton) + 1,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48f)).apply { marginEnd = dp(10f) },
         )
-        
+
         translucentSlider.setOnTouchListener { view, event ->
             if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) view.parent?.requestDisallowInterceptTouchEvent(true)
             false
@@ -671,7 +621,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             override fun onStartTrackingTouch(bar: SeekBar) {
                 translucentSlider.setTracking(true)
             }
-            
+
             override fun onStopTrackingTouch(bar: SeekBar) {
                 translucentSlider.setTracking(false)
                 listener?.onTranslucentLevel(levelOf(bar.progress))
@@ -695,7 +645,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         translucentButton.setOnClickListener { listener?.onToggleTranslucent() }
         lassoDeleteButton.setOnClickListener { listener?.onDeleteLassoSelection() }
 
-        
         val menuHeader = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -725,7 +674,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         )
         switcherPanel.addView(menuHeader)
 
-        
         val syncRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -738,7 +686,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         syncRow.addView(syncStatus, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40f)).apply { marginStart = dp(10f) })
         switcherPanel.addView(syncRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-        
         switcherNotesTitle.textSize = 18f
         switcherNotesTitle.typeface = Typeface.DEFAULT_BOLD
         switcherNotesTitle.setTextColor(INK)
@@ -772,7 +719,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         setZoom(BoardGeometry.DEFAULT_ZOOM)
     }
 
-    
     private fun applyMenuRowStrings() {
         applySyncButton()
         translucentButton.text = MosaicStrings.t(MosaicStrings.Key.translucent)
@@ -793,18 +739,17 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         showNoteLinks(links)
         applyMenuRowStrings()
         hidePopups()
-        
+
         cachedSwitcherWidthPx = switcherPanelWidthPx()
         toolbarHiddenByMenu = true
         applyToolbarVisibility()
-        
+
         layoutSwitcherPanel()
         switcherRoot.visibility = View.VISIBLE
         bringChromeToFront()
         listener?.onPenBlockChanged()
     }
 
-    
     private fun showNoteCards(noteCards: List<BoardEngine.CardRec>) {
         switcherNotesList.removeAllViews()
         switcherNotesEmpty.visibility = if (noteCards.isEmpty()) View.VISIBLE else View.GONE
@@ -887,7 +832,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         )
     }
 
-    
     fun refreshNoteLinks() {
         if (!switcherOpen) return
         showNoteLinks(NoteLinks.list())
@@ -950,11 +894,10 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         if (switcherOpen) layoutSwitcherPanel()
     }
 
-    
     private fun layoutSwitcherPanel() {
         if (width <= 0 || height <= 0) return
         val margin = dp(MENU_SCREEN_MARGIN_DP)
-        
+
         val panelWidth = if (cachedSwitcherWidthPx > 0) cachedSwitcherWidthPx else switcherPanelWidthPx()
         val showLinks = linksPanel.visibility == View.VISIBLE
         val gap = dp(LINKS_GAP_DP)
@@ -971,7 +914,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             )
             linksNatural = linksPanel.measuredHeight
         }
-        
+
         val maxHeight = if (showLinks) {
             (available - gap - min(linksNatural, dp(LINKS_MIN_HEIGHT_DP))).coerceAtLeast(dp(160f))
         } else {
@@ -979,7 +922,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         }
         val lp = switcherPanel.layoutParams as LayoutParams
         lp.width = panelWidth
-        
+
         val notesLp = switcherNotesScroll.layoutParams as LinearLayout.LayoutParams
         notesLp.weight = 0f
         notesLp.height = LinearLayout.LayoutParams.WRAP_CONTENT
@@ -992,7 +935,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         lp.height = if (natural <= maxHeight) {
             LayoutParams.WRAP_CONTENT
         } else {
-            
             notesLp.weight = 1f
             notesLp.height = 0
             switcherNotesScroll.layoutParams = notesLp
@@ -1009,7 +951,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         }
     }
 
-    
     private fun layoutLinksPanel(panelWidth: Int, top: Int, room: Int, natural: Int) {
         val lp = linksPanel.layoutParams as LayoutParams
         lp.width = panelWidth
@@ -1032,10 +973,10 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
     private fun switcherPanelWidthPx(): Int {
         val scrollX = inkToolbarScroll.scrollX
         val base = inkToolbarScroll.left + inkToolbar.left - scrollX
-        
+
         val lassoRight = base + inkToolbar.lassoCellRightPx()
         val margin = dp(MENU_SCREEN_MARGIN_DP)
-        
+
         val extra = dp(MENU_EXTRA_WIDTH_DP)
         return (lassoRight - margin + extra).coerceIn(dp(160f), (width - 2 * margin).coerceAtLeast(dp(160f)))
     }
@@ -1045,7 +986,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         if (syncAddressInput.hasFocus()) hideSyncKeyboard()
         switcherRoot.visibility = View.GONE
         hidePopups()
-        
+
         if (toolbarHiddenByMenu) {
             toolbarHiddenByMenu = false
             applyToolbarVisibility()
@@ -1060,18 +1001,11 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         if (switcherOpen && indexOfChild(switcherRoot) != childCount - 1) switcherRoot.bringToFront()
     }
 
-    
     fun consumesPoint(xPx: Float, yPx: Float): Boolean =
-        blocksPen || yPx < toolbarHeightPx() || regionJumpContains(xPx, yPx) || touchToggleContains(xPx, yPx) ||
-            grayTrialBounds()?.contains(xPx.toInt(), yPx.toInt()) == true
-
-    fun grayTrialBounds(): android.graphics.Rect? =
-        if (grayTrial.visibility != View.VISIBLE || grayTrial.width == 0) null
-        else android.graphics.Rect(grayTrial.left, grayTrial.top, grayTrial.right, grayTrial.bottom)
+        blocksPen || yPx < toolbarHeightPx() || regionJumpContains(xPx, yPx) || touchToggleContains(xPx, yPx)
 
     fun cleanupExclusionBounds(): List<android.graphics.Rect> = buildList {
         if (toolbarHeightPx() > 0) add(android.graphics.Rect(0, 0, width, toolbarHeightPx()))
-        grayTrialBounds()?.let { add(it) }
         touchToggleBounds()?.let { add(it) }
         for (view in regionJumpViews.values) if (view.visibility == View.VISIBLE) {
             add(android.graphics.Rect(view.left, view.top, view.right, view.bottom))
@@ -1086,16 +1020,13 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         if (touchToggle.visibility != View.VISIBLE || touchToggle.width == 0) null
         else android.graphics.Rect(touchToggle.left, touchToggle.top, touchToggle.right, touchToggle.bottom)
 
-    
     val blocksPen: Boolean get() = switcherOpen || widthPopupRoot.visibility == View.VISIBLE ||
         templatePopupRoot.visibility == View.VISIBLE || shapePopupRoot.visibility == View.VISIBLE
 
     private fun hidePopups() { hideWidthPopup(); hideTemplatePopup(); hideShapePopup() }
 
-    
     fun setCurrentTemplate(template: BackgroundTemplate) = templatePopup.setSelected(template)
 
-    
     fun setCurrentShape(kind: Shapes.Kind?) = shapePopup.setSelected(kind)
 
     private fun showShapePopup(cellLeft: Int, cellWidth: Int) {
@@ -1120,7 +1051,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         listener?.onPenBlockChanged()
     }
 
-    
     private fun toggleMenuTemplatePopup() {
         if (templatePopupRoot.visibility == View.VISIBLE) { hideTemplatePopup(); return }
         templatePopup.measure(
@@ -1130,7 +1060,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         val popupWidth = templatePopup.measuredWidth
         val margin = dp(MENU_SCREEN_MARGIN_DP)
         val panelWidth = if (cachedSwitcherWidthPx > 0) cachedSwitcherWidthPx else switcherPanelWidthPx()
-        
+
         val border = dp(WIDTH_POPUP_BORDER_DP)
         val left = (margin + panelWidth - border).coerceIn(0, (width - popupWidth).coerceAtLeast(0))
         val lp = templatePopup.layoutParams as LayoutParams
@@ -1151,12 +1081,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
 
     private fun showWidthPopup(cellLeft: Int, cellWidth: Int) {
         if (widthPopupRoot.visibility == View.VISIBLE) { hideWidthPopup(); return }
-        
-        
-        
-        
-        
-        
+
         if (inkToolbar.markerSelected) {
             widthPopup.showMarkerInks(inkToolbar.markerInk)
         } else {
@@ -1167,7 +1092,7 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
             MeasureSpec.makeMeasureSpec(width.coerceAtLeast(1), MeasureSpec.AT_MOST),
             MeasureSpec.makeMeasureSpec(height.coerceAtLeast(1), MeasureSpec.AT_MOST),
         )
-        
+
         val popupWidth = widthPopup.measuredWidth
         val anchorLeft = cellLeft - inkToolbarScroll.scrollX
         val left = anchorLeft.coerceIn(0, (width - popupWidth).coerceAtLeast(0))
@@ -1184,14 +1109,13 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         listener?.onPenBlockChanged()
     }
 
-    
     private class GlyphButton(
         context: android.content.Context,
         private val glyph: (Canvas, Float, Paint) -> Unit,
         private val click: () -> Unit,
         private val useToolbarGlyphSize: Boolean = false,
         private val strokeScale: Float = 1f,
-        
+
         private val invertOnPress: Boolean = true,
         private val transparent: Boolean = false,
     ) : View(context) {
@@ -1233,13 +1157,12 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         }
     }
 
-    
     private inner class WidthPopupView(context: android.content.Context) : LinearLayout(context) {
         private val cells = ArrayList<GlyphButton>()
         private val widthRow = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         private val inkRow = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         private val inkCells = LinkedHashMap<MarkerInk, GlyphButton>()
-        
+
         private val dotRadii = FloatArray(PenPopup.MAX_WIDTH_COUNT)
 
         init {
@@ -1279,7 +1202,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
 
         fun setSelected(index: Int) = cells.forEachIndexed { i, cell -> cell.active = i == index }
 
-        
         private fun updateDotRadii(count: Int) {
             val step = if (count > 1) minOf(1.5f, 13.5f / (count - 1)) else 0f
             for (i in dotRadii.indices) dotRadii[i] = 1.7f + i * step
@@ -1302,7 +1224,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         }
     }
 
-    
     private inner class TemplatePopupView(context: android.content.Context) : LinearLayout(context) {
         private val styleCells = LinkedHashMap<TemplateStyle, GlyphButton>()
         private val spacingCells = LinkedHashMap<TemplateSpacing, GlyphButton>()
@@ -1369,7 +1290,6 @@ class BoardChromeView(context: Context) : FrameLayout(context) {
         }
     }
 
-    
     private inner class ShapePopupView(context: android.content.Context) : LinearLayout(context) {
         private val cells = LinkedHashMap<Shapes.Kind, GlyphButton>()
         private var current: Shapes.Kind? = null

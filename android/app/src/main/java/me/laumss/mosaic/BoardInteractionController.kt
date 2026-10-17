@@ -30,7 +30,6 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
-
 class BoardInteractionController(
     private val host: MosaicBoardView,
     private val content: BoardContentView,
@@ -39,7 +38,6 @@ class BoardInteractionController(
     private val chrome: BoardChromeView,
     private val emitter: BoardCommandEmitter,
 ) : InputRouter.Sink, BoardChromeView.Listener {
-
     companion object {
         private const val TAG = "MosaicInteraction"
         private const val TAG_PEN = "MosaicPen"
@@ -51,26 +49,23 @@ class BoardInteractionController(
 
         const val PEN_WIDTH_DP = 2f
         const val INK_BLACK = 0xff000000.toInt()
-        
+
         const val ERASER_HIT_RADIUS = 12f
-        
-        
+
         private const val ZOOM_SNAP_RATIO = 0.03f
         // Releasing a note pinch this close to 100% snaps back to the page filling the width.
         private const val NOTE_ZOOM_SNAP_RATIO = 0.08f
         private const val NOTE_PAN_ZOOM_LOCK_SLOP_DP = 12f
-        
+
         private const val ROTATE_SNAP_DEG = 3f
-        
+
         private const val SHAPE_MIN_DRAG_DP = 8f
 
-        
         // Longest the board stays unpainted at launch while a saved note reopens.
         private const val NOTE_RESTORE_PAINT_HOLD_MS = 2000L
         // Longest the pen waits for JS's scene while the board shows only the scene cache.
         private const val SCENE_CACHE_PEN_HOLD_MS = 5000L
 
-        
         const val ACCENT_BG_COLOR = "#FFF9E3"
         const val ACCENT_TEXT_COLOR = "#3f3b2e"
 
@@ -86,37 +81,32 @@ class BoardInteractionController(
         // Room left around ink when a card grows to take in a stroke written past its edge.
         const val CARD_GROW_PAD = 16f
 
-        
-        
-        
         const val TWO_FINGER_CANDIDATE_HOLD_MS = 300L
-        
+
         const val TWO_FINGER_PAIR_WINDOW_MS = TwoFingerToolGuard.EVENT_TIME_DEV_MS
 
-        
         const val CARD_FINGER_MOVE_HOLD_MS = 600L
-        
+
         const val CARD_FINGER_MOVE_HOLD_FAST_MS = 400L
-        
+
         const val CARD_FINGER_MOVE_HOLD_SELECTION_MS = 100L
-        
+
         private const val NOTE_HEADER_PENDING = "#note-header"
         private const val NOTE_LINK_PENDING = "#note-link:"
         private const val NOTE_LINK_TAP_SLOP_DP = 8f
         private const val NOTE_LINK_MIN_HIT_DP = 40f
-        
+
         private val IMPORT_CARD_WIDTHS = floatArrayOf(BoardGeometry.DEFAULT_CARD_WIDTH, 480f, 640f, 800f, 960f)
-        
+
         private const val IMPORT_CARD_MAX_ASPECT = 1.6f
 
         const val LASSO_ACTION_TAP_SLOP_DP = 12f
 
-        
         const val TWO_FINGER_TAP_MAX_MS = 300L
         const val TWO_FINGER_DOUBLE_TAP_GAP_MS = 400L
         const val TWO_FINGER_TAP_MOVE_SLOP_DP = 24f
         const val TWO_FINGER_DOUBLE_TAP_DIST_DP = 120f
-        
+
         const val LASSO_BOUNDS_PAD = 10f
         private const val EINK_OWNER = "gesture"
         private const val NOTE_SCROLL_EINK_OWNER = "note-scroll"
@@ -124,30 +114,26 @@ class BoardInteractionController(
         private const val INKLING_DRAG_EINK_OWNER = "inkling-drag"
         // 拖动结束的广播丢失时（Notipal 被杀等）也要退出拖动显示。
         private const val INKLING_DRAG_MAX_MS = 15_000L
-        
+
         const val GESTURE_SETTLE_MS = 600L
 
-        
         const val NOTE_SHOT_DIR = "/sdcard/EXPORT/mosaic/shots"
         private const val TAG_SHOT = "MosaicNoteShot"
-        
+
         private const val NOTE_SHOT_FOCUS_RETRY_MS = 120L
         private const val NOTE_SHOT_FOCUS_RETRIES = 20
-        
+
         private const val NOTE_SHOT_MAX_SCREEN_FRACTION = 0.9f
 
-        
         private const val EDGE_SWIPE_START_DP = 32f
-        
+
         private const val EDGE_SWIPE_ZONE_DP = 72f
-        
+
         private const val RECOGNIZE_CARD_MIN_DP = 120f
         private val FONT_LEVELS = floatArrayOf(0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1f, 1.15f, 1.3f, 1.5f, 1.75f, 2f, 2.5f, 3f, 4f, 5f, 6f)
 
-        
         const val NOTE_CARD_BOARD_WIDTH = 450f
 
-        
         fun noteCardBoardSize(contentHeight: Float, cardWidth: Float = NOTE_CARD_BOARD_WIDTH, out: FloatArray, header: String = "") {
             val width = cardWidth.coerceAtLeast(BoardGeometry.MIN_CARD_SIZE)
             val headerH = BoardContentView.noteHeaderHeight(header) * width / ScrollingDocument.WIDTH
@@ -172,7 +158,7 @@ class BoardInteractionController(
         host.cancelGrayRestore(reason)
         cardCleanupQueued = false
         cardCleanup.cancel(reason)
-        if (reason in listOf("surface-change", "detach", "size-change", "lab-switch", "manual-refresh")) {
+        if (reason in listOf("surface-change", "detach", "size-change", "manual-refresh")) {
             cardCleanupBacklog.clear()
             cardCleanupTicket = null
         } else if (!cardCleanupBacklog.isEmpty) {
@@ -182,13 +168,13 @@ class BoardInteractionController(
 
     fun resumeCardCleanup(reason: String) {
         if (cardCleanupBacklog.isEmpty || cardCleanupQueued || cardCleanup.phase != "idle" ||
-            !surface.showsBoardChrome || host.isEinkLabOpen || !content.isAttachedToWindow || !content.isShown ||
+            !surface.showsBoardChrome || !content.isAttachedToWindow || !content.isShown ||
             content.holdPaint || chrome.blocksPen || penContact || fingers.isNotEmpty() || sliderTwoDown ||
             presentation.state.movingCards) return
         queueCardCleanup("resume:$reason", 0L)
     }
     private val density: Float get() = host.resources.displayMetrics.density.coerceAtLeast(1f)
-    
+
     private val clipboardIo = ClipboardStrokeIo()
     private val clipboardPasteGeneration = AtomicLong(0L)
     private val clipboardExportGeneration = AtomicLong(0L)
@@ -196,42 +182,38 @@ class BoardInteractionController(
 
     private val edgeSwipeStartPx: Float get() = EDGE_SWIPE_START_DP * density
     private val edgeSwipeZonePx: Float get() = EDGE_SWIPE_ZONE_DP * density
-    
+
     private class PendingRecognition(val rect: RectF, val strokeIds: List<String>)
     private var pendingRecognition: PendingRecognition? = null
-
-    
 
     private val arbiter = ToolArbiter()
     var settings: GestureSettings.Resolved = GestureSettings.Resolved.DEFAULT
         private set
     private var history = BoardHistory()
 
-    
-
     private val whiteboard = WhiteboardSurface(emitter) { host.armCloseWatchdog("board-close", noteShotSessionActive) }
-    
+
     private var surface: BoardSurface = whiteboard
-    
+
     private var surfaceSwitching = false
     private val noteController = NoteController()
     private var notesDirectory: String = ""
-    
+
     private class SuspendedBoard(val scene: BoardEngine.SceneSnapshot, val history: BoardHistory, val lasso: LassoSelection?)
     private var suspendedBoard: SuspendedBoard? = null
-    
+
     private var currentNoteHeader: String? = null
     private var currentNoteHeaderPlaceholder = false
     private var currentNoteHeaderHeight = 0f
     // View scale of the open note page; the header is laid out at screen size inside it.
     private var notePageScale = 1f
-    
+
     private var noteEntryCard: BoardEngine.CardRec? = null
-    
+
     private var noteHeaderHoverBlocked = false
     // Bottom of the zoomed-out note page in page units; infinite on the board.
     private var notePageBottom = Float.POSITIVE_INFINITY
-    
+
     private val viewportTmp = FloatArray(2)
     private val noteScrollResetTask = Runnable {
         MosaicEinkRefreshModule.resetNative(NOTE_SCROLL_EINK_OWNER)
@@ -373,13 +355,12 @@ class BoardInteractionController(
         Log.i(TAG, "pen released after scene cache reason=$reason")
     }
 
-    
     private fun enterSurface(next: BoardSurface, scene: BoardEngine.SceneSnapshot) {
         cancelCardCleanup("surface-change")
         if (surface !== next) resetNoteScrollMode()
         if (surface !== next) invalidateClipboardWork("surface:${next.name}")
         surface = next
-        
+
         NoteLinks.setActive(next.showsBoardChrome)
         BoardEngine.replaceScene(scene)
         chrome.setNoteMode(!next.showsBoardChrome)
@@ -388,9 +369,9 @@ class BoardInteractionController(
         syncNotePageFrame()
         if (next.showsBoardChrome) setNoteHeaderHoverBlocked(false)
         syncToolMirrors(arbiter.effective(), "surface:${next.name}")
-        
+
         presentation.refresh("surface:${next.name}")
-        
+
         val noteRef = if (next.showsBoardChrome) null else noteController.document?.ref
         InklingLink.setSurface(next.name, noteRef, "surface-switch")
         host.onInklingSurfaceChanged(next.name, noteRef)
@@ -399,7 +380,6 @@ class BoardInteractionController(
         Log.i(TAG, "surface entered name=${next.name}")
     }
 
-    
     private fun applyTemplateForSurface(next: BoardSurface, noteRef: String?) {
         val template = TemplateStore.board(host.context)
         val pageWidth = if (next.showsBoardChrome) 0f else ScrollingDocument.WIDTH
@@ -443,8 +423,7 @@ class BoardInteractionController(
         surfaceSwitching = true
         closeCardEditor()
         cancelActiveInteractions("note-close")
-        
-        
+
         val liveStrokes = synchronized(BoardEngine.lock) { BoardEngine.strokes.values.toList() }
         val compacted = ScrollingDocument.compact(liveStrokes)
         if (compacted.isNotEmpty() || noteController.document?.strokes?.isEmpty() != false) {
@@ -465,7 +444,7 @@ class BoardInteractionController(
                 if (card != null) {
                     val size = FloatArray(2); noteCardBoardSize(doc.contentHeight, card.width, size, BoardContentView.noteHeaderOf(card))
                     val resized = card.withRect(RectF(card.x, card.y, card.x + size[0], card.y + size[1]))
-                    
+
                     val entry = noteEntryCard?.takeIf { it.id == card.id } ?: card
                     val change = BoardHistory.Change("note-resize").card(card, resized)
                     pushCardsBelow(change, cardsBelow(entry), resized.height - entry.height)
@@ -481,22 +460,21 @@ class BoardInteractionController(
     var touchEnabled = true
         private set
 
-    
     private var eraserMode = false
     private var lassoMode = false
-    
+
     private var shapeMode = false
     private var shapeKind = Shapes.Kind.RECT
-    
+
     private var shapeSelectionPending = false
-    
+
     private var penStyle: PenStyle = PenStyle.PEN
-    
+
     private var penWidth = PenPopup.WIDTHS[PenPopup.DEFAULT_INDEX]
-    
+
     private var markerInk = MarkerInk.BLACK
     private var cardEditorOverlay: FrameLayout? = null
-    
+
     private var editorKeyboardShift = 0f
 
     fun setPenStyle(style: PenStyle, width: Float) {
@@ -513,7 +491,6 @@ class BoardInteractionController(
         host.setMarkerInk(ink, "marker-ink")
     }
 
-    
     private val selectedCardId: String?
         get() = lasso?.let { if (isSingleCardSelection(it)) it.cardIds.firstOrNull() else null }
 
@@ -526,7 +503,6 @@ class BoardInteractionController(
         }
     }
 
-    
     private fun isSingleCardSelection(sel: LassoSelection): Boolean {
         if (sel.cardIds.size != 1) return false
         if (cardResizeLocked(sel.cardIds[0])) return false
@@ -535,7 +511,6 @@ class BoardInteractionController(
         return sel.strokeIds.all { BoardEngine.strokes[it]?.cardId == id }
     }
 
-    
     private fun selectSingleCard(card: BoardEngine.CardRec) {
         val frame = card.rect(RectF()).apply { inset(-LASSO_BOUNDS_PAD, -LASSO_BOUNDS_PAD) }
         setLasso(LassoSelection(frame, listOf(card.id), emptyList()))
@@ -587,7 +562,6 @@ class BoardInteractionController(
         setLasso(LassoSelection(frame, ids, strokeIds))
     }
 
-    
     fun selectCards(ids: List<String>) {
         val cards = synchronized(BoardEngine.lock) { ids.mapNotNull { BoardEngine.cards[it] } }
         if (cards.isEmpty()) return
@@ -600,24 +574,22 @@ class BoardInteractionController(
         Log.i(TAG_LASSO, "selectCards from JS count=${cards.size}")
     }
 
-    
     private var selectBelowArmed = false
     private var selectBelowPendingRestore = false
 
     class LassoSelection(val rect: RectF, val cardIds: List<String>, val strokeIds: List<String>, val fromLasso: Boolean = false)
     private var lasso: LassoSelection? = null
 
-    
     private var penContact = false
     private var penHovering = false
     private var penHoverX = 0f
     private var penHoverY = 0f
-    
+
     private var trailWhite = false
-    
+
     private var penLastX = 0f
     private var penLastY = 0f
-    
+
     private var sliderTwoDown = false
     private var lastCardWriteId: String? = null
     private var lastCardWriteAt = 0L
@@ -633,7 +605,7 @@ class BoardInteractionController(
             val points = FloatArrayList()
             val pressures = FloatArrayList()
             var nibAngle = Float.NaN
-            
+
             var frameLastMeaningfulX = 0f
             var frameLastMeaningfulY = 0f
             var frameCandidate: RectF? = null
@@ -643,9 +615,9 @@ class BoardInteractionController(
             var continuousWrite = false
             // Set once the stroke leaves a note page; later points are dropped.
             var clipped = false
-            
+
             var convertFromIndex = -1
-            
+
             var rawMinX = Float.MAX_VALUE
             var rawMinY = Float.MAX_VALUE
             var rawMaxX = -Float.MAX_VALUE
@@ -657,14 +629,13 @@ class BoardInteractionController(
         }
 
         class Erase(val change: BoardHistory.Change) : PenSession() {
-            
             var pending = BoardHistory.Change("erase")
             val pendingIds = HashSet<String>()
         }
         class Lasso : PenSession() {
             val pointsPx = FloatArrayList()
         }
-        
+
         class Shape(val kind: Shapes.Kind, val anchorX: Float, val anchorY: Float) : PenSession() {
             var curX = anchorX
             var curY = anchorY
@@ -678,7 +649,6 @@ class BoardInteractionController(
     private var penSession: PenSession? = null
     private var penMoveSession: MoveSession? = null
 
-    
     private class Finger(val id: Int, val downX: Float, val downY: Float, val downAt: Long, val penPriority: Boolean) {
         var x = downX
         var y = downY
@@ -690,7 +660,7 @@ class BoardInteractionController(
 
     private sealed class FingerGesture {
         object Idle : FingerGesture()
-        
+
         class CardPending(val fingerId: Int, val cardId: String) : FingerGesture()
         class TwoCandidate(val a: Int, val b: Int, val startedAt: Long) : FingerGesture()
         class PanZoom(
@@ -708,7 +678,7 @@ class BoardInteractionController(
             val cleanupTrail = Region()
             var frames = 0
             var overscroll: SparseNavigation.Overscroll? = null
-            
+
             var lastCenterX = startCenterX
             var lastCenterY = startCenterY
             // In a note, the gesture locks to pan or zoom once one motion passes the slop; the board does both at once.
@@ -716,17 +686,15 @@ class BoardInteractionController(
         }
         object ScreenTool : FingerGesture()
         class Move(val fingerId: Int) : FingerGesture()
-        
+
         class SurfaceScroll(val fingerId: Int, val startY: Float, val startPanY: Float) : FingerGesture()
-        
+
         class EdgeSwipe(val fingerId: Int, val downX: Float, val downY: Float) : FingerGesture()
     }
 
     private var fingerGesture: FingerGesture = FingerGesture.Idle
     private var cardLongPressTask: Runnable? = null
 
-    
-    
     private var tapEpisodeActive = false
     private var tapEpisodeStartMs = 0L
     private var tapEpisodeMaxFingers = 0
@@ -735,12 +703,11 @@ class BoardInteractionController(
     private var tapEpisodeCy = 0f
     private val tapDownX = HashMap<Int, Float>()
     private val tapDownY = HashMap<Int, Float>()
-    
+
     private var lastTwoFingerTapMs = 0L
     private var lastTwoFingerTapX = 0f
     private var lastTwoFingerTapY = 0f
 
-    
     private sealed class MoveSession(val isPen: Boolean, val pointerId: Int, val startWorldX: Float, val startWorldY: Float) {
         var rawMoves = 0
         val startedAt = SystemClock.uptimeMillis()
@@ -748,19 +715,19 @@ class BoardInteractionController(
 
         class CardResize(isPen: Boolean, pointerId: Int, sx: Float, sy: Float, val card: BoardEngine.CardRec, val handle: BoardGeometry.Handle) : MoveSession(isPen, pointerId, sx, sy) {
             val preview = RectF()
-            
+
             val startRect = RectF()
-            
+
             var inkBounds: RectF? = null
             // A corner drag on a text card scales its text with the card; this is the scale it would get.
             var fontScale = card.fontScale
         }
-        
+
         class Selection(isPen: Boolean, pointerId: Int, sx: Float, sy: Float, val selection: LassoSelection, val cards: List<BoardEngine.CardRec>, val strokes: List<BoardEngine.StrokeRec>, val liftZ: Int?) : MoveSession(isPen, pointerId, sx, sy) {
             var dx = 0f
             var dy = 0f
         }
-        
+
         class SelectionResize(
             isPen: Boolean, pointerId: Int, sx: Float, sy: Float,
             val selection: LassoSelection,
@@ -771,7 +738,7 @@ class BoardInteractionController(
             val startRect = RectF()
             val preview = RectF()
         }
-        
+
         class SelectionRotate(
             isPen: Boolean, pointerId: Int, sx: Float, sy: Float,
             val selection: LassoSelection,
@@ -786,27 +753,22 @@ class BoardInteractionController(
 
     private var fingerMoveSession: MoveSession? = null
 
-    
     private var regionsDirty = true
     private var regions: List<SparseNavigation.Region> = emptyList()
     private var chromeUpdatePosted = false
     private var launcherPullStartY = Float.NaN
     private var panZoomArmed = false
-    
+
     private val presentation by lazy {
         BoardPresentation(handler, content, { surface.showsBoardChrome }, EINK_OWNER, GESTURE_SETTLE_MS).also {
-            
             it.onStateChanged = { if (penHovering && !penContact) reevaluateTrailColor("presentation") }
         }
     }
 
-    
     private val viewWorldRect = RectF()
     private var viewOffsetX = 0
     private var viewOffsetY = 0
     private val tmpLoc = IntArray(2)
-
-    
 
     fun attach() {
         InputRouter.sink = this
@@ -825,12 +787,11 @@ class BoardInteractionController(
         arbiter.reset()
         syncToolMirrors(arbiter.effective(), "attach")
         chrome.setTouchEnabled(touchEnabled)
-        
+
         applyTemplateForSurface(surface, if (surface.showsBoardChrome) null else noteController.document?.ref)
-        
+
         exportLassoStrokes(null)
-        
-        
+
         if (MosaicSession.savedNoteRef(host.context) != null) {
             content.setHoldPaint(true)
             host.postDelayed(releasePaintHoldTask, NOTE_RESTORE_PAINT_HOLD_MS)
@@ -862,22 +823,21 @@ class BoardInteractionController(
         releasePaintHold("detach")
         noteShotSessionActive = false
         noteShotFocusToken++
-        
+
         exportLassoStrokes(null)
         suspendedBoard?.let { suspended ->
-            
-            
+
             noteController.flush(false) { result -> result.onFailure { Log.e(TAG, "note detach save failed", it) } }
             suspendedBoard = null
             history = suspended.history
             lasso = null
-            
+
             surface = whiteboard
             BoardEngine.replaceScene(suspended.scene)
             chrome.setNoteMode(false)
             WhiteboardSceneGate.release(); noteController.clear()
         }
-        
+
         MosaicSession.saveViewport(host.context, BoardEngine.panX, BoardEngine.panY, BoardEngine.scale)
         SceneCache.save(host.context, BoardEngine.snapshotScene())
         surfaceSwitching = false
@@ -910,9 +870,7 @@ class BoardInteractionController(
         applyStylusCalibration()
     }
 
-    
     private fun applyStylusCalibration() {
-        
         DrawPathGate.stylusNearBlocks = gestureToolOf(settings.penButton) != null
         DrawPathGate.sliderToolSide = if (gestureToolOf(settings.slidebarGesture) != null) settings.sliderSide else 0
         host.setStylusCalibration(settings.calibX, settings.calibY, settings.leftHand)
@@ -926,11 +884,9 @@ class BoardInteractionController(
         if (!fromJs) emitter.action("touchEnabled") { putBoolean("value", enabled) }
     }
 
-    
     fun onSceneOrViewportChanged(reason: String) {
         if (reason == "scene") regionsDirty = true
-        
-        
+
         if (reason == "viewport" && viewportGestureActive()) return
         scheduleChromeUpdate()
     }
@@ -938,18 +894,14 @@ class BoardInteractionController(
     private fun viewportGestureActive(): Boolean =
         fingerGesture is FingerGesture.PanZoom || fingerGesture is FingerGesture.SurfaceScroll
 
-    
     fun onDocumentReplaced() {
         history.clear()
         setLasso(null)
-        
-        
-        
+
         content.requestInitialRaster()
         regionsDirty = true
         scheduleChromeUpdate()
-        
-        
+
         val board = suspendedBoard?.scene
         emitter.begin()
         if (board != null) emitter.viewport(board.panX, board.panY, board.scale)
@@ -958,18 +910,14 @@ class BoardInteractionController(
         restoreSessionNote()
     }
 
-    
-
     private fun worldX(px: Float): Float = (px / density - BoardEngine.panX) / BoardEngine.scale
     private fun worldY(px: Float): Float = (px / density - BoardEngine.panY) / BoardEngine.scale
 
-    
     private fun isOnDarkCard(wx: Float, wy: Float): Boolean =
         InkBackdrop.darkAt(wx, wy)
     private fun screenX(world: Float): Float = (world * BoardEngine.scale + BoardEngine.panX) * density
     private fun screenY(world: Float): Float = (world * BoardEngine.scale + BoardEngine.panY) * density
 
-    
     private fun penX(e: MotionEvent): Float = e.x + InkAlign.offsetX
     private fun penY(e: MotionEvent): Float = e.y + InkAlign.offsetY
     private fun penHistX(e: MotionEvent, i: Int): Float = e.getHistoricalX(i) + InkAlign.offsetX
@@ -991,11 +939,9 @@ class BoardInteractionController(
         viewOffsetY = tmpLoc[1]
     }
 
-    
     private fun inklingToolbarHit(viewX: Float, viewY: Float): Boolean =
         InklingLink.consumesScreenPoint(viewX + viewOffsetX, viewY + viewOffsetY)
 
-    
     fun closeForInkling() {
         if (surfaceSwitching) return
         if (suspendedBoard == null) {
@@ -1023,10 +969,6 @@ class BoardInteractionController(
         }
     }
 
-    
-
-    
-    
     private fun apply(change: BoardHistory.Change, record: Boolean, forward: Boolean = true, reconcileInk: Boolean = forward) {
         if (change.isEmpty) return
         val emitCommands = surface.emitsCommands
@@ -1051,13 +993,11 @@ class BoardInteractionController(
         syncNotePageFrame()
         regionsDirty = true
         scheduleChromeUpdate()
-        
+
         if (penHovering && !penContact) reevaluateTrailColor(if (inkFixed) "ink-reconciled" else "scene:${change.label}")
     }
 
     private fun applyDiffs(diffs: List<BoardHistory.Diff>, forward: Boolean, emitCommands: Boolean) {
-        
-        
         val commands = if (emitCommands) ArrayList<() -> Unit>() else null
         val pendingUpserts = ArrayList<BoardEngine.StrokeRec>()
         val pendingRemovals = ArrayList<String>()
@@ -1161,18 +1101,16 @@ class BoardInteractionController(
     private fun commitViewport(panX: Float, panY: Float, scale: Float) {
         BoardEngine.setViewport(panX, panY, scale)
         surface.onViewportCommitted(panX, panY, scale)
-        
+
         if (surface.showsBoardChrome) MosaicSession.saveViewport(host.context, panX, panY, scale)
         scheduleChromeUpdate()
     }
-
-    
 
     private fun applyTransition(t: ToolArbiter.Transition?, source: String) {
         if (t == null) return
         Log.i(TAG_TOOL, "$source ${t.reason} ${t.before}->${t.after} keepSelection=${t.keepSelection} ${arbiter.describe()}")
         if (!t.changed) return
-        
+
         val previous = penSession
         var discardedWrite: PenSession.Write? = null
         when (previous) {
@@ -1184,16 +1122,14 @@ class BoardInteractionController(
         }
         if (!t.after.lasso && !t.after.shape && !t.keepSelection) setLasso(null)
         syncToolMirrors(t.after, source)
-        
+
         discardedWrite?.let { discardWriteTrail(it, "tool-change:$source") }
-        
-        
+
         if (penContact && previous != null && previous !== PenSession.Consumed) {
             beginContactSession(t.after, discardedWrite, source)
         }
     }
 
-    
     private fun beginContactSession(state: ToolArbiter.State, prevWrite: PenSession.Write?, source: String) {
         val wx = worldX(penLastX)
         val wy = worldY(penLastY)
@@ -1225,7 +1161,6 @@ class BoardInteractionController(
                 Log.i(TAG_PEN, "contact converted to shape source=$source")
             }
             else -> {
-                
                 if (lasso != null) { penSession = PenSession.Consumed; return }
                 val card = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
                 val connection = if (card == null) BoardEngine.connectionAt(wx, wy) else null
@@ -1251,7 +1186,6 @@ class BoardInteractionController(
         }
     }
 
-    
     private fun discardWriteTrail(s: PenSession.Write, reason: String) {
         if (s.points.size < 4) return
         host.onPenTrailDiscarded(reason)
@@ -1261,29 +1195,19 @@ class BoardInteractionController(
         eraserMode = state.eraser
         lassoMode = state.lasso
         shapeMode = state.shape
-        
-        
+
         val showLasso = selectBelowPendingRestore || (lasso != null && !state.eraser)
         chrome.setInkTool(state.eraser && !showLasso, state.lasso || showLasso, state.shape && !showLasso)
         chrome.setCurrentShape(if (shapeMode) shapeKind else null)
-        
-        
+
         host.toolLassoActive = lassoMode || shapeMode
-        
-        
-        
-        
+
         host.inkEnabled = !eraserMode && !lassoMode && lasso == null && !chrome.blocksPen && !selectBelowArmed
-        
+
         host.shapeDrag = shapeMode
-        
+
         host.lassoEnabled = (lassoMode || shapeMode) && lasso == null && !chrome.blocksPen && !selectBelowArmed
-        
-        
-        
-        
-        
-        
+
         presentation.set(BoardPresentation.Reason.TOOL, eraserMode)
         // 只在套索工具下用 auto；选中后静止时交还宿主刷新，长按拖卡片和拖边改尺寸都只在拖动时切一次。
         presentation.set(BoardPresentation.Reason.LASSO, lassoMode)
@@ -1297,11 +1221,6 @@ class BoardInteractionController(
         GestureSettings.GestureTool.OFF -> null
     }
 
-    
-
-    
-
-    
     fun preflightPenButtonState() {
         val rawHover = InputReader.isPenHovering()
         val rawRubber = InputReader.isPenRubberActive()
@@ -1320,9 +1239,7 @@ class BoardInteractionController(
         }
     }
 
-    
     fun onPen(event: MotionEvent) {
-        if (host.isEinkLabOpen) return
         if (event.actionMasked == MotionEvent.ACTION_DOWN) cancelCardCleanup("pen-down")
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> penDown(event)
@@ -1334,7 +1251,6 @@ class BoardInteractionController(
     }
 
     fun onPenHover(event: MotionEvent) {
-        if (host.isEinkLabOpen) return
         val exit = event.actionMasked == MotionEvent.ACTION_HOVER_EXIT
         penHoverX = penX(event)
         penHoverY = penY(event)
@@ -1346,11 +1262,10 @@ class BoardInteractionController(
         setNoteHeaderHoverBlocked(noteHeaderHit(penHoverX, penHoverY) || noteOffPageHit(penHoverX, penHoverY))
         if (eraserMode) {
         }
-        
+
         reevaluateTrailColor("hover")
     }
 
-    
     private fun reevaluateTrailColor(reason: String) {
         val want = trailWantsWhite(worldX(penHoverX), worldY(penHoverY))
         if (want == trailWhite) return
@@ -1358,12 +1273,9 @@ class BoardInteractionController(
         host.setTrailWhite(want, "$reason:$trailCause")
     }
 
-    
     private var trailCause = "none"
 
     private fun trailWantsWhite(wx: Float, wy: Float): Boolean {
-        
-        
         trailCause = "none"
         if (penStyle == PenStyle.MARKER) return false
         val top = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
@@ -1377,14 +1289,12 @@ class BoardInteractionController(
         return InkBackdrop.darkAt(wx, wy)
     }
 
-
     private fun penDown(e: MotionEvent) {
         val x = penX(e)
         val y = penY(e)
         penLastX = x
         penLastY = y
-        
-        
+
         when (fingerGesture) {
             FingerGesture.ScreenTool -> {}
             is FingerGesture.TwoCandidate -> {
@@ -1421,26 +1331,22 @@ class BoardInteractionController(
                 "${arbiter.describe()} | ${InputReader.describePenRaw()} density=$density " +
                 "pan=(${BoardEngine.panX},${BoardEngine.panY}) scale=${BoardEngine.scale}",
         )
-        
+
         val downCard = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
         val downLayer = if (downCard != null) InkBackdrop.layerAt("card:${downCard.id}", wx - downCard.x, wy - downCard.y, penWidth * 0.5f)
             else InkBackdrop.layerAt("canvas", wx, wy, penWidth * 0.5f)
         Log.i(TAG_PEN, "[MosaicTrail] down trailWhite=$trailWhite cause=$trailCause layer=${downLayer ?: "none"} card=${downCard?.id ?: "canvas"} dark=${downCard?.colored == true}")
 
-        
         if (selectBelowArmed) {
             handleSelectBelow(wy)
             penSession = PenSession.Consumed
             return
         }
 
-        
         val currentLasso = lasso
-        
-        
+
         val hadSelection = currentLasso != null
         if (currentLasso != null && BoardEngine.connectionAt(wx, wy) == null) {
-            
             val single = if (isSingleCardSelection(currentLasso)) BoardEngine.cards[currentLasso.cardIds[0]] else null
             if (single != null) {
                 val handle = singleCardFrameHandle(currentLasso, wx, wy)
@@ -1450,13 +1356,13 @@ class BoardInteractionController(
                     return
                 }
             }
-            
+
             if (overlay.rotateHandleHit(x, y, LASSO_ACTION_TAP_SLOP_DP * density) && selectionRotatable(currentLasso)) {
                 penMoveSession = beginSelectionRotate(true, e.getPointerId(0), wx, wy, currentLasso)
                 penSession = PenSession.Consumed
                 return
             }
-            
+
             val cornerHandle = selectionCornerHandle(currentLasso, wx, wy)
                 ?: (if (shapeKindOf(currentLasso) != null) shapeEdgeHandle(currentLasso, wx, wy) else null)
             if (cornerHandle != null) {
@@ -1470,8 +1376,7 @@ class BoardInteractionController(
                 penSession = PenSession.Consumed
                 return
             }
-            
-            
+
             if (selectionHit(currentLasso, wx, wy) || overlay.moveHandleHit(x, y, LASSO_ACTION_TAP_SLOP_DP * density)) {
                 penMoveSession = beginSelectionMove(true, e.getPointerId(0), wx, wy, currentLasso)
                 penSession = PenSession.Consumed
@@ -1548,7 +1453,7 @@ class BoardInteractionController(
         session.frameLastMeaningfulY = wy
         session.continuousWrite = card != null && card.id == lastCardWriteId &&
             SystemClock.uptimeMillis() - lastCardWriteAt < CARD_CONTINUOUS_WRITE_MS
-        
+
         if (sliderTwoDown) session.convertFromIndex = 0
         penSession = session
     }
@@ -1622,7 +1527,6 @@ class BoardInteractionController(
         }
     }
 
-    
     private fun shapePreviewPath(s: PenSession.Shape): Path {
         val pts = Shapes.fromDrag(s.kind, s.anchorX, s.anchorY, s.curX, s.curY)
         return BoardEngine.buildPolylinePath(pts)
@@ -1660,7 +1564,6 @@ class BoardInteractionController(
                     }
                     overlay.hideFramePreview()
                     if (candidate != null) {
-                        
                         discardWriteTrail(s, "card-frame")
                         createCardFromFrame(candidate)
                         Log.i(TAG_PEN, "UP consumed as card frame")
@@ -1684,9 +1587,7 @@ class BoardInteractionController(
                     overlay.hideShapePreview()
                     if (!cancelled) {
                         s.curX = penX(e); s.curY = penY(e)
-                        
-                        
-                        
+
                         if (finalizeShape(s) && arbiter.hasOverride(ToolArbiter.Source.SHAPE)) {
                             shapeSelectionPending = true
                             applyTransition(
@@ -1720,7 +1621,6 @@ class BoardInteractionController(
         }
     }
 
-    
     private fun reportStrokeForAlignment(s: PenSession.Write) {
         if (s.rawMinX > s.rawMaxX) return
         refreshViewOffset()
@@ -1732,8 +1632,7 @@ class BoardInteractionController(
 
     private fun commitStroke(s: PenSession.Write) {
         if (s.points.size < 2) return
-        
-        
+
         val marker = penStyle == PenStyle.MARKER
         val draft = BoardEngine.StrokeRec(
             s.id,
@@ -1771,22 +1670,17 @@ class BoardInteractionController(
         Log.i(TAG_PEN, "UP committed stroke ${s.id} style=${penStyle.name} stdWidth=$penWidth drawPathWidth=$committedDrawPathWidth pressureRange=$minPressure..$maxPressure rasterWorldRange=$minRasterWidth..$maxRasterWidth rasterScreenPxRange=$screenMin..$screenMax nibAngle=${rec.nibAngle} points=${s.points.size / 2} space=${s.space} ink=${Integer.toHexString(ink)}")
     }
 
-    
-
     private val hitBuffer = ArrayList<BoardEngine.StrokeRec>()
 
-    
     private fun eraseAt(session: PenSession.Erase, wx: Float, wy: Float) {
         hitBuffer.clear()
                 synchronized(BoardEngine.lock) { BoardEngine.hitTestStrokes(wx, wy, ERASER_HIT_RADIUS / BoardEngine.scale, hitBuffer) }
         if (hitBuffer.isEmpty()) return
         for (rec in hitBuffer) {
-            
             if (session.pendingIds.add(rec.id)) session.pending.stroke(rec, null)
         }
     }
 
-    
     private fun flushErase(session: PenSession.Erase) {
         val step = session.pending
         if (step.isEmpty) return
@@ -1803,8 +1697,6 @@ class BoardInteractionController(
             Log.i(TAG_PEN, "erased ${session.change.diffs.size} strokes")
         }
     }
-
-    
 
     private var frameHoldTask: Runnable? = null
 
@@ -1851,7 +1743,7 @@ class BoardInteractionController(
         val rect = BoardGeometry.cardRectFromFrame(frame)
         val created = BoardEngine.CardRec(newId("card-"), rect.left, rect.top, rect.width(), rect.height(), BoardGeometry.nextZIndex(BoardEngine.cards.values))
         val change = BoardHistory.Change("card-frame").card(null, created)
-        
+
         val candidates = ArrayList<BoardEngine.StrokeRec>()
         synchronized(BoardEngine.lock) { BoardEngine.queryCanvasStrokes(rect, candidates) }
         var captured = 0
@@ -1916,7 +1808,6 @@ class BoardInteractionController(
         return true
     }
 
-    
     private fun strokeCoverage(stroke: BoardEngine.StrokeRec, rect: RectF): Float {
         val pts = stroke.points
         val n = pts.size / 2
@@ -1929,8 +1820,6 @@ class BoardInteractionController(
         }
         return inside.toFloat() / n
     }
-
-    
 
     // Grows a text card to take in a stroke written past its edge; the card keeps its strokes in place on the board.
     private fun growCardForStroke(rec: BoardEngine.StrokeRec): BoardHistory.Change? = synchronized(BoardEngine.lock) {
@@ -1989,11 +1878,9 @@ class BoardInteractionController(
         } else if (BoardEngine.connectionBetween(sourceId, target.id) != null || BoardEngine.threadBetween(sourceId, target.id) != null) {
             return false
         }
-        
+
         onRecognized(if (target != null) "card-connection" else "card-from-stroke")
         if (target != null) {
-            
-            
             if (!BoardGeometry.canConnect(source, target)) {
                 Log.i(TAG_PEN, "card thread rejected source=$sourceId target=${target.id} reason=color-mismatch")
                 return true
@@ -2007,7 +1894,7 @@ class BoardInteractionController(
             return true
         }
         val rect = BoardGeometry.cardFromStrokeRect(source, endX, endY)
-        
+
         val created = BoardEngine.CardRec(
             newId("card-"), rect.left, rect.top, rect.width(), rect.height(), BoardGeometry.nextZIndex(BoardEngine.cards.values),
             bgColor = source.bgColor, textColor = source.textColor,
@@ -2020,8 +1907,6 @@ class BoardInteractionController(
         )
         return true
     }
-
-    
 
     private fun finalizeLasso(s: PenSession.Lasso) {
         val pts = s.pointsPx
@@ -2058,7 +1943,6 @@ class BoardInteractionController(
         setLasso(selection)
     }
 
-    
     // LASSO_BOUNDS_PAD is world units on the board; above 100% (an open note) it stays the same on screen.
     private fun lassoPadWorld(): Float = LASSO_BOUNDS_PAD / BoardEngine.scale.coerceAtLeast(1f)
 
@@ -2084,7 +1968,6 @@ class BoardInteractionController(
         return out
     }
 
-    
     private fun selectInRect(rect: RectF): LassoSelection? {
         val cardIds = ArrayList<String>()
         val strokeIds = ArrayList<String>()
@@ -2095,7 +1978,7 @@ class BoardInteractionController(
 
             val inside = ArrayList<BoardEngine.StrokeRec>()
             BoardEngine.canvasStrokesInside(rect, inside)
-            
+
             for (s in BoardEngine.strokes.values) {
                 val cardId = s.cardId ?: continue
                 if (cardId in wholeCards || !BoardEngine.cards.containsKey(cardId)) continue
@@ -2136,7 +2019,6 @@ class BoardInteractionController(
         return LassoSelection(rect, cardIds, strokeIds)
     }
 
-    
     private fun partialInkIn(rect: RectF, out: MutableList<String>) {
         val candidates = ArrayList<BoardEngine.StrokeRec>()
         BoardEngine.queryCanvasStrokes(rect, candidates)
@@ -2157,11 +2039,9 @@ class BoardInteractionController(
         }
     }
 
-    
     private fun isClosedShape(s: BoardEngine.StrokeRec): Boolean =
         s.isShape && Shapes.kindOf(s).let { it != null && it != Shapes.Kind.LINE }
 
-    
     private fun shapeTouchesRect(shape: BoardEngine.StrokeRec, worldRect: RectF): Boolean {
         val card = shape.cardId?.let { BoardEngine.cards[it] }
         val local = RectF(worldRect)
@@ -2171,7 +2051,6 @@ class BoardInteractionController(
         return probe.op(shape.path, Path.Op.INTERSECT) && !probe.isEmpty
     }
 
-    
     private fun inkOnShape(ink: BoardEngine.StrokeRec, shape: BoardEngine.StrokeRec): Boolean {
         if (ink.id == shape.id || ink.space != shape.space || !shape.bounds.contains(ink.bounds)) return false
         val b = RectF(ink.bounds).apply { inset(-0.01f, -0.01f) }
@@ -2183,8 +2062,7 @@ class BoardInteractionController(
 
     private fun setLasso(requested: LassoSelection?) {
         val next = requested?.let(::expandBoundSelection)
-        
-        
+
         if (next == null && selectBelowPendingRestore) {
             selectBelowPendingRestore = false
             Log.i(TAG_LASSO, "select-below selection cleared -> toolbar back to ${arbiter.describe()}")
@@ -2200,11 +2078,6 @@ class BoardInteractionController(
         refreshHostToolFlags()
         scheduleChromeUpdate()
         if (next == null) {
-            
-            
-            
-            
-            
             handler.postDelayed({
                 if (lasso == null && !penContact && !lassoMode) {
                     presentation.release(BoardPresentation.Reason.LASSO, linger = false)
@@ -2214,8 +2087,6 @@ class BoardInteractionController(
             }, 700L)
         }
         if (next != null) {
-            
-            
             handler.post {
                 if (!penContact) {
                     refreshHostToolFlags()
@@ -2228,7 +2099,6 @@ class BoardInteractionController(
         }
     }
 
-    
     private fun selectionIds(): List<String> {
         val sel = lasso ?: return emptyList()
         return if (isSingleCardSelection(sel)) emptyList() else sel.cardIds.toList()
@@ -2245,24 +2115,22 @@ class BoardInteractionController(
         val shapeKind = shapeKindOf(current)
         val selectedShape = shapeStrokeOf(current)
         val shapeFilled = selectedShape?.penStyle == PenStyle.FILLED_SHAPE.objType
-        
-        
+
         val kind = if (singleCard) BoardEngine.cards[current.cardIds[0]]?.kind else null
         val baseTypes = when {
-            
             singleCard && kind == "image" -> listOf("trash")
             singleCard && kind == "note" -> listOf("trash", "edit-text")
             singleCard && kind == "text" -> listOf("trash", "note", "black", "edit-text")
             singleCard -> listOf("trash", "note", "black")
             shapeKind != null -> listOf("trash") + shapeActionTypes(shapeKind, shapeFilled)
-            
+
             isPureInkSelection(current) -> listOf("trash", "recognize")
             else -> listOf("trash")
         }
-        
+
         val actions = baseTypes + "copy"
         val types = if (canInsertIntoHostNote(current)) actions + "shot" else actions
-        
+
         val onDark = singleCard &&
             (BoardEngine.cards[current.cardIds[0]]?.colored == true)
         overlay.topInsetPx = chrome.toolbarHeightPx().toFloat()
@@ -2273,7 +2141,6 @@ class BoardInteractionController(
             horizontalEdgesOnly = kind == "note")
     }
 
-    
     private fun shapeKindOf(sel: LassoSelection): Shapes.Kind? {
         if (sel.cardIds.isNotEmpty()) return null
         val stroke = shapeStrokeOf(sel) ?: return null
@@ -2294,7 +2161,6 @@ class BoardInteractionController(
         }
     }
 
-    
     private fun isPureInkSelection(sel: LassoSelection): Boolean {
         if (sel.cardIds.isNotEmpty() || sel.strokeIds.isEmpty()) return false
         return synchronized(BoardEngine.lock) {
@@ -2306,11 +2172,9 @@ class BoardInteractionController(
         }
     }
 
-    
     private fun selectionRotatable(sel: LassoSelection): Boolean =
         sel.strokeIds.isNotEmpty() && sel.cardIds.isEmpty()
 
-    
     private fun lassoActionRects(frame: RectF, types: List<String>): List<Pair<RectF, String>> {
         val d = density
         val size = InteractionOverlayView.LASSO_ACTION_SIZE_DP * d
@@ -2382,17 +2246,13 @@ class BoardInteractionController(
         val stroke = shapeStrokeOf(sel) ?: return
         val style = if (filled) PenStyle.FILLED_SHAPE else PenStyle.PEN
         if (stroke.penStyle == style.objType) return
-        
+
         val change = BoardHistory.Change(if (filled) "shape-fill" else "shape-hollow")
             .stroke(stroke, stroke.withPenStyle(style))
         apply(change, record = true)
         updateLassoOverlay()
     }
 
-    
-
-    
-    
     private fun finalizeShape(s: PenSession.Shape): Boolean {
         val dragPx = hypot(s.curX - s.anchorX, s.curY - s.anchorY)
         if (dragPx < SHAPE_MIN_DRAG_DP * density) {
@@ -2406,7 +2266,7 @@ class BoardInteractionController(
             var i = 0
             while (i < shape.size) { shape[i] -= card.x; shape[i + 1] -= card.y; i += 2 }
         }
-        
+
         val rec = BoardEngine.StrokeRec(
             newId("shape-"), if (card != null) "card:${card.id}" else
                 BoardEngine.connectionAt(ax, ay)?.let { "connection:${it.id}" } ?: "canvas", penWidth, INK_BLACK,
@@ -2420,7 +2280,6 @@ class BoardInteractionController(
         return true
     }
 
-    
     private fun selectStroke(rec: BoardEngine.StrokeRec) {
         val frame = synchronized(BoardEngine.lock) { RectF(BoardEngine.strokeInkBounds(rec)) }
         val pad = lassoPadWorld()
@@ -2428,7 +2287,6 @@ class BoardInteractionController(
         setLasso(LassoSelection(frame, emptyList(), listOf(rec.id)))
     }
 
-    
     private fun convertShape(action: String, transform: (FloatArray) -> FloatArray) {
         val sel = lasso ?: return
         val kind = shapeKindOf(sel) ?: return
@@ -2486,7 +2344,6 @@ class BoardInteractionController(
         Log.i(TAG_LASSO, "deleted strokes=${sel.strokeIds.size} cards=${sel.cardIds.size}")
     }
 
-    
     fun clearLassoForInkling(delete: Boolean) {
         if (!InklingLink.isInkSurface()) {
             Log.i(TAG_LASSO, "inkling clear-selection deferred surface=${InklingLink.currentSurface()} delete=$delete")
@@ -2506,7 +2363,6 @@ class BoardInteractionController(
         Log.i(TAG_LASSO, "inkling clear-selection delete=$delete strokes=${sel.strokeIds.size} cards=${sel.cardIds.size}")
     }
 
-    
     fun insertTextCardFromInkling(text: String, anchorScreenX: Int, anchorScreenY: Int) {
         if (!InklingLink.isBoardSurface()) {
             Log.i(TAG, "inkling text-card deferred surface=${InklingLink.currentSurface()}")
@@ -2518,7 +2374,6 @@ class BoardInteractionController(
         emitImportedTextCard(TextReflow.reflow(text), wx, wy, "inkling", centered = false)
     }
 
-    
     fun insertDocTextCard(text: String) {
         if (!surface.showsBoardChrome) {
             Log.i(TAG, "doc text-card ignored surface=${surface.name}")
@@ -2528,7 +2383,6 @@ class BoardInteractionController(
         emitImportedTextCard(TextReflow.reflow(text), view.centerX(), view.centerY(), "doc", centered = true)
     }
 
-    
     fun importNoteCard(path: String, title: String, done: (Result<Boolean>) -> Unit) {
         if (!surface.showsBoardChrome || suspendedBoard != null || surfaceSwitching || notesDirectory.isBlank()) {
             Log.i(TAG, "note import deferred surface=${surface.name}")
@@ -2577,7 +2431,6 @@ class BoardInteractionController(
         }
     }
 
-    
     private fun emitImportedTextCard(text: String, x: Float, y: Float, source: String, centered: Boolean) {
         if (text.isBlank()) return
         var size = BoardContentView.measureTextCardSize(text, IMPORT_CARD_WIDTHS[0])
@@ -2598,13 +2451,12 @@ class BoardInteractionController(
         Log.i(TAG, "imported text card source=$source at world=($left,$top) size=${size.x}x${size.y} len=${text.length}")
     }
 
-    
     private fun normalizeColoredCardToDefault(card: BoardEngine.CardRec): BoardHistory.Change? {
         if (!card.colored) return null
         val next = card.withColors("", "")
         val change = BoardHistory.Change("card-normalize")
         change.card(card, next)
-        
+
         reconcileConnectionsForColor(next, change)
         return change
     }
@@ -2617,13 +2469,12 @@ class BoardInteractionController(
         val newText = if (isBlack) "" else "#ffffff"
         val moved = card.withColors(newBg, newText)
         val change = BoardHistory.Change("card-color").card(card, moved)
-        
+
         val relinked = reconcileConnectionsForColor(moved, change)
         apply(change, record = true)
         Log.i(TAG, "toggle card black id=${card.id} wasBlack=$isBlack connections=$relinked")
     }
 
-    
     private fun reconcileConnectionsForColor(next: BoardEngine.CardRec, change: BoardHistory.Change): String {
         var removed = 0
         var added = 0
@@ -2651,10 +2502,6 @@ class BoardInteractionController(
         return "-$removed/+$added"
     }
 
-    
-
-    
-    
     private fun invalidateClipboardWork(reason: String) {
         val pasteGeneration = clipboardPasteGeneration.incrementAndGet()
         clipboardPasteTask?.cancel(true)
@@ -2727,8 +2574,7 @@ class BoardInteractionController(
             return
         }
         val out = LinkedHashMap<String, ClipboardStrokeIo.ExportStroke>()
-        
-        
+
         synchronized(BoardEngine.lock) {
             for (id in sel.strokeIds) {
                 val rec = BoardEngine.strokes[id] ?: continue
@@ -2782,7 +2628,6 @@ class BoardInteractionController(
         }
     }
 
-    
     fun handlePasteStrokes() {
         if (!InklingLink.isInkSurface()) {
             Log.i(TAG_LASSO, "paste deferred surface=${InklingLink.currentSurface()}")
@@ -2794,11 +2639,10 @@ class BoardInteractionController(
         val viewCx = (host.width / density / 2f - BoardEngine.panX) / BoardEngine.scale
         val viewCy = (host.height / density / 2f - BoardEngine.panY) / BoardEngine.scale
         val d = density
-        
-        
+
         // Clipboard dimensions use the fixed board scale; note pages have their intrinsic view scale.
         val worldScale = 1f / (d * if (surface.showsBoardChrome) 1f else notePageScale)
-        
+
         val metrics = host.resources.displayMetrics
         val transform = ClipboardStrokeIo.PasteTransform(
             viewCx, viewCy, 0f, 0f, worldScale, 1f / worldScale,
@@ -2823,8 +2667,7 @@ class BoardInteractionController(
                         stroke.contourOffsets,
                     )
                 }
-                
-                
+
                 val darkGrayMarkers = recs.filter {
                     it.penStyle == PenStyle.MARKER.objType && MarkerInk.fromArgb(it.color) == MarkerInk.DARK_GRAY
                 }
@@ -2838,7 +2681,7 @@ class BoardInteractionController(
                 }
                 if (pastedIds.isEmpty()) return@post
                 apply(change, record = true)
-                
+
                 selectPastedStrokes(pastedIds)
                 content.postInvalidateOnAnimation()
                 host.invalidate()
@@ -2852,7 +2695,6 @@ class BoardInteractionController(
         }
     }
 
-    
     private fun selectPastedStrokes(ids: List<String>) {
         if (ids.isEmpty()) return
         val frame = RectF()
@@ -2870,7 +2712,6 @@ class BoardInteractionController(
         setLasso(LassoSelection(frame, emptyList(), ids.toList()))
     }
 
-    
     private fun collectCardRemoval(cardId: String, change: BoardHistory.Change) {
         val card = BoardEngine.cards[cardId] ?: return
         BoardEngine.cardStrokes[cardId]?.forEach { change.stroke(it, null) }
@@ -2884,10 +2725,6 @@ class BoardInteractionController(
         for (c in conns) change.connection(c, null)
         change.card(card, null)
     }
-
-    
-
-    
 
     private fun beginResize(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, card: BoardEngine.CardRec, handle: BoardGeometry.Handle): MoveSession.CardResize {
         // 与套索拖动笔迹相同：拖动期间停掉系统笔迹服务，只由 Mosaic 画预览。
@@ -2911,7 +2748,6 @@ class BoardInteractionController(
         return session
     }
 
-    
     private fun attachedInkWorldBounds(cardId: String): RectF? {
         var out: RectF? = null
         synchronized(BoardEngine.lock) {
@@ -2923,7 +2759,6 @@ class BoardInteractionController(
         return out
     }
 
-    
     private fun computeResizePreview(m: MoveSession.CardResize, wx: Float, wy: Float) {
         if (m.handle.isCorner && isTextCard(m.card)) { computeTextScalePreview(m, wx, wy); return }
         when {
@@ -2979,7 +2814,6 @@ class BoardInteractionController(
         CardSizeConstraints.constrainRect(m.card.withFontScale(m.fontScale), m.preview, m.handle, proportional = true)
     }
 
-    
     private fun refreshSingleCardFrame() {
         val sel = lasso ?: return
         if (!isSingleCardSelection(sel)) return
@@ -2990,20 +2824,17 @@ class BoardInteractionController(
         updateLassoOverlay()
     }
 
-    
     private fun singleCardFrameHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
         val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardEngine.scale, 0.25f)
         val kind = sel.cardIds.firstOrNull()?.let { BoardEngine.cards[it]?.kind }
         return ResizeHandles.hit(ResizeHandles.forCard(kind), sel.rect, wx, wy, radius)
     }
 
-    
     private fun shapeEdgeHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
         val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardEngine.scale, 0.25f)
         return ResizeHandles.hit(ResizeHandles.forSelection(false, true, false), sel.rect, wx, wy, radius)
     }
 
-    
     private fun selectionCornerHandle(sel: LassoSelection, wx: Float, wy: Float): BoardGeometry.Handle? {
         if (isSingleCardSelection(sel)) return null
         val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardEngine.scale, 0.25f)
@@ -3023,7 +2854,7 @@ class BoardInteractionController(
         val session = MoveSession.SelectionResize(isPen, pointerId, wx, wy, sel, handle, cards, strokes)
         session.startRect.set(sel.rect)
         session.preview.set(sel.rect)
-        
+
         val cardRects = ArrayList<RectF>()
         val inkPath = Path()
         val previewInk = ArrayList<InteractionOverlayView.PreviewInk>()
@@ -3037,7 +2868,6 @@ class BoardInteractionController(
         return session
     }
 
-    
     private fun pushSelectionResizePreview(m: MoveSession.SelectionResize) {
         val start = m.startRect
         val fx = if (start.width() > 0f) m.preview.width() / start.width() else 1f
@@ -3049,7 +2879,6 @@ class BoardInteractionController(
         overlay.updateScalePreview(fx, fy, px, py)
     }
 
-    
     private fun computeSelectionResizePreview(m: MoveSession.SelectionResize, wx: Float, wy: Float) {
         val start = m.startRect
         val handle = m.handle
@@ -3101,13 +2930,12 @@ class BoardInteractionController(
         m.preview.set(x, y, x + w, y + h)
     }
 
-    
     private fun beginSelectionRotate(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, sel: LassoSelection): MoveSession.SelectionRotate {
         host.setDrawPathSuspended(true, "lasso-selection-rotate")
         val strokes = ArrayList<BoardEngine.StrokeRec>()
         val inkPath = Path()
         val previewInk = ArrayList<InteractionOverlayView.PreviewInk>()
-        
+
         collectSelectionPreview(sel, ArrayList(), strokes, ArrayList(), inkPath, previewInk = previewInk)
         val framePx = worldRectToPx(sel.rect, RectF())
         overlay.beginMovePreview(framePx, emptyList(), inkPath, PEN_WIDTH_DP * BoardEngine.scale * density, ink = previewInk)
@@ -3118,7 +2946,6 @@ class BoardInteractionController(
         return MoveSession.SelectionRotate(isPen, pointerId, wx, wy, sel, strokes, sel.rect.centerX(), sel.rect.centerY())
     }
 
-    
     private fun rotateAngle(m: MoveSession.SelectionRotate, wx: Float, wy: Float): Float {
         var a = kotlin.math.atan2(wy - m.pivotY, wx - m.pivotX) - m.startAngle
         val twoPi = (2 * Math.PI).toFloat()
@@ -3130,7 +2957,6 @@ class BoardInteractionController(
         return if (abs(a - nearest) <= snap) nearest else a
     }
 
-    
     private fun collectSelectionPreview(
         sel: LassoSelection,
         cards: MutableList<BoardEngine.CardRec>,
@@ -3179,7 +3005,6 @@ class BoardInteractionController(
     }
 
     private fun beginSelectionMove(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, sel: LassoSelection): MoveSession.Selection {
-        
         host.setDrawPathSuspended(true, "lasso-selection-move")
         val cards = ArrayList<BoardEngine.CardRec>()
         val strokes = ArrayList<BoardEngine.StrokeRec>()
@@ -3260,7 +3085,6 @@ class BoardInteractionController(
                 host.setDrawPathSuspended(false, "lasso-selection-move-end")
                 val single = m.liftZ?.let { z -> m.cards.singleOrNull()?.let { it to z } }
                 if (single != null && (abs(dx) > 0.01f || abs(dy) > 0.01f)) {
-                    
                     val (card, z) = single
                     settleCardDrop(card, card.x + dx, card.y + dy, z)
                     refreshSingleCardFrame()
@@ -3273,13 +3097,12 @@ class BoardInteractionController(
                         movedCards[card.id] = moved
                         change.card(card, moved)
                     }
-                    
+
                     val destX = m.selection.rect.centerX() + dx
                     val destY = m.selection.rect.centerY() + dy
                     val cardsAfter = BoardEngine.cardsByZ.map { movedCards[it.id] ?: it }
                     val destination = BoardGeometry.topCardAt(cardsAfter, destX, destY)
-                    
-                    
+
                     val destInGroup = destination != null && movedCards.containsKey(destination.id)
                     for (stroke in m.strokes) {
                         if (stroke.connectionId != null) {
@@ -3287,8 +3110,7 @@ class BoardInteractionController(
                             continue
                         }
                         val sourceCard = stroke.cardId?.let { BoardEngine.cards[it] }
-                        
-                        
+
                         if (sourceCard != null && movedCards.containsKey(sourceCard.id)) continue
                         change.stroke(stroke, stroke.translated(dx, dy, sourceCard, if (destInGroup) sourceCard else destination))
                     }
@@ -3351,7 +3173,7 @@ class BoardInteractionController(
                         change.stroke(stroke, stroke.rotated(m.angle, m.pivotX, m.pivotY, card, card))
                     }
                     apply(change, record = true)
-                    
+
                     val sel = LassoSelection(m.selection.rect, m.selection.cardIds, m.selection.strokeIds, m.selection.fromLasso)
                     lasso = LassoSelection(selectionFrame(sel), sel.cardIds, sel.strokeIds, sel.fromLasso)
                     BoardEngine.mutate { setSelection(selectionIds()) }
@@ -3392,7 +3214,7 @@ class BoardInteractionController(
     }
 
     private fun recordPanZoomCleanupPosition(g: FingerGesture.PanZoom) {
-        if (!surface.showsBoardChrome || host.isEinkLabOpen) return
+        if (!surface.showsBoardChrome) return
         val bounds = Rect()
         val px = RectF()
         val strokes = ArrayList<BoardEngine.StrokeRec>()
@@ -3417,7 +3239,7 @@ class BoardInteractionController(
     }
 
     private fun scheduleCardCleanup(oldPositions: Region, reason: String) {
-        if (!surface.showsBoardChrome || host.isEinkLabOpen) return
+        if (!surface.showsBoardChrome) return
         cardCleanupBacklog.add(oldPositions)
         if (cardCleanupBacklog.isEmpty) return
         queueCardCleanup(reason, GESTURE_SETTLE_MS)
@@ -3441,7 +3263,7 @@ class BoardInteractionController(
                 cardCleanupTicket = ticket
                 cardCleanup.schedule {
                     val exposed = Region(trail)
-                    if (!surface.showsBoardChrome || host.isEinkLabOpen || chrome.blocksPen || penContact ||
+                    if (!surface.showsBoardChrome || chrome.blocksPen || penContact ||
                         fingers.isNotEmpty() || sliderTwoDown || scale != BoardEngine.scale || panX != BoardEngine.panX || panY != BoardEngine.panY) {
                         exposed.setEmpty()
                     } else {
@@ -3479,7 +3301,6 @@ class BoardInteractionController(
         presentation.release(BoardPresentation.Reason.TRANSFORM)
     }
 
-    
     // 拖动时原位置不留东西：卡片连同桥和线、选中的笔迹都从内容层拿掉，只看叠加层的预览。
     private fun hideFromTiles(cardIds: Collection<String>, strokeIds: Collection<String> = emptyList()) {
         unhideFromTiles()
@@ -3503,7 +3324,6 @@ class BoardInteractionController(
         out
     }
 
-    
     private fun settleCardDrop(card: BoardEngine.CardRec, x: Float, y: Float, liftZ: Int) {
         val snap = BoardGeometry.findSnap(BoardEngine.cardsByZ, card, x, y)
         val settled = card.moved(snap.x, snap.y).withZ(liftZ)
@@ -3515,10 +3335,7 @@ class BoardInteractionController(
         apply(change, record = true)
     }
 
-    
-
     override fun onTouch(frame: InputRouter.TouchFrame) {
-        if (host.isEinkLabOpen) return
         if (frame.action == InputRouter.ACTION_DOWN || frame.action == InputRouter.ACTION_POINTER_DOWN) cancelCardCleanup("touch-down")
         if (maybeCloseFromLauncherPull(frame)) return
         trackToolbarToggleTap(frame)
@@ -3555,7 +3372,6 @@ class BoardInteractionController(
         }
     }
 
-    
     private fun trackToolbarToggleTap(frame: InputRouter.TouchFrame) {
         val moveSlop = TWO_FINGER_TAP_MOVE_SLOP_DP * density
         when (frame.action) {
@@ -3573,7 +3389,7 @@ class BoardInteractionController(
                 if (penContact || penHovering || frame.penPriority) tapEpisodeMoved = true
                 val i = frame.actionIndex
                 tapDownX[frame.ids[i]] = frame.xs[i]; tapDownY[frame.ids[i]] = frame.ys[i]
-                
+
                 if (frame.count == 2) {
                     tapEpisodeCx = (frame.xs[0] + frame.xs[1]) / 2f
                     tapEpisodeCy = (frame.ys[0] + frame.ys[1]) / 2f
@@ -3588,7 +3404,6 @@ class BoardInteractionController(
                 }
             }
             InputRouter.ACTION_POINTER_UP -> {
-                
             }
             InputRouter.ACTION_UP -> {
                 if (tapEpisodeActive) {
@@ -3626,15 +3441,14 @@ class BoardInteractionController(
             Log.i(TAG_FINGER, "DOWN id=$id ignored: chrome")
             return
         }
-        
-        
+
         if (inklingToolbarHit(x, y)) {
             Log.i(TAG_FINGER, "DOWN id=$id ignored: inkling-toolbar")
             return
         }
-        
+
         if (arbiter.hasOverride(ToolArbiter.Source.SLIDEBAR)) return
-        
+
         if (penContact) {
             Log.i(TAG_FINGER, "DOWN id=$id blocked: pen-session")
             return
@@ -3645,15 +3459,14 @@ class BoardInteractionController(
 
         if (fingers.size >= 2) {
             val (a, b) = firstTwo()
-            
+
             cancelCardLongPress()
             fingerMoveSession?.let { cancelMoveSession(it); fingerMoveSession = null }
             if (fingerGesture is FingerGesture.SurfaceScroll) {
                 content.setGestureThrottle(false)
                 commitViewport(BoardEngine.panX, BoardEngine.panY, BoardEngine.scale)
             }
-            
-            
+
             if (fingerGesture is FingerGesture.PanZoom || fingerGesture is FingerGesture.ScreenTool) return
             if (fingers.size > 2) { fingerGesture = FingerGesture.Idle; return }
             if (!touchEnabled && gestureToolOf(settings.screenGesture) == null) { fingerGesture = FingerGesture.Idle; return }
@@ -3667,14 +3480,12 @@ class BoardInteractionController(
             return
         }
 
-        
         if (penPriority) {
             fingerGesture = FingerGesture.Idle
             Log.i(TAG_FINGER, "single finger idle id=$id reason=pen-priority")
             return
         }
-        
-        
+
         if (lasso == null && !selectBelowArmed && surface.showsBoardChrome) {
             if (!chrome.switcherOpen && x <= edgeSwipeStartPx) {
                 fingerGesture = FingerGesture.EdgeSwipe(id, x, y)
@@ -3682,7 +3493,7 @@ class BoardInteractionController(
                 return
             }
         }
-        
+
         if (noteHeaderHit(x, y) && lasso == null && !selectBelowArmed) {
             fingerGesture = FingerGesture.CardPending(id, NOTE_HEADER_PENDING)
             cancelCardLongPress()
@@ -3707,12 +3518,10 @@ class BoardInteractionController(
             return
         }
 
-        
         val currentLasso = lasso
-        
+
         val hadSelection = currentLasso != null
         if (currentLasso != null) {
-            
             val single = if (isSingleCardSelection(currentLasso)) BoardEngine.cards[currentLasso.cardIds[0]] else null
             if (single != null) {
                 val handle = singleCardFrameHandle(currentLasso, wx, wy)
@@ -3727,7 +3536,7 @@ class BoardInteractionController(
                 fingerGesture = FingerGesture.Move(id)
                 return
             }
-            
+
             val cornerHandle = selectionCornerHandle(currentLasso, wx, wy)
                 ?: (if (shapeKindOf(currentLasso) != null) shapeEdgeHandle(currentLasso, wx, wy) else null)
             if (cornerHandle != null) {
@@ -3749,8 +3558,6 @@ class BoardInteractionController(
             setLasso(null)
         }
 
-        
-        
         val linkId = noteLinkAt(wx, wy)
         if (linkId != null) {
             fingerGesture = FingerGesture.CardPending(id, NOTE_LINK_PENDING + linkId)
@@ -3762,9 +3569,7 @@ class BoardInteractionController(
             fingerGesture = FingerGesture.Idle
             return
         }
-        
-        
-        
+
         fingerGesture = FingerGesture.CardPending(id, card.id)
         cancelCardLongPress()
         val holdMs = when {
@@ -3779,7 +3584,7 @@ class BoardInteractionController(
             val f = fingers[id] ?: return@Runnable
             val current = BoardEngine.cards[pending.cardId]
             if (current == null) { fingerGesture = FingerGesture.Idle; return@Runnable }
-            
+
             selectConnectedComponent(current)
             val sel = lasso ?: return@Runnable
             fingerMoveSession = beginSelectionMove(false, id, worldX(f.x), worldY(f.y), sel)
@@ -3805,7 +3610,7 @@ class BoardInteractionController(
             }
             is FingerGesture.CardPending -> {
                 val f = fingers[g.fingerId] ?: return
-                
+
                 if (hypot(f.x - f.downX, f.y - f.downY) >= BoardGeometry.CARD_DRAG_THRESHOLD_PX * density) {
                     cancelCardLongPress()
                     fingerGesture = FingerGesture.Idle
@@ -3817,8 +3622,7 @@ class BoardInteractionController(
                 if (TwoFingerToolGuard.moved(a.downX, a.downY, a.x, a.y) || TwoFingerToolGuard.moved(b.downX, b.downY, b.x, b.y)) {
                     handler.removeCallbacks(twoCandidateTimeout)
                     Log.i(TAG_TWO, "candidate moved → pinch")
-                    
-                    
+
                     fallbackFromTwoCandidate(a, b, "moved")
                 }
             }
@@ -3833,7 +3637,7 @@ class BoardInteractionController(
                 val f = fingers[g.fingerId] ?: return
                 val dx = f.x - g.downX
                 val dy = f.y - g.downY
-                
+
                 if (abs(dy) > abs(dx)) return
                 if (dx >= edgeSwipeZonePx) {
                     fingerGesture = FingerGesture.Idle
@@ -3889,7 +3693,7 @@ class BoardInteractionController(
             is FingerGesture.PanZoom -> {
                 if (id == g.a || id == g.b) {
                     endPanZoom(g, cleanOldPositions = !cancelled)
-                    
+
                     if (fingers.size >= 2) {
                         val (a, b) = firstTwo()
                         beginPanZoom(a, b)
@@ -3912,32 +3716,23 @@ class BoardInteractionController(
         }
     }
 
-    
     private fun dp(value: Float): Float = value * density
 
-    
     private fun editTextCard(card: BoardEngine.CardRec) {
         closeCardEditor()
         host.inkEnabled = false
         val original = card.content
         val note = card.kind == "note"
-        
+
         val below = if (note) cardsBelow(card) else emptyList()
         var finished = false
-        
-        
-        val tempWhite = presentation.state.whiteCards
+
         val darkText = !note && card.colored
         val editor = CardTextEditor(
             host.context,
             if (note) BoardContentView.noteHeaderText(card) else original,
             darkText,
-            
-            fill = when {
-                card.colored -> Color.BLACK
-                tempWhite -> Color.WHITE
-                else -> content.cardFillColor
-            },
+            fill = if (card.colored) Color.BLACK else content.cardFillColor,
             contentScale = if (note) card.width / ScrollingDocument.WIDTH else card.fontScale,
             headerMode = note,
             onFontStep = if (note) null else { step ->
@@ -3974,7 +3769,6 @@ class BoardInteractionController(
                     val current = BoardEngine.cards[card.id]
                     closeCardEditor()
                     if (current != null && (current.content != original || current.fontScale != card.fontScale)) {
-                        
                         val change = BoardHistory.Change("card-text-edit").card(card, current)
                         for (b in below) {
                             val moved = BoardEngine.cards[b.id] ?: continue
@@ -3990,7 +3784,6 @@ class BoardInteractionController(
         host.bringChildToFront(editor)
     }
 
-    
     private fun avoidKeyboard(region: RectF?, obscuredTop: Int?) {
         val r = region ?: return
         val shiftPx = editorKeyboardShift * density
@@ -4007,14 +3800,12 @@ class BoardInteractionController(
         scheduleChromeUpdate()
     }
 
-    
     private fun grownToFit(card: BoardEngine.CardRec, minHeight: Float): BoardEngine.CardRec {
         val needed = BoardContentView.measureTextCardSize(card.content, card.width, CardTextFormat.metricsFor(card)).y
         val height = max(minHeight, needed)
         return if (height == card.height) card else card.withRect(RectF(card.x, card.y, card.x + card.width, card.y + height))
     }
 
-    
     private fun editRegionWorld(cardId: String): RectF? {
         val card = BoardEngine.cards[cardId] ?: return null
         val r = card.rect(RectF())
@@ -4025,11 +3816,10 @@ class BoardInteractionController(
         return r
     }
 
-    
     private fun withNoteHeader(card: BoardEngine.CardRec, plain: String): BoardEngine.CardRec {
         val k = card.width / ScrollingDocument.WIDTH
         val oldH = BoardContentView.noteHeaderHeight(BoardContentView.noteHeaderOf(card)) * k
-        
+
         val probe = BoardEngine.CardRec(card.id, card.x, card.y, card.width, card.height, card.zIndex, card.kind, plain,
             card.imagePath, card.noteRef, card.bgColor, card.textColor, "")
         val lines = BoardContentView.noteHeaderLines(probe)
@@ -4039,7 +3829,6 @@ class BoardInteractionController(
             card.imagePath, card.noteRef, card.bgColor, card.textColor, lines.firstOrNull().orEmpty())
     }
 
-    
     private fun cardsBelow(anchor: BoardEngine.CardRec): List<BoardEngine.CardRec> {
         val column = arrayListOf(anchor.rect(RectF()))
         val result = ArrayList<BoardEngine.CardRec>()
@@ -4056,7 +3845,6 @@ class BoardInteractionController(
         return result
     }
 
-    
     private fun pushCardsBelow(change: BoardHistory.Change, below: List<BoardEngine.CardRec>, grow: Float) {
         val dy = max(0f, grow)
         for (b in below) {
@@ -4066,17 +3854,14 @@ class BoardInteractionController(
         }
     }
 
-    
     private fun setPageNoteHeader(markdown: String) {
         currentNoteHeaderPlaceholder = markdown.isBlank()
         currentNoteHeader = if (currentNoteHeaderPlaceholder) MosaicStrings.t(MosaicStrings.Key.noteHeaderPlaceholder) else markdown
         currentNoteHeaderHeight = BoardContentView.noteHeaderHeight(currentNoteHeader.orEmpty(), notePageScale)
     }
 
-    
     private fun pageHeaderRegionWorld(): RectF = RectF(0f, -currentNoteHeaderHeight, ScrollingDocument.WIDTH, 0f)
 
-    
     private fun editPageNoteHeader(recognized: String? = null) {
         if (surface.showsBoardChrome) return
         val ref = noteController.document?.ref ?: return
@@ -4084,7 +3869,7 @@ class BoardInteractionController(
         closeCardEditor()
         host.inkEnabled = false
         val header = BoardContentView.noteHeaderText(source)
-        
+
         var initial = header
         var selection: IntRange? = null
         if (recognized != null) {
@@ -4137,10 +3922,10 @@ class BoardInteractionController(
         val oldH = currentNoteHeaderHeight
         setPageNoteHeader(BoardContentView.noteHeaderOf(next))
         content.setNoteHeader(currentNoteHeader, currentNoteHeaderPlaceholder, notePageScale)
-        
+
         val d = (currentNoteHeaderHeight - oldH) * BoardEngine.scale
         if (d != 0f) BoardEngine.setViewport(BoardEngine.panX, BoardEngine.panY + d, BoardEngine.scale)
-        
+
         emitter.begin()
         emitter.cardUpsert(next)
         emitter.commit()
@@ -4195,21 +3980,8 @@ class BoardInteractionController(
         }
     }
 
-    fun setEinkLabActive(active: Boolean) {
-        cancelCardCleanup("lab-switch")
-        if (active) {
-            cancelActiveInteractions("eink-lab")
-            penContact = false
-            penHovering = false
-            presentation.reset("eink-lab")
-        } else syncToolMirrors(arbiter.effective(), "eink-lab-close")
-    }
-
-    
-
     private val twoCandidateTimeout = Runnable { settleTwoCandidate("hold") }
 
-    
     private fun fallbackFromTwoCandidate(a: Finger, b: Finger, reason: String) {
         if (penContact || penHovering || a.penPriority || b.penPriority) {
             fingerGesture = FingerGesture.Idle
@@ -4219,7 +3991,6 @@ class BoardInteractionController(
         if (touchEnabled) beginPanZoom(a, b) else fingerGesture = FingerGesture.Idle
     }
 
-    
     private fun adoptScreenTool(a: Finger, b: Finger, reason: String): Boolean {
         val tool = gestureToolOf(settings.screenGesture) ?: return false
         val decision = TwoFingerToolGuard.evaluate(
@@ -4239,7 +4010,6 @@ class BoardInteractionController(
         return true
     }
 
-    
     private fun settleTwoCandidate(reason: String): Boolean {
         val g = fingerGesture as? FingerGesture.TwoCandidate ?: return false
         handler.removeCallbacks(twoCandidateTimeout)
@@ -4249,7 +4019,6 @@ class BoardInteractionController(
         return true
     }
 
-    
     private fun yieldPanZoomToPen(reason: String) {
         val g = fingerGesture as? FingerGesture.PanZoom ?: return
         val a = fingers[g.a]
@@ -4261,8 +4030,6 @@ class BoardInteractionController(
             Log.i(TAG_PAN, "panzoom yielded to pen: no screen tool reason=$reason")
         }
     }
-
-    
 
     private fun beginPanZoom(a: Finger, b: Finger) {
         cancelCardCleanup("panzoom-begin")
@@ -4277,10 +4044,7 @@ class BoardInteractionController(
         )
         fingerGesture = g
         panZoomArmed = false
-        
-        
-        
-        
+
         if (surface.showsBoardChrome) {
             overlay.setLassoVisible(false)
             presentation.acquire(BoardPresentation.Reason.PAN_ZOOM)
@@ -4343,7 +4107,7 @@ class BoardInteractionController(
         }
         val ratio = if (g.lock == PanZoomLock.PAN) 1f else dist / g.startDistance
         val nextScale = surface.constrainScale(g.startScale * ratio, g.startScale)
-        
+
         val startCxDp = g.startCenterX / d
         val startCyDp = g.startCenterY / d
         val worldCx = (startCxDp - g.startPanX) / g.startScale
@@ -4352,12 +4116,10 @@ class BoardInteractionController(
         val anchorX = if (g.lock == PanZoomLock.ZOOM) startCxDp else cx / d
         val anchorY = if (g.lock == PanZoomLock.ZOOM) startCyDp else cy / d
         surface.constrainPan(anchorX - worldCx * nextScale, anchorY - worldCy * nextScale, nextScale, viewportTmp)
-        
-        
+
         val panX = snapPanToPx(viewportTmp[0])
         val panY = snapPanToPx(viewportTmp[1])
-        
-        
+
         g.overscroll = null
         if (panX != BoardEngine.panX || panY != BoardEngine.panY || nextScale != BoardEngine.scale) {
             recordPanZoomCleanupPosition(g)
@@ -4373,10 +4135,8 @@ class BoardInteractionController(
 
     private fun toolbarHeightWorld(): Float = chrome.toolbarHeightPx() / density
 
-    
     private fun noteTopInsetWorld(): Float = toolbarHeightWorld() + currentNoteHeaderHeight * BoardEngine.scale
 
-    
     private fun noteHeaderHit(x: Float, y: Float): Boolean =
         !surface.showsBoardChrome && currentNoteHeaderHeight > 0f && worldY(y) < 0f && !noteOffPageHit(x, y)
 
@@ -4427,10 +4187,8 @@ class BoardInteractionController(
         host.setDrawPathRegionBlocked(blocked, "note-header")
     }
 
-    
     private fun snapPanToPx(panDp: Float): Float = Math.round(panDp * density) / density
 
-    
     private fun magneticZoom(scale: Float): Float {
         val level = BoardGeometry.ZOOM_LEVELS[BoardGeometry.nearestZoomIndex(scale)]
         return if (abs(level - scale) <= scale * ZOOM_SNAP_RATIO) level else scale
@@ -4441,9 +4199,7 @@ class BoardInteractionController(
         var panX = BoardEngine.panX
         var panY = BoardEngine.panY
         var scale = BoardEngine.scale
-        
-        
-        
+
         val snapped = when {
             scale == g.startScale -> scale
             surface.showsBoardChrome -> magneticZoom(scale)
@@ -4457,7 +4213,7 @@ class BoardInteractionController(
             val p = BoardGeometry.zoomAroundScreenPoint(panX, panY, scale, snapped, ax, ay)
             surface.constrainPan(p[0], p[1], snapped, viewportTmp)
             panX = snapPanToPx(viewportTmp[0]); panY = snapPanToPx(viewportTmp[1]); scale = snapped
-            
+
             BoardEngine.setViewport(panX, panY, scale)
             Log.i(TAG_PAN, "snap scale ${g.startScale}->$scale")
         }
@@ -4495,19 +4251,14 @@ class BoardInteractionController(
         Log.i(TAG_PAN, "end frames=${g.frames} centerWorld=($centerX,$centerY) pan=($panX,$panY) scale=$scale")
     }
 
-    
-
     override fun onPenState(state: InputRouter.PenState, value: Boolean) {
-        if (host.isEinkLabOpen) return
         when (state) {
             InputRouter.PenState.HOVER -> {
                 penHovering = value
                 if (!value && !penContact)
                 else when (fingerGesture) {
-                    
-                    
                     is FingerGesture.TwoCandidate -> settleTwoCandidate("hover-enter")
-                    
+
                     is FingerGesture.PanZoom -> yieldPanZoomToPen("hover-enter")
                     else -> {}
                 }
@@ -4515,8 +4266,6 @@ class BoardInteractionController(
             InputRouter.PenState.RUBBER, InputRouter.PenState.STYLUS -> {
                 val physical = if (state == InputRouter.PenState.RUBBER) ToolArbiter.Physical.RUBBER else ToolArbiter.Physical.STYLUS
                 if (value) {
-                    
-                    
                     if (arbiter.hasOverride(ToolArbiter.Source.PEN_BUTTON)) {
                         if (physical == ToolArbiter.Physical.RUBBER &&
                             arbiter.overrideTool(ToolArbiter.Source.PEN_BUTTON) != ToolArbiter.Tool.ERASER
@@ -4529,8 +4278,7 @@ class BoardInteractionController(
                         Log.i(TAG_TOOL, "pen-button down repeat physical=$physical ${arbiter.describe()}")
                         return
                     }
-                    
-                    
+
                     val near = penContact ||
                         (if (physical == ToolArbiter.Physical.STYLUS) InputReader.isPenStylusPressNear() else penHovering)
                     val bound = if (physical == ToolArbiter.Physical.RUBBER) ToolArbiter.Tool.ERASER else gestureToolOf(settings.penButton)
@@ -4553,10 +4301,8 @@ class BoardInteractionController(
         }
     }
 
-    
     override fun onManualRefresh() {
         cancelCardCleanup("manual-refresh")
-        if (host.isEinkLabOpen) { host.refreshEinkLabAfterHostRefresh(); return }
         if (surfaceSwitching) return
         host.flushInkHandoff("manual-refresh")
         Log.i(TAG, "manual full refresh: exit lasso/eraser/gesture states ${arbiter.describe()} lasso=${lasso != null}")
@@ -4566,13 +4312,11 @@ class BoardInteractionController(
         applyTransition(arbiter.clearBase(), "manual-refresh")
         setLasso(null)
         presentation.reset("manual-refresh")
-        
-        
+
         host.redrawAfterHostRefresh()
     }
 
     override fun onSlider(gesture: String, side: Int) {
-        if (host.isEinkLabOpen) return
         if (side != settings.sliderSide) return
         cancelCardCleanup("slider")
         host.flushInkHandoff("slider")
@@ -4580,21 +4324,18 @@ class BoardInteractionController(
         when (gesture) {
             "slideUp" -> redo()
             "slideDown" -> undo()
-            
-            
-            
-            
+
             "twoDown" -> if (gestureToolOf(settings.slidebarGesture) != null) {
                 sliderTwoDown = true
                 presentation.acquire(BoardPresentation.Reason.SLIDER)
                 host.setDrawPathSuspended(true, "slider-two-down")
-                
+
                 (penSession as? PenSession.Write)?.let { it.convertFromIndex = it.points.size }
             }
             "twoUp" -> {
                 sliderTwoDown = false
                 host.setDrawPathSuspended(false, "slider-two-up")
-                
+
                 presentation.release(BoardPresentation.Reason.SLIDER, linger = false)
             }
             "twoTap" -> gestureToolOf(settings.slidebarGesture)?.let { applyTransition(arbiter.toggleBase(it), "slider-toggle") }
@@ -4605,8 +4346,6 @@ class BoardInteractionController(
         }
         resumeCardCleanup("slider-finished")
     }
-
-    
 
     private fun currentRegions(): List<SparseNavigation.Region> {
         if (!regionsDirty) return regions
@@ -4641,7 +4380,7 @@ class BoardInteractionController(
             selectedCardColored = selected?.colored == true,
             selectedCardKind = selected?.kind,
             sizeLevels = levels,
-            
+
             lassoCards = selected == null && lasso?.cardIds?.isNotEmpty() == true,
         )
         val jumps = if (fingerGesture is FingerGesture.PanZoom) emptyList()
@@ -4670,10 +4409,9 @@ class BoardInteractionController(
         emitter.begin(); emitter.action("loadArchive"); emitter.commit()
     }
 
-    
     override fun onSelectBelow() {
         if (selectBelowArmed) { cancelSelectBelow("toggle-off"); return }
-        
+
         setLasso(null)
         selectBelowArmed = true
         chrome.setSelectBelowActive(true)
@@ -4681,7 +4419,6 @@ class BoardInteractionController(
         Log.i(TAG_LASSO, "select-below armed ${arbiter.describe()}")
     }
 
-    
     private fun cancelSelectBelow(reason: String) {
         if (!selectBelowArmed) return
         selectBelowArmed = false
@@ -4690,7 +4427,6 @@ class BoardInteractionController(
         Log.i(TAG_LASSO, "select-below cancelled reason=$reason")
     }
 
-    
     private fun handleSelectBelow(wy: Float) {
         selectBelowArmed = false
         chrome.setSelectBelowActive(false)
@@ -4708,23 +4444,19 @@ class BoardInteractionController(
             }
         }
         val hits = if (any && bounds.bottom > wy) {
-            
             selectInRect(RectF(bounds.left - 1f, wy, bounds.right + 1f, bounds.bottom + 1f))
         } else null
 
         if (hits != null) {
-            
             selectBelowPendingRestore = true
             setLasso(LassoSelection(selectionFrame(hits), hits.cardIds, hits.strokeIds))
             Log.i(TAG_LASSO, "select-below hit cards=${hits.cardIds.size} strokes=${hits.strokeIds.size} y=$wy")
         } else {
-            
             refreshHostToolFlags()
             Log.i(TAG_LASSO, "select-below nothing below y=$wy")
         }
     }
     override fun onPenStyle(style: PenStyle, width: Float) {
-        
         if (lasso != null) leaveShapeSelectionForToolbar()
         setPenStyle(style, width)
     }
@@ -4748,7 +4480,7 @@ class BoardInteractionController(
         leaveShapeSelectionForToolbar()
         applyTransition(arbiter.toggleBase(ToolArbiter.Tool.LASSO), "toolbar-lasso")
     }
-    
+
     override fun onShapeSelected(kind: Shapes.Kind) {
         if (shapeMode && shapeKind == kind) {
             val transition = if (arbiter.hasOverride(ToolArbiter.Source.SHAPE)) {
@@ -4761,11 +4493,6 @@ class BoardInteractionController(
         }
         shapeKind = kind
         if (arbiter.hasOverride(ToolArbiter.Source.SHAPE)) {
-            
-            
-            
-            
-            
             shapeSelectionPending = false
             applyTransition(
                 arbiter.replaceOverride(
@@ -4777,10 +4504,8 @@ class BoardInteractionController(
             )
             if (lasso != null) setLasso(null)
         } else if (!shapeMode) {
-            
             if (lasso != null) setLasso(null)
-            
-            
+
             applyTransition(
                 arbiter.pushOverride(ToolArbiter.Source.SHAPE, ToolArbiter.Tool.SHAPE, ToolArbiter.Settle.ON_PEN_UP),
                 "toolbar-shape:$kind",
@@ -4793,9 +4518,8 @@ class BoardInteractionController(
         leaveShapeSelectionForToolbar()
         applyTransition(arbiter.clearBase(), "toolbar-write")
     }
-    
+
     override fun onTemplateSelected(template: BackgroundTemplate) {
-        
         TemplateStore.setBoard(host.context, template)
         val pageWidth = if (surface.showsBoardChrome) 0f else ScrollingDocument.WIDTH
         content.setBackgroundTemplate(template, pageWidth)
@@ -4838,11 +4562,11 @@ class BoardInteractionController(
                     val contentHeight = flushed.getOrNull()?.contentHeight ?: ScrollingDocument.WIDTH
                     noteController.clear()
                     val size = FloatArray(2)
-                    
+
                     val header = BoardContentView.noteHeaderFromText(source.content)
                     val headerLines = if (header.isEmpty()) emptyList() else header.split('\n')
                     noteCardBoardSize(contentHeight, source.width, size, BoardContentView.noteHeaderMarkdown(headerLines))
-                    
+
                     val note = BoardEngine.CardRec(source.id, source.x, source.y, size[0], size[1], source.zIndex, "note", header, noteController.previewPath(ref), ref, "", "", headerLines.firstOrNull().orEmpty())
                     val change = BoardHistory.Change("card-to-note")
                     synchronized(BoardEngine.lock) { BoardEngine.cardStrokes[source.id]?.forEach { change.stroke(it, null) } }
@@ -4880,7 +4604,6 @@ class BoardInteractionController(
     override fun onToggleTouch() = setTouchEnabled(!touchEnabled, fromJs = false)
 
     override fun onPenBlockChanged() {
-        if (host.isEinkLabOpen) return
         InklingLink.setChromeMenuOpen(chrome.blocksPen)
         refreshHostToolFlags()
         keepNoteTopOnToolbarChange()
@@ -4925,7 +4648,7 @@ class BoardInteractionController(
         val id = selectedCardId ?: return
         val card = BoardEngine.cards[id] ?: return
         if (card.kind == "image" || card.kind == "note") return
-        
+
         val next = if (card.colored) card.withColors("", "")
         else card.withColors(ACCENT_BG_COLOR, ACCENT_TEXT_COLOR)
         val change = BoardHistory.Change("card-accent").card(card, next)
@@ -4936,7 +4659,6 @@ class BoardInteractionController(
 
     override fun onDeleteLassoSelection() = deleteLassoSelection()
 
-    
     private fun onRecognizeLasso() {
         val sel = lasso ?: return
         if (!isPureInkSelection(sel)) {
@@ -4953,14 +4675,12 @@ class BoardInteractionController(
         Log.i(TAG_LASSO, "recognize requested strokes=${strokeIds.size}")
     }
 
-    
     fun createRecognizedTextCard(text: String) {
         val pending = pendingRecognition ?: return
         pendingRecognition = null
         val trimmed = text.trim()
         if (trimmed.isEmpty()) { Log.i(TAG_LASSO, "recognize empty text; scene unchanged"); return }
         if (!surface.showsBoardChrome) {
-            
             setLasso(null)
             editPageNoteHeader(recognized = trimmed)
             Log.i(TAG_LASSO, "recognize note header strokes=${pending.strokeIds.size} chars=${trimmed.length}")
@@ -5024,8 +4744,6 @@ class BoardInteractionController(
         val y = frame.ys[0]
         when (frame.action) {
             InputRouter.ACTION_DOWN -> if (y < 120f) {
-                
-                
                 chrome.cancelTransientPresses()
                 launcherPullStartY = y
                 host.context.sendBroadcast(Intent("com.ratta.supernote.launcher.BroadcastReceiver.slidebarstatusbar").putExtra("lockStatusbar", true))
@@ -5035,7 +4753,7 @@ class BoardInteractionController(
                 launcherPullStartY = Float.NaN
                 if (!start.isNaN() && y - start > 180f) {
                     Log.i(TAG, "launcher top-pull close distance=${y - start} surface=${surface.name}")
-                    
+
                     if (!surfaceSwitching) surface.onCloseRequested(BoardSurface.CloseSource.LAUNCHER_PULL)
                     return true
                 }
@@ -5054,7 +4772,7 @@ class BoardInteractionController(
         val notes = synchronized(BoardEngine.lock) {
             BoardEngine.cardsByZ.filter { it.kind == "note" }
         }
-        
+
         val links = NoteLinks.list().filter { NoteLinks.regionOf(it.id) != null }
         chrome.showSwitcher(notes, links)
         refreshHostToolFlags()
@@ -5065,12 +4783,10 @@ class BoardInteractionController(
         refreshHostToolFlags()
     }
 
-    
     fun setSyncState(enabled: Boolean, state: String, address: String) {
         chrome.setSyncState(enabled, state, address)
     }
 
-    
     override fun onOpenNoteCard(cardId: String) {
         val card = BoardEngine.cards[cardId] ?: return
         chrome.hideSwitcher()
@@ -5078,7 +4794,6 @@ class BoardInteractionController(
         openNote(card.noteRef)
     }
 
-    
     override fun onLocateNoteCard(cardId: String) {
         val card = BoardEngine.cards[cardId] ?: return
         cancelFingerGestures("locate-note")
@@ -5094,7 +4809,6 @@ class BoardInteractionController(
         Log.i(TAG, "locate note card=${card.id} at (${card.x},${card.y}) scale=$scale")
     }
 
-    
     private fun noteLinkAt(wx: Float, wy: Float): String? {
         if (!surface.showsBoardChrome) return null
         val scale = BoardEngine.scale
@@ -5139,26 +4853,20 @@ class BoardInteractionController(
         emitter.commit()
     }
 
-    
-
-    
     private var noteShotBusy = false
-    
+
     private var noteShotFocusToken = 0
-    
+
     private var noteShotSessionActive = false
 
-    
     private class NoteShotPng(val path: String, val width: Int, val height: Int, val hotspot: NoteShotExport.Hotspot)
 
-    
     private fun canInsertIntoHostNote(sel: LassoSelection): Boolean =
         surface.showsBoardChrome && MosaicNoteShotModule.currentHostNotePath() != null &&
             synchronized(BoardEngine.lock) {
                 SelectionActions.canInsertNoteImage(sel.fromLasso, sel.cardIds, sel.strokeIds, BoardEngine.strokes.values)
             }
 
-    
     private fun onInsertLassoIntoNote() {
         val sel = lasso ?: return
         if (!canInsertIntoHostNote(sel)) {
@@ -5184,8 +4892,7 @@ class BoardInteractionController(
         )
         renderNoteShotPng(shotId, layout) { png ->
             if (png == null) return@renderNoteShotPng
-            
-            
+
             setLasso(null)
             emitter.begin()
             emitter.action("noteShotReady") {
@@ -5198,7 +4905,6 @@ class BoardInteractionController(
         }
     }
 
-    
     fun focusNoteShot(json: String) {
         val shot = NoteShotExport.Shot.parse(json)
         if (shot == null) {
@@ -5225,7 +4931,7 @@ class BoardInteractionController(
         setLasso(null)
         chrome.hideSwitcher()
         refreshHostToolFlags()
-        
+
         val top = chrome.toolbarHeightPx() / density
         val w = host.width / density
         val h = max(1f, host.height / density - top)
@@ -5237,7 +4943,6 @@ class BoardInteractionController(
         Log.i(TAG_SHOT, "focus id=${shot.id} region=$region scale=$scale")
     }
 
-    
     fun renderNoteShot(json: String, done: (WritableMap?) -> Unit) {
         val shot = NoteShotExport.Shot.parse(json)
         if (shot == null || !surface.showsBoardChrome || noteShotBusy) {
@@ -5306,7 +5011,6 @@ class BoardInteractionController(
         map.putDouble("pxPerWorld", pxPerWorld.toDouble())
     }
 
-    
     private fun renderNoteShotPng(shotId: String, layout: NoteShotExport.Layout, done: (NoteShotPng?) -> Unit) {
         noteShotBusy = true
         val densityValue = density
@@ -5349,7 +5053,6 @@ class BoardInteractionController(
         }
     }
 
-    
     @Suppress("DEPRECATION")
     private fun realDisplaySize(): Point {
         val point = Point()
@@ -5362,9 +5065,6 @@ class BoardInteractionController(
         return point
     }
 
-    
-
-    
     class FloatArrayList(capacity: Int = 256) {
         private var data = FloatArray(capacity)
         var size = 0

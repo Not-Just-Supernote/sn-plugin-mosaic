@@ -18,7 +18,6 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 
-
 class MosaicRawNetModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
     companion object {
         private const val TAG = "MosaicRawNet"
@@ -221,7 +220,6 @@ class MosaicRawNetModule(private val context: ReactApplicationContext) : ReactCo
         return line.toString(Charsets.ISO_8859_1.name())
     }
 
-    
     private fun readHead(input: InputStream): Pair<Int, Map<String, String>> {
         val status = readLine(input).split(' ').getOrNull(1)?.toIntOrNull() ?: throw IOException("状态行无效")
         val headers = HashMap<String, String>()
@@ -234,7 +232,6 @@ class MosaicRawNetModule(private val context: ReactApplicationContext) : ReactCo
         return status to headers
     }
 
-    
     @ReactMethod
     fun httpRequest(method: String, host: String, port: Int, path: String, contentType: String?, bodyBase64: String?, promise: Promise) {
         Thread({

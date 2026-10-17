@@ -7,9 +7,7 @@ import android.util.Log
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-
 object BoardEngine {
-
     private const val TAG = "MosaicBoardEngine"
     const val PROTOCOL_VERSION = 9
 
@@ -25,13 +23,9 @@ object BoardEngine {
     private const val OP_SET_CONNECTIONS = 8
 
     private const val GRID_CELL = 512f
-    
-    
-    
-    
-    
+
     const val STROKE_PAD = 32f
-    
+
     const val NECK_PAD = 16f
 
     const val THREAD_SPACE = "thread:"
@@ -39,19 +33,19 @@ object BoardEngine {
 
     class StrokeRec(
         val id: String,
-        
+
         val space: String,
         val width: Float,
         val color: Int,
-        
+
         val points: FloatArray,
-        
+
         val pressures: FloatArray,
-        
+
         rawPenStyle: Int,
-        
+
         val sampleScale: Float,
-        
+
         _requestedDrawPathWidth: Int = 0,
         val nibAngle: Float = Float.NaN,
         /** Complete source SDK X/Y tilt sequence; geometry edits retain these raw samples. */
@@ -60,22 +54,18 @@ object BoardEngine {
     ) {
         init { ContourGeometry.validate(contourOffsets, points.size / 2) }
         val isOutline: Boolean get() = contourOffsets.isNotEmpty()
-        
+
         val penStyle: Int = PenStyle.normalizeStoredType(rawPenStyle)
-        
+
         val drawPathWidth: Int = _requestedDrawPathWidth.takeIf { it > 0 }
             ?: DrawPathClient.widthArgument(PenStyle.fromObjType(penStyle), width)
         val bounds: RectF = computePointBounds(if (isOutline) points.copyOfRange(contourOffsets[0] * 2, points.size) else points)
-        
-        
-        
-        
-        
+
         val isShape: Boolean by lazy { !isOutline && Shapes.kindOf(points, pressures) != null }
         val path: Path by lazy { if (isOutline) ContourGeometry.path(points, contourOffsets) else if (isShape) buildPolylinePath(points) else buildStrokePath(points) }
         val cardId: String? = if (space.startsWith("card:")) space.substring(5) else null
         val connectionId: String? = if (space.startsWith("connection:")) space.substring(11) else null
-        
+
         val threadEnds: Pair<String, String>? = if (space.startsWith(THREAD_SPACE)) {
             space.substring(THREAD_SPACE.length).split('|').takeIf { it.size == 2 }?.let { it[0] to it[1] }
         } else null
@@ -95,7 +85,6 @@ object BoardEngine {
         fun withPenStyle(style: PenStyle): StrokeRec =
             if (style.objType == penStyle) this else StrokeRec(id, space, width, color, points, pressures, style.objType, sampleScale, DrawPathClient.widthArgument(style, width), nibAngle, angles, contourOffsets)
 
-        
         fun translated(
             dx: Float,
             dy: Float,
@@ -129,7 +118,6 @@ object BoardEngine {
             )
         }
 
-        
         fun translatedWorld(dx: Float, dy: Float): StrokeRec {
             val out = FloatArray(points.size)
             var i = 0
@@ -141,7 +129,6 @@ object BoardEngine {
             return StrokeRec(id, space, width, color, out, pressures, penStyle, sampleScale, drawPathWidth, nibAngle, angles, contourOffsets)
         }
 
-        
         fun scaled(
             fx: Float,
             fy: Float,
@@ -180,7 +167,6 @@ object BoardEngine {
             )
         }
 
-        
         fun rotated(
             radians: Float,
             pivotWorldX: Float,
@@ -222,18 +208,14 @@ object BoardEngine {
             )
         }
 
-        
         fun withPoints(pts: FloatArray): StrokeRec =
             StrokeRec(id, space, width, color, pts, if (pressures.size == pts.size / 2) pressures else Shapes.pressures(pts.size / 2), penStyle, sampleScale, drawPathWidth, nibAngle, angles, contourOffsets)
 
         companion object {
             const val INK_BLACK = 0xFF000000.toInt()
             const val INK_WHITE = 0xFFFFFFFF.toInt()
-            
-            const val INK_WHITE_PINNED = 0xFFFEFEFE.toInt()
 
-            
-            
+            const val INK_WHITE_PINNED = 0xFFFEFEFE.toInt()
         }
     }
 
@@ -244,21 +226,20 @@ object BoardEngine {
         val width: Float,
         val height: Float,
         val zIndex: Int,
-        
+
         val kind: String = "text",
         val content: String = "",
         val imagePath: String = "",
         val noteRef: String = "",
-        
+
         val bgColor: String = "",
-        
+
         val textColor: String = "",
-        
+
         val title: String = "",
         // Text size multiplier of a text card: headings, body and padding scale together.
         val fontScale: Float = 1f,
     ) {
-        
         val colored: Boolean
             get() = bgColor.isNotEmpty() && !bgColor.equals("#ffffff", ignoreCase = true)
 
@@ -286,7 +267,6 @@ object BoardEngine {
         fun withFontScale(value: Float): CardRec =
             CardRec(id, x, y, width, height, zIndex, kind, content, imagePath, noteRef, bgColor, textColor, title, clampFontScale(value))
 
-        
         fun sameNeckGeometry(other: CardRec): Boolean =
             x == other.x && y == other.y && width == other.width && height == other.height && colored == other.colored
     }
@@ -305,19 +285,16 @@ object BoardEngine {
         }
     }
 
-    
     class NeckRec(val id: String, val path: Path, val dark: Boolean) {
         val bounds: RectF = RectF().also { path.computeBounds(it, true) }
     }
 
-    
     class ThreadRec(val id: String, val fromId: String, val toId: String, val path: Path, val centerline: FloatArray, val dark: Boolean) {
         val bounds: RectF = RectF().also { path.computeBounds(it, true) }
         fun touches(cardId: String): Boolean = fromId == cardId || toId == cardId
     }
 
     interface Listener {
-        
         fun onSceneChanged(dirtyWorld: RectF?, contentMoved: Boolean)
         fun onViewportChanged()
         fun onSelectionChanged()
@@ -331,7 +308,6 @@ object BoardEngine {
         val panX: Float, val panY: Float, val scale: Float,
     )
 
-    
     data class RenderSnapshot(
         val canvasStrokes: List<StrokeRec>,
         val cardsByZ: List<CardRec>,
@@ -344,7 +320,6 @@ object BoardEngine {
         val threads: List<ThreadRec> = emptyList(),
     )
 
-    
     fun renderSnapshot(world: RectF): RenderSnapshot = synchronized(lock) {
         val hiddenCards = hiddenCardIds
         val hiddenStrokes = hiddenStrokeIds
@@ -355,9 +330,7 @@ object BoardEngine {
         for (card in cardsByZ) cardMap[card.id] = card
         val orderedCards = if (hiddenCards.isEmpty()) cardsByZ.toList() else cardsByZ.filter { it.id !in hiddenCards }
         val attached = HashMap<String, List<StrokeRec>>(cardStrokes.size)
-        
-        
-        
+
         val cardRect = RectF()
         for (card in orderedCards) {
             card.rect(cardRect)
@@ -405,17 +378,15 @@ object BoardEngine {
         listener?.onSelectionChanged()
     }
 
-    
     val strokes = LinkedHashMap<String, StrokeRec>()
     val cards = LinkedHashMap<String, CardRec>()
     val connections = LinkedHashMap<String, ConnectionRec>()
     val necks = LinkedHashMap<String, NeckRec>()
-    
+
     val threads = LinkedHashMap<String, StrokeRec>()
     val threadShapes = LinkedHashMap<String, ThreadRec>()
     val selectedCardIds = LinkedHashSet<String>()
 
-    
     // 拖动、改尺寸、旋转时原位置不画这些卡片和笔迹，连同卡片的桥和线；预览由叠加层画。
     @Volatile var hiddenCardIds: Set<String> = emptySet()
     @Volatile var hiddenStrokeIds: Set<String> = emptySet()
@@ -426,7 +397,6 @@ object BoardEngine {
     private val canvasStrokeGrid = HashMap<Long, MutableList<String>>()
     val cardStrokes = HashMap<String, MutableList<StrokeRec>>()
 
-    
     @Volatile var panX = 0f
         private set
     @Volatile var panY = 0f
@@ -472,9 +442,6 @@ object BoardEngine {
         listener?.onSelectionChanged()
     }
 
-    
-
-    
     inline fun mutate(block: Mutation.() -> Unit) {
         val m = Mutation()
         synchronized(lock) {
@@ -493,13 +460,13 @@ object BoardEngine {
         private var dirtyAll = false
         private var moved = false
         private var selectionDirty = false
-        
+
         private val touchedCards = HashSet<String>()
-        
+
         private val touchedConnections = HashSet<String>()
-        
+
         private val newConnections = HashSet<String>()
-        
+
         private val touchedThreads = HashSet<String>()
 
         fun addDirty(rect: RectF) {
@@ -513,7 +480,6 @@ object BoardEngine {
             moved = true
         }
 
-        
         fun addStroke(rec: StrokeRec) {
             val existing = strokes[rec.id]
             if (existing != null) {
@@ -529,7 +495,6 @@ object BoardEngine {
             rec.connectionId?.let(touchedConnections::add)
         }
 
-        
         fun addStrokesBatch(records: List<StrokeRec>) {
             if (records.any { it.isThread }) {
                 records.filter { it.isThread }.forEach(::addStroke)
@@ -563,7 +528,7 @@ object BoardEngine {
                 if (existing != null) {
                     includeBounds(existing)
                     moved = true
-                    
+
                     strokes.remove(rec.id)
                     removedRecords.add(existing)
                     existing.connectionId?.let(lockConnections::add)
@@ -653,13 +618,12 @@ object BoardEngine {
             return rec
         }
 
-        
         fun upsertCard(rec: CardRec) {
             val previous = cards[rec.id]
             if (previous != null && previous.sameGeometry(rec)) return
             if (previous == null || !previous.sameNeckGeometry(rec)) touchedCards.add(rec.id)
             previous?.let { addDirty(cardDirtyBounds(it)) }
-            
+
             cards[rec.id] = rec
             rebuildCardOrderLocked()
             addDirty(cardDirtyBounds(rec))
@@ -688,7 +652,6 @@ object BoardEngine {
             return rec
         }
 
-        
         fun replaceConnections(next: Collection<ConnectionRec>) {
             val nextIds = HashSet<String>(next.size)
             for (c in next) {
@@ -702,7 +665,6 @@ object BoardEngine {
             for (c in next) connections[c.id] = c
         }
 
-        
         fun refreshThreadsLocked() {
             if (touchedThreads.isEmpty() && (touchedCards.isEmpty() || threads.isEmpty())) return
             val ids = LinkedHashSet<String>(touchedThreads)
@@ -733,7 +695,6 @@ object BoardEngine {
             return ThreadRec(rec.id, a.id, b.id, shape.path, shape.centerline, a.colored && b.colored)
         }
 
-        
         fun refreshNecksLocked() {
             if (touchedConnections.isNotEmpty()) {
                 val changed = ConnectionBindings.refresh(connections, strokes.values)
@@ -770,7 +731,7 @@ object BoardEngine {
         private fun buildNeckLocked(conn: ConnectionRec, wasActive: Boolean, isNew: Boolean): NeckRec? {
             val a = cards[conn.fromId] ?: return null
             val b = cards[conn.toId] ?: return null
-            
+
             if (a.colored != b.colored) return null
             val gap = BoardGeometry.edgeDistance(a, b)
             if (gap > NeckGeometry.MAX_DISTANCE) return null
@@ -794,8 +755,6 @@ object BoardEngine {
         }
     }
 
-    
-
     fun applyOps(base64: String): Int {
         val bytes = try {
             Base64.decode(base64, Base64.DEFAULT)
@@ -811,10 +770,7 @@ object BoardEngine {
         var count = 0
         val startedAt = System.nanoTime()
         val m = Mutation()
-        
-        
-        
-        
+
         val decoded = ArrayList<() -> Unit>()
         val pendingStrokes = ArrayList<StrokeRec>()
         fun flushPendingStrokes() {
@@ -906,8 +862,6 @@ object BoardEngine {
         return count
     }
 
-    
-
     fun queryCanvasStrokes(world: RectF, out: MutableList<StrokeRec>) {
         val minCx = cellIndex(world.left - STROKE_PAD)
         val maxCx = cellIndex(world.right + STROKE_PAD)
@@ -924,7 +878,6 @@ object BoardEngine {
         }
     }
 
-    
     fun hitTestStrokes(worldX: Float, worldY: Float, radius: Float, out: MutableList<StrokeRec>) {
         val minCx = cellIndex(worldX - radius)
         val maxCx = cellIndex(worldX + radius)
@@ -955,7 +908,6 @@ object BoardEngine {
         }
     }
 
-    
     fun canvasStrokesInside(world: RectF, out: MutableList<StrokeRec>) {
         val minCx = cellIndex(world.left)
         val maxCx = cellIndex(world.right)
@@ -998,7 +950,6 @@ object BoardEngine {
         return null
     }
 
-    
     fun connectionAt(worldX: Float, worldY: Float): ConnectionRec? = synchronized(lock) {
         var best: ConnectionRec? = null
         var bestArea = Float.POSITIVE_INFINITY
@@ -1029,7 +980,6 @@ object BoardEngine {
         }
     }
 
-    
     fun threadStroke(id: String, from: CardRec, to: CardRec): StrokeRec? {
         val shape = NeckGeometry.buildThread(from.rect(), to.rect()) ?: return null
         val points = shape.centerline
@@ -1042,8 +992,6 @@ object BoardEngine {
     fun connectionsOf(cardId: String, out: MutableList<ConnectionRec>) {
         for (c in connections.values) if (c.fromId == cardId || c.toId == cardId) out.add(c)
     }
-
-    
 
     private fun insertStrokeLocked(rec: StrokeRec) {
         strokes[rec.id] = rec
@@ -1086,11 +1034,9 @@ object BoardEngine {
         cardsByZ = cards.values.sortedBy { it.zIndex }
     }
 
-    
     fun cardDirtyBounds(card: CardRec): RectF =
         RectF(card.x - 16f, card.y - 16f, card.x + card.width + 16f, card.y + card.height + 16f)
 
-    
     fun cardAndNecksDirtyBounds(card: CardRec): RectF = synchronized(lock) {
         val out = cardDirtyBounds(card)
         for (neck in necks.values) {
@@ -1103,7 +1049,6 @@ object BoardEngine {
         out
     }
 
-    
     fun invalidateImages(paths: Collection<String>) {
         if (paths.isEmpty()) return
         val set = paths.toHashSet()
@@ -1136,8 +1081,6 @@ object BoardEngine {
 
     private fun boundsContain(b: RectF, x: Float, y: Float, r: Float): Boolean =
         x >= b.left - r && x <= b.right + r && y >= b.top - r && y <= b.bottom + r
-
-    
 
     // Writes a scene in the same op stream JS sends (cards, connections, then strokes), for SceneCache.
     fun encodeSceneOps(scene: SceneSnapshot): ByteArray {
@@ -1268,8 +1211,6 @@ object BoardEngine {
         return RectF(minX, minY, maxX, maxY)
     }
 
-    
-    
     fun buildPolylinePath(points: FloatArray): Path {
         val path = Path()
         val pointCount = points.size / 2

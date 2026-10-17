@@ -1,9 +1,6 @@
 package me.laumss.mosaic
 
-
 class ToolArbiter {
-
-    
     enum class Tool { ERASER, LASSO, SHAPE }
     enum class Source { PEN_BUTTON, SCREEN, SLIDEBAR, SHAPE }
     enum class Settle { ON_PEN_UP, ON_NEXT_PEN_DOWN }
@@ -24,7 +21,7 @@ class ToolArbiter {
     class Transition(
         val before: State,
         val after: State,
-        
+
         val keepSelection: Boolean,
         val reason: String,
     ) {
@@ -36,10 +33,10 @@ class ToolArbiter {
         var tool: Tool,
         var settle: Settle,
         var exitRequested: Boolean = false,
-        
+
         val armed: Boolean,
         var armedConsumed: Boolean = false,
-        
+
         var held: Boolean = true,
         val physical: Physical?,
     )
@@ -58,22 +55,17 @@ class ToolArbiter {
 
     fun overrideTool(source: Source): Tool? = overrides.firstOrNull { it.source == source }?.tool
 
-    
     fun penButtonPhysical(): Physical? =
         overrides.firstOrNull { it.source == Source.PEN_BUTTON }?.physical
 
-    
     fun penButtonHeld(): Boolean = overrides.any { it.source == Source.PEN_BUTTON && it.held }
 
-    
     fun toggleBase(tool: Tool): Transition = transition("toggle-base:$tool", false) {
         base = if (base == tool) null else tool
     }
 
-    
     fun clearBase(): Transition = transition("clear-base", false) { base = null }
 
-    
     fun pushOverride(
         source: Source,
         tool: Tool,
@@ -95,7 +87,6 @@ class ToolArbiter {
         }
     }
 
-    
     fun releaseOverride(source: Source): Transition = transition("release:$source", true) {
         val item = overrides.firstOrNull { it.source == source } ?: return@transition
         item.held = false
@@ -104,10 +95,8 @@ class ToolArbiter {
         if (!penContact && !awaitingArmedStroke) remove(source)
     }
 
-    
     fun forceExit(source: Source): Transition = transition("force-exit:$source", true) { remove(source) }
 
-    
     fun replaceOverride(source: Source, tool: Tool, settle: Settle): Transition? =
         transition("replace:$source/$tool", true) {
             val item = overrides.firstOrNull { it.source == source } ?: return@transition
@@ -116,14 +105,12 @@ class ToolArbiter {
             item.exitRequested = false
         }
 
-    
     fun reset() {
         base = null
         overrides.clear()
         penContact = false
     }
 
-    
     fun penDown(): Transition = transition("pen-down", true) {
         penContact = true
         for (item in ArrayList(overrides)) {
@@ -137,7 +124,6 @@ class ToolArbiter {
         }
     }
 
-    
     fun penUp(): Transition = transition("pen-up", true) {
         penContact = false
         for (item in ArrayList(overrides)) {

@@ -7,15 +7,12 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.FileReader
 
-
 class SliderReader {
-
     companion object {
         private const val TAG = "MosaicSlider"
         const val SIDE_LEFT = 1
         const val SIDE_RIGHT = 2
 
-        
         fun isSupportedDevice(deviceType: Int): Boolean = deviceType == 4 || deviceType == 5
 
         private const val SYSFS_DIR_28 = "/sys/devices/platform/fe5d0000.i2c/i2c-4/4-0028/"
@@ -157,8 +154,7 @@ class SliderReader {
             s.twoDownTime = now
             s.twoDownPositions = positions.copyOf()
             if (s.downTime < 0) s.downTime = now
-            
-            
+
             emitGesture(side, "twoDown", positions[0])
             return
         }
@@ -168,7 +164,7 @@ class SliderReader {
             && Math.abs(positions[1] - lastTwo[1]) <= doubleSlipOffset
         ) {
             s.isTwoMove = false
-            
+
             if (!s.isTwoLongPressed && now - s.twoDownTime > LONG_PRESS_TIMEOUT_MS) {
                 s.isTwoLongPressed = true
                 emitGesture(side, "twoLongPress", positions[0])
@@ -184,14 +180,12 @@ class SliderReader {
         Log.d(TAG, "side=$side UP downPos=${s.downPosition} lastPos=${s.lastPosition} isSlide=${s.isSlide} isLong=${s.isLongPressed} isTwoEvent=${s.isTwoEvent} elapsed=${elapsed}ms")
 
         if (s.isTwoEvent) {
-            
-            
             if (!s.isTwoMove && s.downTime >= 0 && now - s.downTime <= PRESS_TIMEOUT_MS) {
                 emitGesture(side, "twoTap", -1)
             } else if (s.isTwoLongPressed) {
                 emitGesture(side, "twoLongPressEnd", -1)
             }
-            
+
             emitGesture(side, "twoUp", -1)
             return
         }
@@ -260,9 +254,9 @@ class SliderReader {
         distance: Int = 0,
     ) {
         Log.i(TAG, "gesture=$gesture side=$side pos=$position speed=$speed dist=$distance")
-        
+
         InputArbiter.onSliderActivity()
-        
+
         DrawPathGate.onSliderGesture(gesture, side)
         InputRouter.postSlider(gesture, side)
     }

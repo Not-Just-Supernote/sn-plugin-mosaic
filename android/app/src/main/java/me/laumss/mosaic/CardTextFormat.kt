@@ -1,8 +1,6 @@
 package me.laumss.mosaic
 
-
 object CardTextFormat {
-    
     class Metrics(
         val body: Float, val lineMul: Float, val padX: Float, val padTop: Float, val padBottom: Float,
         val h1: Float, val h2: Float, val h3: Float,
@@ -52,7 +50,7 @@ object CardTextFormat {
         if (heading > 0) body = body.drop(heading + 1)
         var bold = false
         var italic = false
-        
+
         repeat(2) {
             val n = when {
                 body.length >= 6 && body.startsWith("***") && body.endsWith("***") -> 3
@@ -80,7 +78,7 @@ object CardTextFormat {
             val row = rowAt(cursor)
             lines[row] = lines[row].copy(style = lines[row].style.toggle(kind))
         }
-        
+
         fun replace(start: Int, removed: Int, inserted: String): Triple<Int, Int, Int> {
             val old = text()
             val from = start.coerceIn(0, old.length)

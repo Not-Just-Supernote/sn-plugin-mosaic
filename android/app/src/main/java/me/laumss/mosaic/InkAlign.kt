@@ -8,24 +8,22 @@ import java.io.InputStreamReader
 import java.util.ArrayDeque
 import kotlin.math.abs
 
-
 object InkAlign {
     private const val TAG = "MosaicInkAlign"
-    
+
     private const val PREFS = "mosaic_ink_align_v2"
     private const val KEY_DX = "dx"
     private const val KEY_DY = "dy"
     private const val KEY_N = "n"
 
-    
     private const val PAIR_WINDOW_MS = 600L
-    
+
     private const val SIZE_TOLERANCE_PX = 4f
-    
+
     private const val AMBIGUITY_MARGIN_PX = 1.5f
-    
+
     private const val MAX_DELTA_PX = 15f
-    
+
     private const val OUTLIER_FROM_MEDIAN_PX = 5f
     private const val MIN_SAMPLES_TO_APPLY = 3
     private const val MAX_SAMPLES = 15
@@ -74,7 +72,6 @@ object InkAlign {
         }
     }
 
-    
     fun setBaseline(bx: Float, by: Float) {
         synchronized(lock) {
             val n = prefs?.getInt(KEY_N, 0) ?: 0
@@ -100,7 +97,6 @@ object InkAlign {
         }
     }
 
-    
     fun onPenUp(l: Float, t: Float, r: Float, b: Float) {
         val now = SystemClock.uptimeMillis()
         synchronized(lock) {
@@ -150,7 +146,7 @@ object InkAlign {
         var ambiguous = false
         synchronized(lock) {
             while (pending.isNotEmpty() && now - pending.first.t > PAIR_WINDOW_MS) pending.removeFirst()
-            
+
             var best: Pending? = null
             var bestScore = Float.MAX_VALUE
             var secondScore = Float.MAX_VALUE
@@ -164,7 +160,7 @@ object InkAlign {
             }
             if (best != null && secondScore - bestScore < AMBIGUITY_MARGIN_PX) {
                 ambiguous = true
-                
+
                 pending.removeAll { p ->
                     abs(fwW - (p.r - p.l)) <= SIZE_TOLERANCE_PX && abs(fwH - (p.b - p.tp)) <= SIZE_TOLERANCE_PX
                 }
@@ -190,8 +186,6 @@ object InkAlign {
         val mx: Float; val my: Float; val n: Int
         var outlier = false
         synchronized(lock) {
-            
-            
             if (samplesX.size >= MIN_SAMPLES_TO_APPLY) {
                 val cmx = median(samplesX); val cmy = median(samplesY)
                 if (abs(dx - cmx) > OUTLIER_FROM_MEDIAN_PX || abs(dy - cmy) > OUTLIER_FROM_MEDIAN_PX) outlier = true

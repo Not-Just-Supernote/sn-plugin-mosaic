@@ -10,17 +10,13 @@ import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
-
 object BoardGeometry {
-
-    
     const val MIN_CARD_SIZE = 80f
     const val MIN_IMAGE_CARD_SIZE = MIN_CARD_SIZE * 3f
     const val MAX_CARD_SIZE = 2000f
     const val DEFAULT_CARD_WIDTH = 320f
     const val DEFAULT_CARD_HEIGHT = 280f
 
-    
     const val CONNECT_DISTANCE = 40f
     const val SNAP_DISTANCE = 56f
     const val BRIDGE_GAP = 18f
@@ -28,15 +24,11 @@ object BoardGeometry {
     const val CARD_STROKE_MIN_OVERLAP = 48f
     const val CARD_STROKE_GAP = 72f
 
-    
     const val CARD_HANDLE_HIT_PX = 34f
     const val CARD_DRAG_THRESHOLD_PX = 14f
     const val CARD_LONG_PRESS_MS = 500L
     const val LASSO_MIN_BOX_PX = 50f
 
-    
-    
-    
     const val MIN_ZOOM_SCALE = 0.36666667f
     const val NORMAL_ZOOM_SCALE = 0.8f
     const val MAX_ZOOM_SCALE = 2.0f
@@ -57,7 +49,6 @@ object BoardGeometry {
         BOTTOM(false, false, false, true),
         LEFT(true, false, false, false);
 
-        
         val isCorner: Boolean get() = (movesLeft || movesRight) && (movesTop || movesBottom)
     }
 
@@ -65,11 +56,8 @@ object BoardGeometry {
 
     class SizeLevel(val factor: Float, val neighborId: String, val rect: RectF)
 
-    
-
     fun minCardSize(kind: String?): Float = if (kind == "image") MIN_IMAGE_CARD_SIZE else MIN_CARD_SIZE
 
-    
     fun clampCardSize(width: Float, height: Float, kind: String?, out: PointF = PointF()): PointF {
         val lo = minCardSize(kind)
         out.set(
@@ -79,7 +67,6 @@ object BoardGeometry {
         return out
     }
 
-    
     fun cardRectFromFrame(frame: RectF, kind: String? = "text"): RectF {
         val size = clampCardSize(frame.width(), frame.height(), kind)
         val x = frame.left + (frame.width() - size.x) / 2f
@@ -87,15 +74,12 @@ object BoardGeometry {
         return RectF(x, y, x + size.x, y + size.y)
     }
 
-    
-
     fun pointInRect(x: Float, y: Float, r: RectF): Boolean =
         x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
 
     fun pointHitsCard(card: BoardEngine.CardRec, x: Float, y: Float): Boolean =
         x >= card.x && x <= card.x + card.width && y >= card.y && y <= card.y + card.height
 
-    
     fun topCardAt(cardsByZ: List<BoardEngine.CardRec>, x: Float, y: Float): BoardEngine.CardRec? {
         var hit: BoardEngine.CardRec? = null
         for (card in cardsByZ) if (pointHitsCard(card, x, y)) hit = card
@@ -105,7 +89,6 @@ object BoardGeometry {
     fun nextZIndex(cards: Collection<BoardEngine.CardRec>): Int =
         (cards.maxOfOrNull { it.zIndex } ?: 0) + 1
 
-    
     fun handleAt(card: BoardEngine.CardRec, x: Float, y: Float, scale: Float): Handle? {
         val radius = CARD_HANDLE_HIT_PX / max(scale, 0.25f)
         val left = card.x
@@ -128,7 +111,6 @@ object BoardGeometry {
         }
     }
 
-    
     fun resizeRect(handle: Handle, startX: Float, startY: Float, start: RectF, worldX: Float, worldY: Float, kind: String?, out: RectF): RectF {
         val dx = worldX - startX
         val dy = worldY - startY
@@ -143,7 +125,6 @@ object BoardGeometry {
         return out
     }
 
-    
     fun resizeProportional(handle: Handle, startX: Float, startY: Float, start: RectF, worldX: Float, worldY: Float, kind: String?, out: RectF): RectF {
         val oldCornerX = if (handle.movesLeft) start.left else start.right
         val oldCornerY = if (handle.movesTop) start.top else start.bottom
@@ -161,7 +142,6 @@ object BoardGeometry {
         return out
     }
 
-    
     fun resizeWidthKeepAspect(handle: Handle, startX: Float, startY: Float, start: RectF, worldX: Float, worldY: Float, kind: String?, out: RectF): RectF {
         val dx = worldX - startX
         val requestedW = start.width() + (if (handle.movesRight) dx else 0f) - (if (handle.movesLeft) dx else 0f)
@@ -198,8 +178,6 @@ object BoardGeometry {
         out.set(x, y, x + w, y + h)
     }
 
-    
-
     private fun overlap(a0: Float, a1: Float, b0: Float, b1: Float): Float = max(0f, min(a1, b1) - max(a0, b0))
 
     fun edgeDistance(ax: Float, ay: Float, aw: Float, ah: Float, b: BoardEngine.CardRec): Float {
@@ -211,11 +189,9 @@ object BoardGeometry {
     fun edgeDistance(a: BoardEngine.CardRec, b: BoardEngine.CardRec): Float =
         edgeDistance(a.x, a.y, a.width, a.height, b)
 
-    
     fun canConnect(a: BoardEngine.CardRec, b: BoardEngine.CardRec): Boolean =
         a.id != b.id && a.colored == b.colored
 
-    
     fun findSnap(
         others: Iterable<BoardEngine.CardRec>,
         card: BoardEngine.CardRec,
@@ -258,17 +234,10 @@ object BoardGeometry {
             consider(x, other.y - h - BRIDGE_GAP)
             consider(x, other.y + other.height + BRIDGE_GAP)
         }
-        
-        
-        
-        
-        
+
         return if (snapped) SnapResult(snapX, snapY, other.id) else SnapResult(x, y, null)
     }
 
-    
-
-    
     fun cardFromStrokeRect(source: BoardEngine.CardRec, endX: Float, endY: Float): RectF {
         val w = source.width
         val h = if (source.kind == "note") w * 0.61803398875f else source.height
@@ -288,8 +257,6 @@ object BoardGeometry {
         }
         return RectF(x, y, x + w, y + h)
     }
-
-    
 
     private val SIZE_LEVEL_FACTORS = floatArrayOf(0.5f, 2f, 4f)
     private const val SIZE_LEVEL_SHRINK_NEAR_RATIO = 1.1f
@@ -318,7 +285,6 @@ object BoardGeometry {
         return nearest
     }
 
-    
     fun sizeLevelRect(card: BoardEngine.CardRec, neighbor: BoardEngine.CardRec, width: Float, height: Float): RectF {
         val hGap = card.x >= neighbor.x + neighbor.width || card.x + card.width <= neighbor.x
         val vGap = card.y >= neighbor.y + neighbor.height || card.y + card.height <= neighbor.y
@@ -365,8 +331,6 @@ object BoardGeometry {
         return levels
     }
 
-    
-
     fun scaleForZoomPercent(percent: Float): Float =
         if (percent <= 100f) {
             MIN_ZOOM_SCALE + ((percent - 10f) / 90f) * (NORMAL_ZOOM_SCALE - MIN_ZOOM_SCALE)
@@ -399,7 +363,6 @@ object BoardGeometry {
         return best
     }
 
-    
     fun zoomAroundScreenPoint(panX: Float, panY: Float, scale: Float, nextScale: Float, ax: Float, ay: Float): FloatArray {
         val s = if (scale > 0f) scale else 1f
         val worldX = (ax - panX) / s

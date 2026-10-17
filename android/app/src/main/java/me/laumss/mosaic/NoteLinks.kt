@@ -11,12 +11,10 @@ import com.ratta.supernote.pluginlib.modules.PluginModule
 import org.json.JSONObject
 import java.io.File
 
-
 object NoteLinks {
     private const val TAG = "MosaicNoteLinks"
     private const val STORE_FILENAME = "note-shots.json"
 
-    
     private const val CORNER_LEN = 44f
     private const val CORNER_STROKE = 5f
     private const val CORNER_OFFSET = 4f
@@ -32,13 +30,13 @@ object NoteLinks {
     class Link(
         val shot: NoteShotExport.Shot,
         val notePath: String,
-        
+
         val page: Int,
         val updatedAt: String,
     ) {
         val id: String get() = shot.id
         val noteName: String get() = File(notePath).nameWithoutExtension
-        
+
         val recorded: RectF? = run {
             var out: RectF? = null
             for (b in shot.cards.values + shot.strokes.values) out = out?.apply { union(b) } ?: RectF(b)
@@ -47,7 +45,6 @@ object NoteLinks {
     }
 
     class Frame(val id: String, val rect: RectF, val label: String, val badge: RectF) {
-        
         val extent: RectF = RectF(rect).apply {
             val out = CORNER_OFFSET + CORNER_STROKE + 2f
             inset(-out, -out)
@@ -60,12 +57,11 @@ object NoteLinks {
     private val lock = Any()
     private var links: List<Link> = emptyList()
     private var stamp: Pair<Long, Long>? = null
-    
+
     private var active = true
-    
+
     private val reach = HashMap<String, RectF>()
 
-    
     @Volatile
     var frames: List<Frame> = emptyList()
         private set
@@ -74,7 +70,7 @@ object NoteLinks {
         textSize = LABEL_SIZE
         isFakeBoldText = true
     }
-    
+
     private val cornerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = INK
@@ -100,7 +96,6 @@ object NoteLinks {
         null
     }
 
-    
     fun reload(file: File): List<RectF> {
         synchronized(lock) {
             val nextStamp = file.lastModified() to file.length()
@@ -128,7 +123,6 @@ object NoteLinks {
         return refresh(null)
     }
 
-    
     fun setActive(on: Boolean) {
         synchronized(lock) {
             if (active == on) return
@@ -138,7 +132,6 @@ object NoteLinks {
         }
     }
 
-    
     fun refresh(dirty: RectF?): List<RectF> = synchronized(lock) { refreshLocked(dirty) }
 
     private fun refreshLocked(dirty: RectF?): List<RectF> {
@@ -173,10 +166,8 @@ object NoteLinks {
         return changed
     }
 
-    
     fun list(): List<Link> = synchronized(lock) { links }
 
-    
     fun regionOf(id: String): RectF? = frames.firstOrNull { it.id == id }?.let { RectF(it.rect) }
 
     fun badgeAt(x: Float, y: Float, slop: Float, minSide: Float): String? {
@@ -203,14 +194,13 @@ object NoteLinks {
         return Frame(link.id, RectF(region), label, RectF(left, top, left + width, top + LABEL_SIZE * 1.25f + 4f))
     }
 
-    
     fun draw(canvas: Canvas, world: RectF) {
         for (frame in frames) {
             if (!RectF.intersects(frame.extent, world)) continue
             drawCorners(canvas, frame.rect)
             val badge = frame.badge
             canvas.drawRect(badge, badgePaint)
-            
+
             val ax = badge.left + LABEL_PAD_X
             val ay = badge.centerY() - ARROW / 2f
             canvas.drawLine(ax, ay + ARROW, ax + ARROW, ay, arrowPaint)

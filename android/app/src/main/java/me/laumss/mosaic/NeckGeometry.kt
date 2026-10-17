@@ -6,9 +6,7 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
-
 object NeckGeometry {
-
     private const val CORNER_RADIUS = 15f
     private const val FOOTPRINT_DISTANCE = 80f
     private const val SHRINK_CLAMP_MIN = 0.01f
@@ -19,10 +17,8 @@ object NeckGeometry {
     private const val INSET = 2f
     private const val EPS = 1e-7f
 
-    
     const val MAX_DISTANCE = 160f
 
-    
     const val RECONNECT_DISTANCE = BoardGeometry.CONNECT_DISTANCE
 
     private const val THREAD_INSET = 12f
@@ -59,7 +55,6 @@ object NeckGeometry {
 
     private fun center(r: RectF) = V(r.centerX(), r.centerY())
 
-    
     fun signedEdgeDistance(a: RectF, b: RectF): Float {
         val dx = max(0f, max(a.left - b.right, b.left - a.right))
         val dy = max(0f, max(a.top - b.bottom, b.top - a.bottom))
@@ -69,7 +64,6 @@ object NeckGeometry {
         return -min(overlapX, overlapY)
     }
 
-    
     private fun edgeStart(r: RectF, edge: Int): V = when (edge) {
         0 -> V(r.left, r.top)
         1 -> V(r.right, r.top)
@@ -84,7 +78,6 @@ object NeckGeometry {
         else -> V(r.left, r.top)
     }
 
-    
     private fun rayExit(r: RectF, from: V, dir: V): Exit {
         var s = Float.POSITIVE_INFINITY
         var edge = 0
@@ -105,7 +98,6 @@ object NeckGeometry {
         return Exit(V(from.x + dir.x * s, from.y + dir.y * s), edge, s)
     }
 
-    
     private fun wallAnchor(r: RectF, exit: Exit, sameEdge: Boolean, wrapEnd: Boolean): Anchor {
         val radius = min(CORNER_RADIUS, min(r.width() / 2f, r.height() / 2f))
         val start = edgeStart(r, exit.edge)
@@ -123,13 +115,11 @@ object NeckGeometry {
         return Anchor(other + uOwnInto * d, -uOwnInto)
     }
 
-    
     private fun insetTowardCenter(r: RectF, p: V): V {
         val inward = normalize(center(r) - p)
         return p + inward * INSET
     }
 
-    
     fun build(a: RectF, b: RectF, maxDistance: Float = MAX_DISTANCE): Path? {
         val centerA = center(a)
         val centerB = center(b)
@@ -140,7 +130,6 @@ object NeckGeometry {
         val gap = max(0f, signedEdgeDistance(a, b))
         if (gap > maxDistance) return null
 
-        
         val shrink = 1f - (gap / FOOTPRINT_DISTANCE).coerceIn(SHRINK_CLAMP_MIN, SHRINK_CLAMP_MAX)
         fun guide(r: RectF, c: V, side: Float): V {
             val dir = perpendicular * side
@@ -152,7 +141,6 @@ object NeckGeometry {
         val guideBLow = guide(b, centerB, -1f)
         val guideBHigh = guide(b, centerB, 1f)
 
-        
         val wallLowDir = normalize(guideBLow - guideALow)
         val wallHighDir = normalize(guideBHigh - guideAHigh)
         if (wallLowDir.isZero || wallHighDir.isZero) return null
@@ -161,7 +149,6 @@ object NeckGeometry {
         val exitAHigh = rayExit(a, guideAHigh, wallHighDir)
         val exitBHigh = rayExit(b, guideBHigh, -wallHighDir)
 
-        
         val sameEdgeA = exitALow.edge == exitAHigh.edge
         val sameEdgeB = exitBLow.edge == exitBHigh.edge
         val anchorALow = wallAnchor(a, exitALow, sameEdgeA, wrapEnd = false)
@@ -174,8 +161,6 @@ object NeckGeometry {
         val bLow = insetTowardCenter(b, anchorBLow.point)
         val bHigh = insetTowardCenter(b, anchorBHigh.point)
 
-        
-        
         fun orderByPerpendicular(p: V, q: V): Array<V> {
             val pProjection = p.x * perpendicular.x + p.y * perpendicular.y
             val qProjection = q.x * perpendicular.x + q.y * perpendicular.y
@@ -188,18 +173,12 @@ object NeckGeometry {
         val bLowFinal = orderedB[0]
         val bHighFinal = orderedB[1]
 
-        
-        
-        
-        
         val wallT = lerp(HANDLE_SCALE_NEAR, 0.42f, min(1f, gap / HANDLE_DISTANCE))
         val cpALow = aLowFinal + (bLowFinal - aLowFinal) * wallT
         val cpBLow = bLowFinal + (aLowFinal - bLowFinal) * wallT
         val cpAHigh = aHighFinal + (bHighFinal - aHighFinal) * wallT
         val cpBHigh = bHighFinal + (aHighFinal - bHighFinal) * wallT
 
-        
-        
         val chordA = dist(aHighFinal, aLowFinal)
         val chordB = dist(bHighFinal, bLowFinal)
         val wallLowLength = dist(aLowFinal, bLowFinal)
@@ -209,10 +188,7 @@ object NeckGeometry {
         val highRoundness = 0.78f + 0.44f * (wallLowLength / wallTotal)
         val capLow = min(CORNER_RADIUS * 1.35f * lowRoundness, chordB * 0.32f)
         val capHigh = min(CORNER_RADIUS * 1.35f * highRoundness, chordB * 0.32f)
-        
-        
-        
-        
+
         val bCapDir = normalize(bHighFinal - bLowFinal)
         val capCpLow = bLowFinal + bCapDir * capLow
         val capCpHigh = bHighFinal - bCapDir * capHigh
@@ -232,7 +208,6 @@ object NeckGeometry {
         return path
     }
 
-    
     fun buildThread(a: RectF, b: RectF): ThreadShape? {
         val gapX = max(b.left - a.right, a.left - b.right)
         val gapY = max(b.top - a.bottom, a.top - b.bottom)
@@ -260,7 +235,7 @@ object NeckGeometry {
             insetB = min(THREAD_INSET, b.height() / 2f)
             span = gapY
         }
-        
+
         val handle = min(max(span * 0.5f, THREAD_HANDLE_MIN), min(THREAD_HANDLE_MAX, span))
         val p0 = edgeA
         val p1 = edgeA + normalA * handle
@@ -312,7 +287,6 @@ object NeckGeometry {
         return ThreadShape(path, centerline)
     }
 
-    
     fun threadHit(centerline: FloatArray, x: Float, y: Float, radius: Float): Boolean {
         val reach = radius + THREAD_END_WIDTH / 2f
         var i = 0

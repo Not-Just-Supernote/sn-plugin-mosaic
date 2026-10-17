@@ -13,7 +13,6 @@ import java.util.zip.CRC32
 import java.util.zip.Deflater
 import java.util.zip.DeflaterOutputStream
 
-
 // The thumbnail is a column of PNG tiles: notes/<ref>/<tile>.png, each 480x640 note units.
 object NotePreview {
     private const val PX_PER_UNIT = 3f

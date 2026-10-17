@@ -9,11 +9,9 @@ import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.uimanager.UIManagerModule
 
-
 class MosaicBoardEngineModule(
     reactContext: ReactApplicationContext,
 ) : ReactContextBaseJavaModule(reactContext) {
-
     override fun getName(): String = "MosaicBoardEngine"
 
     // JS replaces the whole scene as clearScene, a run of applyOps, then documentReplaced. Those calls are gathered
@@ -46,27 +44,22 @@ class MosaicBoardEngineModule(
         reactApplicationContext.getNativeModule(UIManagerModule::class.java)?.resolveView(viewTag) as? MosaicBoardView
     } catch (_: Throwable) { null }
 
-    
     @ReactMethod(isBlockingSynchronousMethod = true)
     fun getCurrentSurface(): String = InklingLink.currentSurface()
 
-    
     @ReactMethod(isBlockingSynchronousMethod = true)
     fun isBoardSurface(): Boolean = InklingLink.isBoardSurface()
 
-    
     @ReactMethod
     fun applyOps(base64: String) {
         enqueue { BoardEngine.applyOps(base64) }
     }
 
-    
     @ReactMethod
     fun setViewport(panX: Double, panY: Double, scale: Double) {
         enqueue { BoardEngine.setViewport(panX.toFloat(), panY.toFloat(), scale.toFloat()) }
     }
 
-    
     @ReactMethod
     fun setViewportIfUnset(panX: Double, panY: Double, scale: Double) {
         val ctx = reactApplicationContext
@@ -77,7 +70,6 @@ class MosaicBoardEngineModule(
         }
     }
 
-    
     @ReactMethod
     fun selectCards(viewTag: Int, ids: ReadableArray) {
         val list = ArrayList<String>()
@@ -85,7 +77,6 @@ class MosaicBoardEngineModule(
         withView(viewTag) { it.controller.selectCards(list) }
     }
 
-    
     @ReactMethod
     fun clearScene() {
         SceneCache.jsReplaceStarted()
@@ -94,7 +85,6 @@ class MosaicBoardEngineModule(
         main.postDelayed(replaceTimeout, REPLACE_TIMEOUT_MS)
     }
 
-    
     @ReactMethod
     fun documentReplaced(viewTag: Int) {
         if (flushReplace(viewTag)) return
@@ -104,7 +94,6 @@ class MosaicBoardEngineModule(
         }
     }
 
-    
     @ReactMethod
     fun undo(viewTag: Int) {
         withView(viewTag) { it.controller.undo() }
@@ -115,7 +104,6 @@ class MosaicBoardEngineModule(
         withView(viewTag) { it.controller.redo() }
     }
 
-    
     @ReactMethod
     fun focusNoteShot(viewTag: Int, shotJson: String) {
         withView(viewTag) { it.controller.focusNoteShot(shotJson) }
@@ -126,7 +114,6 @@ class MosaicBoardEngineModule(
         withView(viewTag) { it.reloadNoteLinks() }
     }
 
-    
     @ReactMethod
     fun renderNoteShot(viewTag: Int, shotJson: String, promise: Promise) {
         withView(viewTag, onMissing = { promise.resolve(null) }) { view ->
@@ -134,25 +121,21 @@ class MosaicBoardEngineModule(
         }
     }
 
-    
     @ReactMethod
     fun setSyncState(viewTag: Int, enabled: Boolean, state: String, address: String) {
         withView(viewTag) { it.controller.setSyncState(enabled, state, address) }
     }
 
-    
     @ReactMethod
     fun createRecognizedTextCard(viewTag: Int, text: String) {
         withView(viewTag) { it.controller.createRecognizedTextCard(text) }
     }
 
-    
     @ReactMethod
     fun insertDocTextCard(viewTag: Int, text: String) {
         withView(viewTag) { it.controller.insertDocTextCard(text) }
     }
 
-    
     @ReactMethod
     fun importNoteCard(viewTag: Int, path: String, title: String, promise: Promise) {
         withView(viewTag, onMissing = { promise.resolve(false) }, waitForBoard = false) { view ->
@@ -162,7 +145,6 @@ class MosaicBoardEngineModule(
         }
     }
 
-    
     @ReactMethod
     fun invalidateImages(paths: ReadableArray) {
         val list = ArrayList<String>()
@@ -170,7 +152,6 @@ class MosaicBoardEngineModule(
         enqueue { BoardEngine.invalidateImages(list) }
     }
 
-    
     @ReactMethod
     fun addListener(eventName: String) = Unit
 

@@ -4,7 +4,6 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 
-
 object MosaicStrings {
     private val zh: Boolean
         get() = Locale.getDefault().language.startsWith("zh")
@@ -86,7 +85,6 @@ object MosaicStrings {
     fun noteName(number: Int): String =
         if (zh) "笔记 $number" else "Note $number"
 
-    
     fun noteLinkArrived(name: String, page: Int): String {
         val where = if (page >= 0) (if (zh) "，截图在第 ${page + 1} 页" else ", shot on page ${page + 1}") else ""
         return if (zh) "回到笔记《$name》$where" else "Back to note $name$where"

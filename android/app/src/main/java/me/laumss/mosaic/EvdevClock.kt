@@ -2,14 +2,10 @@ package me.laumss.mosaic
 
 import java.io.FileDescriptor
 
-
 internal object EvdevClock {
-    
     private const val EVIOCSCLOCKID = 0x400445a0
     private const val CLOCK_MONOTONIC = 1
 
-    
-    
     private val intRefClass by lazy { Class.forName("android.system.Int32Ref") }
     private val ioctlInt by lazy {
         Class.forName("android.system.Os").getMethod(

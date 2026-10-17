@@ -22,18 +22,13 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-
 object NoteShotExport {
-
-    
     const val CONTENT_PADDING = 32f
 
-    
     private const val MIN_WIDTH_DP = 180f
-    
+
     private const val MAX_PX_PER_DP = 4f
 
-    
     private const val STRIP_DP = 44f
     private const val TAG_MARGIN_DP = 4f
     private const val TAG_HEIGHT_DP = 36f
@@ -46,16 +41,15 @@ object NoteShotExport {
     private const val TAG_TEXT = "Mosaic"
     private const val TAG_COLOR = 0xFF111111.toInt()
 
-    
     class Shot(
         val id: String,
-        
+
         val rect: RectF?,
-        
+
         val cards: Map<String, RectF>,
         val strokes: Map<String, RectF>,
         val fingerprint: String,
-        
+
         val pxPerWorld: Float,
     ) {
         companion object {
@@ -102,9 +96,7 @@ object NoteShotExport {
         }
     }
 
-    
     class Anchored(val region: RectF, val cards: Map<String, RectF>, val strokes: Map<String, RectF>) {
-        
         fun anchorsJson(): String =
             JSONObject().put("cards", boxesJson(cards)).put("strokes", boxesJson(strokes)).toString()
 
@@ -117,13 +109,10 @@ object NoteShotExport {
         }
     }
 
-    
     class Layout(val region: RectF, val pxPerWorld: Float, val stripPx: Int, val widthPx: Int, val heightPx: Int)
 
-    
     class Hotspot(val x: Float, val y: Float, val w: Float, val h: Float)
 
-    
     fun capture(cardIds: Collection<String>, strokeIds: Collection<String>): Anchored? {
         val cards = LinkedHashMap<String, RectF>()
         val strokes = LinkedHashMap<String, RectF>()
@@ -142,7 +131,6 @@ object NoteShotExport {
         return Anchored(padded(content), cards, strokes)
     }
 
-    
     fun resolve(shot: Shot): Anchored? {
         val dxs = ArrayList<Float>()
         val dys = ArrayList<Float>()
@@ -182,7 +170,6 @@ object NoteShotExport {
         return Anchored(region, keptCards, keptStrokes)
     }
 
-    
     fun anchorExtent(shot: Shot): RectF? {
         var out: RectF? = null
         for (id in shot.cards.keys) {
@@ -196,7 +183,6 @@ object NoteShotExport {
         return out
     }
 
-    
     fun fingerprint(region: RectF): String {
         val sb = StringBuilder(4096)
         sb.append(round1(region.left)).append(',').append(round1(region.top)).append(',')
@@ -217,7 +203,7 @@ object NoteShotExport {
             }
             val canvas = ArrayList<BoardEngine.StrokeRec>()
             BoardEngine.queryCanvasStrokes(region, canvas)
-            
+
             canvas.sortBy { it.id }
             for (s in canvas) appendStroke(sb, s)
         }
@@ -226,7 +212,6 @@ object NoteShotExport {
         return digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
-    
     fun layout(region: RectF, pxPerWorld: Float, density: Float, maxWidthPx: Float, maxHeightPx: Float): Layout {
         val w = max(1f, region.width())
         val h = max(1f, region.height())
@@ -242,7 +227,6 @@ object NoteShotExport {
         return Layout(RectF(region), scale, stripPx, widthPx, heightPx)
     }
 
-    
     fun drawTag(canvas: Canvas, density: Float, widthPx: Int, heightPx: Int): Hotspot {
         val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
@@ -263,7 +247,7 @@ object NoteShotExport {
         })
         val baseline = rect.centerY() - (text.ascent() + text.descent()) / 2f
         canvas.drawText(TAG_TEXT, rect.left + padX, baseline, text)
-        
+
         val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             color = Color.WHITE
@@ -280,7 +264,6 @@ object NoteShotExport {
         return Hotspot(rect.left / w, rect.top / h, rect.width() / w, rect.height() / h)
     }
 
-    
     fun writeGrayPng(bitmap: Bitmap, file: File) {
         val width = bitmap.width
         val height = bitmap.height
@@ -315,7 +298,7 @@ object NoteShotExport {
         DataOutputStream(header).apply {
             writeInt(width)
             writeInt(height)
-            write(byteArrayOf(8, 0, 0, 0, 0)) 
+            write(byteArrayOf(8, 0, 0, 0, 0))
         }
         DataOutputStream(BufferedOutputStream(FileOutputStream(file), 64 * 1024)).use { out ->
             out.write(byteArrayOf(137.toByte(), 80, 78, 71, 13, 10, 26, 10))
@@ -336,7 +319,6 @@ object NoteShotExport {
         out.writeInt(crc.value.toInt())
     }
 
-    
     private fun luma(argb: Int): Int {
         val a = (argb ushr 24) and 0xff
         val y = (((argb shr 16) and 0xff) * 299 + ((argb shr 8) and 0xff) * 587 + (argb and 0xff) * 114) / 1000
@@ -345,7 +327,6 @@ object NoteShotExport {
 
     private fun cardBounds(id: String): RectF? = BoardEngine.cards[id]?.rect(RectF())
 
-    
     private fun strokeBounds(id: String): RectF? {
         val s = BoardEngine.strokes[id] ?: return null
         val out = RectF(s.bounds)

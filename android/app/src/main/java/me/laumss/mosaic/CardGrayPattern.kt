@@ -6,7 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Shader
 
-/** Shared by the board and the lab; the pattern stays one device pixel per sample. */
+/** Shared by the board and the drag preview; the pattern stays one device pixel per sample. */
 object CardGrayPattern {
     private val ranks10: IntArray by lazy {
         val ordered = (0 until 100).sortedBy { index ->

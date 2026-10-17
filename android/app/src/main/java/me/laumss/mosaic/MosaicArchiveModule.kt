@@ -12,7 +12,6 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
-
 class MosaicArchiveModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
     override fun getName(): String = "MosaicArchive"
 
@@ -31,7 +30,6 @@ class MosaicArchiveModule(context: ReactApplicationContext) : ReactContextBaseJa
         return out
     }
 
-    
     @ReactMethod
     fun saveArchive(sourceDir: String, archivePath: String, entries: ReadableArray, promise: Promise) = runAsync(promise) {
         val source = File(sourceDir).canonicalFile
@@ -57,7 +55,6 @@ class MosaicArchiveModule(context: ReactApplicationContext) : ReactContextBaseJa
         archive.absolutePath
     }
 
-    
     @ReactMethod
     fun restoreArchive(sourceDir: String, archivePath: String, requiredFile: String, entries: ReadableArray, promise: Promise) = runAsync(promise) {
         val target = File(sourceDir).canonicalFile
@@ -117,7 +114,7 @@ class MosaicArchiveModule(context: ReactApplicationContext) : ReactContextBaseJa
         }
         staged.deleteRecursively()
         previous.deleteRecursively()
-        
+
         CardImageCache.clear()
         true
     }

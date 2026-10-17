@@ -10,9 +10,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-
 class BoardCommandEmitter(private val reactContext: ReactContext) {
-
     companion object {
         private const val TAG = "MosaicBoardCommand"
         const val EVENT_NAME = "MosaicBoardCommand"
@@ -36,7 +34,6 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
         send(ops)
     }
 
-    
     private fun op(map: WritableMap) {
         val current = batch
         if (current != null) {
@@ -47,9 +44,6 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
     }
 
     private fun send(ops: WritableArray) {
-        
-        
-        
         if (!reactContext.hasActiveReactInstance()) {
             Log.w(TAG, "emit skipped: react instance inactive ops=${ops.size()}")
             return
@@ -64,8 +58,6 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
         }
     }
 
-    
-
     fun strokeUpsert(rec: BoardEngine.StrokeRec) {
         op(
             Arguments.createMap().apply {
@@ -74,9 +66,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 putString("space", rec.space)
                 putDouble("width", rec.width.toDouble())
                 putDouble("color", (rec.color.toLong() and 0xffffffffL).toDouble())
-                
-                
-                
+
                 putInt("pen", rec.penStyle)
                 putInt("drawPathWidth", rec.drawPathWidth)
                 putDouble("sampleScale", rec.sampleScale.toDouble())
@@ -84,9 +74,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 if (rec.angles.isNotEmpty()) putString("angles", packAngles(rec.angles))
                 if (rec.contourOffsets.isNotEmpty()) putArray("contourOffsets", Arguments.createArray().apply { rec.contourOffsets.forEach(::pushInt) })
                 putString("points", packPoints(rec.points, rec.pressures))
-                
-                
-                
+
                 putMap("bounds", Arguments.createMap().apply {
                     putDouble("left", rec.bounds.left.toDouble())
                     putDouble("top", rec.bounds.top.toDouble())
@@ -97,7 +85,6 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
         )
     }
 
-    
     fun strokeUpsertBatch(records: Collection<BoardEngine.StrokeRec>) {
         if (records.isEmpty()) return
         val startedAt = System.nanoTime()
@@ -193,8 +180,6 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
         })
     }
 
-    
-
     fun cardUpsert(rec: BoardEngine.CardRec) {
         op(
             Arguments.createMap().apply {
@@ -206,8 +191,7 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
                 putDouble("height", rec.height.toDouble())
                 putInt("zIndex", rec.zIndex)
                 putString("kind", rec.kind)
-                
-                
+
                 putString("content", rec.content)
                 putString("noteRef", rec.noteRef)
                 if (rec.kind == "image" && rec.imagePath.isNotEmpty()) putString("imageRef", java.io.File(rec.imagePath).name)
@@ -251,9 +235,6 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
         )
     }
 
-    
-
-    
     var viewMetricsDp: (() -> FloatArray)? = null
 
     fun viewport(panX: Float, panY: Float, scale: Float) {
@@ -273,7 +254,6 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
         )
     }
 
-    
     fun action(name: String, args: (WritableMap.() -> Unit)? = null) {
         op(
             Arguments.createMap().apply {
@@ -284,12 +264,9 @@ class BoardCommandEmitter(private val reactContext: ReactContext) {
         )
     }
 
-    
-
     private fun stringArray(ids: Collection<String>): WritableArray =
         Arguments.createArray().apply { for (id in ids) pushString(id) }
 
-    
     private fun packPoints(points: FloatArray, pressures: FloatArray?): String {
         val count = points.size / 2
         val buf = ByteBuffer.allocate(count * 12).order(ByteOrder.LITTLE_ENDIAN)

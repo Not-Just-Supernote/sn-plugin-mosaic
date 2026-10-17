@@ -17,7 +17,6 @@ import kotlin.math.min
  * 两条腿可以伸进卡片里不少，也可以差一点没碰到边。
  */
 object CardEdgeExtend {
-
     enum class Side { LEFT, TOP, RIGHT, BOTTOM }
 
     class Match(val card: BoardEngine.CardRec, val side: Side, val depth: Float, val rect: RectF, val metrics: String)

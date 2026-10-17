@@ -34,27 +34,25 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
-
 class MosaicNoteShotModule(
     reactContext: ReactApplicationContext,
 ) : ReactContextBaseJavaModule(reactContext) {
-
     companion object {
         private const val TAG = "MosaicNoteShotNative"
         private const val MODULE_NAME = "MosaicNoteShot"
         private const val RESTORE_EVENT = "MosaicRestoreTarget"
-        
+
         private const val USERDATA_MARKER = "mosaicShot"
-        
+
         private const val SHOT_STORE_FILENAME = "note-shots.json"
-        
+
         private const val MAX_SIGNATURE_DISTANCE = 24
-        
+
         private const val MAX_ASPECT_DIFF = 0.04f
         private const val TAP_MAX_DURATION_MS = 450L
         private const val TAP_MAX_DISTANCE_PX = 32f
         private const val HIT_PADDING_PX = 10f
-        
+
         private const val MIN_HIT_PX = 72f
         private const val DEFAULT_HOTSPOT_WIDTH = 0.3f
         private const val DEFAULT_HOTSPOT_HEIGHT = 0.08f
@@ -87,7 +85,6 @@ class MosaicNoteShotModule(
             activeInstance?.onBoardVisibilityChanged(visible)
         }
 
-        
         @JvmStatic
         fun currentHostNotePath(): String? = try {
             HostDataCacheAPI.getInstance()
@@ -98,7 +95,6 @@ class MosaicNoteShotModule(
             null
         }
 
-        
         @JvmStatic
         fun parseShotUserData(raw: String?): JSONObject? {
             if (raw.isNullOrBlank()) return null
@@ -132,10 +128,8 @@ class MosaicNoteShotModule(
         var maxDistance: Float = 0f,
     )
 
-    
     private class Hit(val id: String, val num: Int, val region: JSONArray?, val fingerprint: String, val adopt: Boolean)
 
-    
     private class ShotVersion(
         val id: String,
         val updatedAt: String,
@@ -147,7 +141,6 @@ class MosaicNoteShotModule(
         val hotspot: JSONArray?,
     )
 
-    
     private class CopyMatch(val version: ShotVersion, val distance: Int)
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -161,7 +154,7 @@ class MosaicNoteShotModule(
     private var pendingRestoreJson: String? = null
     private var inputReader: InputReader? = null
     private val versionsLock = Any()
-    
+
     private var versionsIndex: List<ShotVersion> = emptyList()
     private var versionsStamp = 0L to -1L
 
@@ -188,7 +181,6 @@ class MosaicNoteShotModule(
         Log.i(TAG, "background note tap monitor stopped")
     }
 
-    
     @ReactMethod
     fun takePendingRestore(promise: Promise) {
         val value = synchronized(pendingLock) {
@@ -197,7 +189,6 @@ class MosaicNoteShotModule(
         promise.resolve(value)
     }
 
-    
     @ReactMethod
     fun pictureSignature(path: String, aspect: Double, promise: Promise) {
         Thread({
@@ -275,7 +266,6 @@ class MosaicNoteShotModule(
         false
     }
 
-    
     private fun inspectTap(x: Float, y: Float) {
         val context = tapContext()
         if (!context.permits()) return
@@ -348,7 +338,6 @@ class MosaicNoteShotModule(
         }
     }
 
-    
     private fun hitTest(
         app: PluginAppAPI,
         elements: List<Element>,
@@ -394,7 +383,6 @@ class MosaicNoteShotModule(
         return null
     }
 
-    
     private fun matchCopy(app: PluginAppAPI, picturePath: String?, aspect: Float): CopyMatch? {
         val signature = PictureSignature.of(picturePath, aspect)
         if (signature == null) {
@@ -402,7 +390,7 @@ class MosaicNoteShotModule(
             return null
         }
         var best: CopyMatch? = null
-        
+
         var closestId: String? = null
         var closestDistance = Int.MAX_VALUE
         val aspect = signature.width.toFloat() / max(1, signature.height)
@@ -430,7 +418,6 @@ class MosaicNoteShotModule(
         return best
     }
 
-    
     private fun loadVersions(app: PluginAppAPI): List<ShotVersion> = synchronized(versionsLock) {
         val file = File(app.pluginPath, SHOT_STORE_FILENAME)
         val stamp = file.lastModified() to file.length()
@@ -469,7 +456,6 @@ class MosaicNoteShotModule(
         x >= rect.left - HIT_PADDING_PX && x <= rect.right + HIT_PADDING_PX &&
             y >= rect.top - HIT_PADDING_PX && y <= rect.bottom + HIT_PADDING_PX
 
-    
     private fun hotspotRect(picture: RectF, hs: JSONArray?): RectF {
         val nx = (hs?.optDouble(0, 0.0)?.toFloat() ?: 0f).coerceIn(0f, 1f)
         val ny = (hs?.optDouble(1, 0.0)?.toFloat() ?: 0f).coerceIn(0f, 1f)
@@ -500,7 +486,6 @@ class MosaicNoteShotModule(
 
     @Synchronized
     private fun beginQuery(filePath: String): Long? {
-        
         if (queryBusy.get()) cancelActiveQuery("tap-supersedes")
         if (!queryBusy.compareAndSet(false, true)) return null
         val token = querySequence.incrementAndGet()
@@ -569,29 +554,26 @@ class MosaicNoteShotModule(
     }
 }
 
-
 internal object PictureSignature {
     private const val TAG = "MosaicNoteShotNative"
     private const val GRID = 16
-    
+
     private const val CONTENT_LUMA = 235
-    
+
     private const val EDGE_IGNORE_PX = 8
-    
+
     private const val HASH_DELTA = 0.75
-    
+
     private const val FULL_DECODE_PIXELS = 4_000_000L
-    
+
     private const val EXTRACT_LOOKBACK_MS = 5_000L
-    
+
     private const val MAX_CANDIDATES = 6
-    
+
     private const val ASPECT_TOLERANCE = 0.05f
 
-    
     class Signature(val width: Int, val height: Int, val hash: String)
 
-    
     fun of(path: String?, aspect: Float = 0f): Signature? {
         if (path.isNullOrEmpty()) return null
         val file = existingFile(path, aspect) ?: return null
@@ -620,7 +602,7 @@ internal object PictureSignature {
         val width = bitmap.width
         val height = bitmap.height
         val row = IntArray(width)
-        
+
         val edge = (EDGE_IGNORE_PX / sample).coerceAtLeast(1).takeIf { width > it * 4 && height > it * 4 } ?: 0
         var left = width
         var right = -1
@@ -650,7 +632,7 @@ internal object PictureSignature {
         }
         val contentWidth = right - left + 1
         val contentHeight = bottom - top + 1
-        
+
         val columns = GRID + 1
         val sums = DoubleArray(columns * GRID)
         val counts = IntArray(columns * GRID)
@@ -680,7 +662,6 @@ internal object PictureSignature {
         return Signature(contentWidth * sample, contentHeight * sample, hex.toString())
     }
 
-    
     private fun existingFile(path: String, aspect: Float): File? {
         val reported = File(path)
         val candidates = ArrayList<File>(MAX_CANDIDATES + 1)
@@ -714,7 +695,6 @@ internal object PictureSignature {
         return null
     }
 
-    
     fun distance(a: String, b: String): Int {
         if (a.isEmpty() || a.length != b.length) return Int.MAX_VALUE
         var bits = 0
@@ -727,7 +707,6 @@ internal object PictureSignature {
         return bits
     }
 
-    
     private fun luma(argb: Int): Int {
         val a = (argb ushr 24) and 0xff
         val r = (argb shr 16) and 0xff

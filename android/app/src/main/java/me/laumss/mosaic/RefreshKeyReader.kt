@@ -6,9 +6,7 @@ import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-
 class RefreshKeyReader {
-
     companion object {
         private const val TAG = "MosaicRefreshKey"
         private const val EV_KEY = 1
@@ -82,7 +80,6 @@ class RefreshKeyReader {
         }
     }
 
-    
     private fun scanRefreshDevices(): List<String> {
         val result = ArrayList<String>()
         try {
