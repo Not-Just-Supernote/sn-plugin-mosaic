@@ -27,22 +27,13 @@ internal class SelectionController(private val board: BoardInteractionController
 
     var selectBelowPendingRestore = false
 
+    @set:JvmName("setLassoValue")
     var lasso: LassoSelection? = null
 
     private var selectionCopyBusy = false
 
-    private fun cardResizeLocked(cardId: String): Boolean {
-        val component = connectedComponent(cardId).toSet()
-        return synchronized(BoardEngine.lock) {
-            BoardEngine.connections.values.any { connection ->
-                connection.locked && component.contains(connection.fromId) && component.contains(connection.toId)
-            }
-        }
-    }
-
     fun isSingleCardSelection(sel: LassoSelection): Boolean {
         if (sel.cardIds.size != 1) return false
-        if (cardResizeLocked(sel.cardIds[0])) return false
         if (sel.strokeIds.isEmpty()) return true
         val id = sel.cardIds[0]
         return sel.strokeIds.all { BoardEngine.strokes[it]?.cardId == id }
@@ -55,6 +46,45 @@ internal class SelectionController(private val board: BoardInteractionController
 
     private fun connectedComponent(cardId: String): List<String> = synchronized(BoardEngine.lock) {
         ConnectionBindings.expand(listOf(cardId), BoardEngine.cards.keys, BoardEngine.connections.values)
+    }
+
+    /** Only bound members get inner resize handles; the group still owns selection and movement. */
+    private fun connectedResizeCards(sel: LassoSelection): List<BoardEngine.CardRec> = synchronized(BoardEngine.lock) {
+        if (sel.cardIds.size < 2) return@synchronized emptyList()
+        val selected = sel.cardIds.toHashSet()
+        val members = HashSet<String>()
+        for (connection in BoardEngine.connections.values) {
+            if (connection.locked && connection.fromId in selected && connection.toId in selected) {
+                members.add(connection.fromId)
+                members.add(connection.toId)
+            }
+        }
+        BoardEngine.cardsByZ.filter { it.id in members }
+    }
+
+    fun connectedCardResizeTarget(sel: LassoSelection, wx: Float, wy: Float): Pair<BoardEngine.CardRec, BoardGeometry.Handle>? {
+        val radius = BoardGeometry.CARD_HANDLE_HIT_PX / max(BoardViewport.scale, 0.25f)
+        val top = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
+        for (card in connectedResizeCards(sel).asReversed()) {
+            if (top != null && top.id != card.id) continue
+            val handles = connectedResizeHandles(card)
+            val handle = ResizeHandles.hit(handles, card.rect(RectF()), wx, wy, radius) ?: continue
+            return card to handle
+        }
+        return null
+    }
+
+    fun connectedCardMoveTarget(sel: LassoSelection, wx: Float, wy: Float): BoardEngine.CardRec? {
+        val card = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy) ?: return null
+        return card.takeIf { connectedResizeCards(sel).any { member -> member.id == it.id } }
+    }
+
+    private fun connectedResizeHandles(card: BoardEngine.CardRec): List<BoardGeometry.Handle> {
+        val rect = card.rect(RectF())
+        return ResizeHandles.forSelection(false, true, card.kind == "note").filter { handle ->
+            val cover = BoardGeometry.topCardAt(BoardEngine.cardsByZ, ResizeHandles.x(handle, rect), ResizeHandles.y(handle, rect))
+            cover == null || cover.id == card.id
+        }
     }
 
     private fun expandBoundSelection(sel: LassoSelection): LassoSelection = synchronized(BoardEngine.lock) {
@@ -283,7 +313,8 @@ internal class SelectionController(private val board: BoardInteractionController
         if (next == null) {
             board.handler.postDelayed({
                 if (lasso == null && !board.pen.penContact && !board.lassoMode) {
-                    board.presentation.release(BoardPresentation.Reason.LASSO, linger = false)
+                    // Clearing a selection does not end the held lasso refresh mode.
+                    // Only an explicit tool choice (or plugin teardown) releases A2.
                     board.content.markSettleRequested()
                     board.content.postInvalidateOnAnimation()
                 }
@@ -310,11 +341,17 @@ internal class SelectionController(private val board: BoardInteractionController
     fun updateLassoOverlay() {
         val current = lasso
         if (current == null) {
+            board.overlay.setConnectedCardResizeFrames(emptyList())
             board.overlay.setLassoFrame(null)
             return
         }
         val framePx = board.worldRectToPx(current.rect, RectF())
         val singleCard = isSingleCardSelection(current)
+        board.overlay.setConnectedCardResizeFrames(connectedResizeCards(current).map { card ->
+            InteractionOverlayView.CardResizeFrame(
+                board.worldRectToPx(card.rect(RectF()), RectF()), connectedResizeHandles(card), card.colored,
+            )
+        })
         val shapeKind = shapeKindOf(current)
         val selectedShape = shapeStrokeOf(current)
         val shapeFilled = selectedShape?.penStyle == PenStyle.FILLED_SHAPE.objType
@@ -524,6 +561,14 @@ internal class SelectionController(private val board: BoardInteractionController
         val card = BoardEngine.cards[sel.cardIds[0]] ?: return
         val frame = card.rect(RectF()).apply { inset(-LASSO_BOUNDS_PAD, -LASSO_BOUNDS_PAD) }
         lasso = LassoSelection(frame, sel.cardIds, sel.strokeIds, sel.fromLasso)
+        BoardEngine.mutate { setSelection(selectionIds()) }
+        updateLassoOverlay()
+    }
+
+    fun refreshAfterCardResize() {
+        val sel = lasso ?: return
+        if (isSingleCardSelection(sel)) { refreshSingleCardFrame(); return }
+        lasso = LassoSelection(selectionFrame(sel), sel.cardIds, sel.strokeIds, sel.fromLasso)
         BoardEngine.mutate { setSelection(selectionIds()) }
         updateLassoOverlay()
     }

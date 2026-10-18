@@ -19,7 +19,7 @@ class BoardPresentation(
     private val einkOwner: String,
     private val settleMs: Long,
 ) {
-    // motion：画面跟着手移动的手势，选择运动配方；Regal 由宿主管理。
+    // motion：画面跟着手移动的手势，选择运动配方；最终帧的 UI Regal 由 CardTrailCleanup 请求开启。
     // 卡片在交互期间保留原来的底色。
     enum class Reason(
         val einkMode: Int?, val flat: Boolean, val suspendFog: Boolean,
@@ -30,12 +30,18 @@ class BoardPresentation(
         // Notipal 浮窗在白板上被拖动：与双指平移相同的显示，被浮窗让出的区域按 A2 快刷。
         INKLING_DRAG(MosaicEinkRefreshModule.MODE_A2, flat = true, suspendFog = true),
 
-        // 拖动、改尺寸和旋转共用 A2 与运动配方，预览保留字迹。
+        // 卡片实际拖动临时使用 AUTO；松手回到持有的套索 A2。
+        CARD_MOVE(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false, motion = true),
+
+        // 卡片改尺寸使用 A2；松手只释放调整原因，不释放套索 A2。
+        CARD_ADJUST(MosaicEinkRefreshModule.MODE_A2, flat = false, suspendFog = false, motion = true),
+
+        // 旋转和纯笔迹变换仍使用 A2。
         TRANSFORM(MosaicEinkRefreshModule.MODE_A2, flat = false, suspendFog = false, motion = true),
 
         TOOL(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false),
 
-        LASSO(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = false),
+        LASSO(MosaicEinkRefreshModule.MODE_A2, flat = false, suspendFog = false),
 
         SCREEN_TOOL(MosaicEinkRefreshModule.MODE_DEFAULT, flat = false, suspendFog = true),
 
@@ -115,6 +121,9 @@ class BoardPresentation(
             val m = r.einkMode ?: continue
             if (eink == null || MosaicEinkRefreshModule.priority(m) > MosaicEinkRefreshModule.priority(eink)) eink = m
         }
+        // CARD_MOVE is a temporary exception to the held lasso A2 request, not a
+        // global change to refresh priority. All other operations retain A2 priority.
+        if (Reason.CARD_MOVE in active) eink = MosaicEinkRefreshModule.MODE_DEFAULT
         val moving = isBoardSurface() && (active + lingering).any { it.motion || it == Reason.INKLING_DRAG }
         return State(flat, flat && isBoardSurface(), fog, eink, moving)
     }
@@ -144,7 +153,7 @@ class BoardPresentation(
                 content.runWhenGestureFrameDrawn(Runnable {
                     if (gen == resetGen && applied.einkMode == mode && applied.movingCards) {
                         MosaicEinkRefreshModule.applyNative(mode, einkOwner)
-                        Log.i(TAG, "A2 after moving recipe ready")
+                        Log.i(TAG, "mode=$mode after moving recipe ready")
                     }
                 })
             } else if (mode == null) resetEink()

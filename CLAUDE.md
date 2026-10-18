@@ -10,7 +10,7 @@ Kotlin 代码在 `android/app/src/main/java/me/laumss/mosaic/`，按职责分包
 - `engine/`：场景数据和几何。`BoardEngine`（场景）、`BoardViewport`（视口）、`BoardHistory`（撤销）、`BoardGeometry`、`NeckGeometry`、`Shapes` 等，不依赖视图。
 - `render/`：四层视图和绘制，见下。
 - `drawpath/`：系统笔迹服务。连接和配置在 `DrawPathSession`，抬笔后的交接、背景同步和清轨迹的整屏刷新在 `InkHandoff`。
-- `eink/`：刷新模式 `BoardPresentation`，卡片移动后的残影清理 `CardTrailCleanup`、`EinkTrailCleanup`、`EinkRegionDriver`（JNI 在 `cpp/eink_region.c`，函数名带包名，换包要一起改）。
+- `eink/`：刷新模式 `BoardPresentation`，卡片/画布移动后的最终帧与 UI Regal 控制 `CardTrailCleanup`；`EinkRegionDriver` 只读屏幕忙碌状态（JNI 在 `cpp/eink_region.c`，函数名带包名，换包要一起改）。
 - `note/`：笔记卡片。打开关闭和页面状态在 `NoteSession`，文件读写在 `NoteController`、`TchFile`，插入 Note 的截图和链接在 `NoteShots`。
 - `inkling/`：Notipal 协同。广播在 `InklingLink`，剪贴板、调色盘和导入在 `InklingBridge`，回调在 `InklingCallbacks`。
 
@@ -54,6 +54,8 @@ JS 依赖的 `React/src/` 只有 `boardFormat.ts` 在仓库里，其余文件不
 
 笔尖下的笔迹由系统服务实时绘制，代码在 `DrawPathClient.kt`。抬笔后笔迹立即存入，但停笔 3 秒后才由 Mosaic 重绘替换。这 3 秒里内容层不能重画，否则系统笔迹会消失。逻辑在 `InkHandoff` 的 `holdInkHandoff` 附近。
 
+`holdsSystemInk` 包括接触、待提交和整段 3 秒交接等待。悬停、排队的 rearm、重新 configure 和背景同步都遵守这个等待；不要在每次落笔强制重发笔配置。交接定时器不变，连续书写重新计时。
+
 画框、拉出新卡片、连线、方括号扩卡这些手势不留笔迹。抬笔 0.6 秒后整屏刷新（插件根视图 `forceEinkFullUpdate`），系统笔迹就清掉了；背景同步（`syncBackground`）等刷新后 1.2 秒再发（`syncHoldUntil`）。书法笔（drawPath 类型 15）下设备实测：抬笔后 150ms 内刷新经常清不掉（先关掉再打开服务也不能稳定解决），0.6 秒和 1 秒后刷新每次都清掉；只同步背景、只重开服务、在原处重画再擦掉都清不掉。逻辑在 `InkHandoff` 的 `onPenTrailDiscarded` 和 `runPendingFullRefresh`。
 
 套索和图形不走系统服务，轨迹由 Mosaic 自己画。
@@ -62,13 +64,11 @@ JS 依赖的 `React/src/` 只有 `boardFormat.ts` 在仓库里，其余文件不
 
 ## 刷新模式
 
-刷新模式在 `BoardPresentation.kt` 里按原因叠加，`MosaicEinkRefreshModule` 再和笔、滑条等其他来源合并，优先级 A2 > DTH > 其余，同级取最近的。DTH 在设备上效果不好，目前没有地方用。选中后拉手柄或四边任意位置都算改尺寸，角优先（`ResizeHandles.hit`）。双指平移缩放（`PAN_ZOOM`）、Notipal 浮窗拖动（`INKLING_DRAG`）、拖动或旋转选中内容（含长按拖卡片）和调整卡片或选区尺寸（`TRANSFORM`）都用 A2。白板上这些手势期间浅灰卡和桥改用黑白抖动的运动配方（`CardGrayRecipe.MOVING`），配方那一帧画出来后才切 A2，松手时先放掉 A2 再画回灰卡；黑卡照旧；单卡调整尺寸时通过拖动预览层持续显示附属手写，手写随卡片左上角平移，保持原尺寸；拉卡片手柄时系统笔迹服务停掉，和套索拖动一样；底纹和阴影照常；原位置的卡片（连同桥和线）和选中的笔迹从内容层拿掉（`BoardEngine.hiddenCardIds`、`hiddenStrokeIds`），只看叠加层的预览。橡皮和套索工具下也用 auto。选中后静止时不占 auto。
+进入套索工具或显示套索选区（包括长按卡片）后，LASSO 持有 A2（4）。取消选区、结束拖动、调整宽高或自动工具回退不释放；手动选择其他工具时立即按新工具更新。显式选笔时，即使 ToolArbiter.clearBase 的状态没有变化，也会释放该请求。插件 detach 仍清空全部模式。
 
-换样的图块没画完之前，内容层停在按下时的视口，不跟着手指出帧，否则灰卡以灰色在 A2 下移动，滑动开头留下残影。逻辑在 `BoardContentView` 的 `lookPending`。
+卡片长按但未发生位移时使用 CARD_ADJUST / A2；实际拖动时启用 CARD_MOVE / AUTO（7），在 BoardPresentation 内临时优先于套索 A2。松手或取消立即释放 CARD_MOVE 并恢复持有的 A2，不回到宿主刷新。卡片宽高调整、旋转、纯笔迹变换、画布与笔记内部双指平移缩放、浮窗和滑条仍按原 A2 流程执行。卡片拖动与宽高调整保留当前的无延迟最终帧提交。
 
-regal（硬件清残影）由宿主管理，Mosaic 不开关它。
-
-卡片移动或双指平移后，旧位置在浅灰卡下留下的残影由 `EinkTrailCleanup` 清理：画面静止后对露出的白色区域先刷黑再刷白，直接写驱动，代码在 `cpp/eink_region.c` 和 `EinkRegionDriver.kt`。宿主整屏刷新后由 `EinkGrayRestore` 补一帧灰阶。
+本次只使用 setEinkUpdateMode/resetEinkUpdateMode；不恢复 FullUiAuto/Regal DOWN-MOVE 控制、首帧等待或换指试验。静态加深灰色配方保留。CardTrailCleanup 与宿主全刷后的 EinkGrayRestore 保留原有实现；A2 持有期间不强行执行稳定帧 Regal 请求。
 
 ## 笔刷
 
@@ -108,7 +108,9 @@ regal（硬件清残影）由宿主管理，Mosaic 不开关它。
 
 距离超过 160 桥消失，连接保留。重新靠近到 40 以内，桥再出现。
 
-在连接上写字会锁定它。锁定后相连的卡片一起选中、一起移动。
+在连接上写字会锁定它，锁定成员仍一起选中。选中组合后，拖子卡片的边手柄独立调宽高，拖子卡片内部或长按它独立移动；浮动移动手柄和组合空白区域仍移动整组。`ConnectedCardConstraints` 同时约束所有当前可见的相邻桥：预览和提交都停在断桥距离之前，桥上已有的可见笔迹保持原位并完整留在桥的可用区域内，卡片边缘不能吞掉这些笔迹。尺寸到达内容极限后可通过受同样约束的单卡移动调整布局。桥在拖动中实时预览。子卡自身的文字/本地手写最小尺寸约束继续生效，笔记卡保留左右调宽并维持比例的规则。
+
+连接笔迹限制用局部坐标下四倍分辨率的 Region 遮罩，不能在主线程用 Path.op 合并压感笔迹；设备上真实书法笔轮廓曾使 Skia 曲线合并卡死并触发 ANR。场景锁只用于捕获引用，遮罩计算在锁外进行。
 
 ## 线
 

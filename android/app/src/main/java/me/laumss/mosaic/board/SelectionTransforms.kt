@@ -10,9 +10,8 @@ import me.laumss.mosaic.note.*
 import me.laumss.mosaic.render.*
 import android.graphics.Color
 import android.graphics.Path
-import android.graphics.Rect
+import android.graphics.Matrix
 import android.graphics.RectF
-import android.graphics.Region
 import android.os.SystemClock
 import android.util.Log
 import kotlin.math.abs
@@ -25,6 +24,17 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         private const val ROTATE_SNAP_DEG = 3f
     }
 
+    private fun presentationReason(m: MoveSession): BoardPresentation.Reason = when (m) {
+        is MoveSession.CardResize -> BoardPresentation.Reason.CARD_ADJUST
+        is MoveSession.Selection -> when {
+            m.cards.isEmpty() -> BoardPresentation.Reason.TRANSFORM
+            m.autoMoveStarted -> BoardPresentation.Reason.CARD_MOVE
+            else -> BoardPresentation.Reason.CARD_ADJUST
+        }
+        is MoveSession.SelectionResize -> if (m.cards.isNotEmpty()) BoardPresentation.Reason.CARD_ADJUST else BoardPresentation.Reason.TRANSFORM
+        is MoveSession.SelectionRotate -> BoardPresentation.Reason.TRANSFORM
+    }
+
     fun beginResize(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, card: BoardEngine.CardRec, handle: BoardGeometry.Handle): MoveSession.CardResize {
         // 与套索拖动笔迹相同：拖动期间停掉系统笔迹服务，只由 Mosaic 画预览。
         board.host.drawPath.setSuspended(true, "card-resize")
@@ -32,6 +42,8 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         card.rect(session.preview)
         card.rect(session.startRect)
         session.inkBounds = attachedInkWorldBounds(card.id)
+        session.inkLocalBounds = session.inkBounds?.let { RectF(it).apply { offset(-card.x, -card.y) } }
+        session.connectionGuard = ConnectedCardConstraints.capture(card).takeUnless { it.isEmpty }
         val strokeIds = synchronized(BoardEngine.lock) {
             BoardEngine.cardStrokes[card.id]?.map { it.id }.orEmpty()
         }
@@ -42,7 +54,8 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         board.overlay.beginMovePreview(null, emptyList(), inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardViewport.scale * board.density, ink = previewInk)
         hideFromTiles(listOf(card.id))
         board.overlay.showCardPreview(board.worldRectToPx(session.preview, RectF()), card.kind, card.colored)
-        board.presentation.acquire(BoardPresentation.Reason.TRANSFORM)
+        board.presentation.acquire(presentationReason(session))
+        updateConnectionPreview(session.connectionGuard, session.preview)
         Log.i(LogTags.INTERACTION, "[CardAdjust] resize begin card=${card.id} handle=$handle corner=${handle.isCorner} pen=$isPen")
         return session
     }
@@ -59,7 +72,12 @@ internal class SelectionTransforms(private val board: BoardInteractionController
     }
 
     private fun computeResizePreview(m: MoveSession.CardResize, wx: Float, wy: Float) {
-        if (m.handle.isCorner && isTextCard(m.card)) { computeTextScalePreview(m, wx, wy); return }
+        val previous = RectF(m.preview)
+        if (m.handle.isCorner && isTextCard(m.card)) {
+            computeTextScalePreview(m, wx, wy)
+            constrainConnectedResize(m, previous)
+            return
+        }
         when {
             m.card.kind == "note" ->
                 BoardGeometry.resizeWidthKeepAspect(m.handle, m.startWorldX, m.startWorldY, m.startRect, wx, wy, m.card.kind, m.preview)
@@ -68,14 +86,42 @@ internal class SelectionTransforms(private val board: BoardInteractionController
             else ->
                 BoardGeometry.resizeRect(m.handle, m.startWorldX, m.startWorldY, m.startRect, wx, wy, m.card.kind, m.preview)
         }
-        if (m.card.kind != "note") m.inkBounds?.let { ib ->
-            if (m.handle.movesLeft) m.preview.left = min(m.preview.left, ib.left)
-            if (m.handle.movesRight) m.preview.right = max(m.preview.right, ib.right)
-            if (m.handle.movesTop) m.preview.top = min(m.preview.top, ib.top)
-            if (m.handle.movesBottom) m.preview.bottom = max(m.preview.bottom, ib.bottom)
-        }
         CardSizeConstraints.constrainRect(m.card, m.preview, m.handle,
-            proportional = m.card.kind == "image" && m.handle.isCorner)
+            proportional = m.card.kind == "image" && m.handle.isCorner, inkBounds = m.inkLocalBounds)
+        constrainConnectedResize(m, previous)
+    }
+
+    private fun constrainConnectedResize(m: MoveSession.CardResize, previous: RectF) {
+        val guard = m.connectionGuard ?: return
+        logConnectionLimit(m, guard.constrain(previous, m.preview, m.preview))
+        if (m.handle.isCorner && isTextCard(m.card)) {
+            m.fontScale = BoardEngine.clampFontScale(m.card.fontScale * m.preview.width() / m.startRect.width())
+        }
+    }
+
+    private fun logConnectionLimit(m: MoveSession, limited: Boolean) {
+        if (limited && !m.connectionLimited) Log.i(LogTags.INTERACTION, "[ConnectionLimit] stopped before bridge break or ink clipping")
+        m.connectionLimited = limited
+    }
+
+    private fun updateConnectionPreview(guard: ConnectedCardConstraints?, rect: RectF) {
+        if (guard == null) return
+        val scale = BoardViewport.scale * board.density
+        val matrix = Matrix().apply {
+            setScale(scale, scale)
+            postTranslate(BoardViewport.panX * board.density, BoardViewport.panY * board.density)
+        }
+        val bridges = guard.previewPaths(rect).map { (path, dark) ->
+            Path().also { path.transform(matrix, it) } to dark
+        }
+        val ink = guard.bridgeStrokes.flatMap { stroke ->
+            stroke.runs.map { run ->
+                InteractionOverlayView.PreviewInk(Path().also { run.path.transform(matrix, it) },
+                    InkBackdrop.resolve(stroke), run.width * scale, run.filled ||
+                        (stroke.isShape && stroke.penStyle == PenStyle.FILLED_SHAPE.objType))
+            }
+        }
+        board.overlay.setConnectionPreview(bridges, ink)
     }
 
     private fun isTextCard(card: BoardEngine.CardRec): Boolean = card.kind != "image" && card.kind != "note"
@@ -128,7 +174,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         collectSelectionPreview(previewSelection, ArrayList(), ArrayList(), cardRects, inkPath, grayBridges, previewInk)
         board.overlay.beginMovePreview(board.worldRectToPx(sel.rect, RectF()), cardRects, inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardViewport.scale * board.density, cards.map { !it.colored }, grayBridges, ink = previewInk)
         hideFromTiles(sel.cardIds, sel.strokeIds)
-        board.presentation.acquire(BoardPresentation.Reason.TRANSFORM)
+        board.presentation.acquire(presentationReason(session))
         Log.i(LogTags.LASSO, "resize begin cards=${cards.size} strokes=${strokes.size} handle=$handle pen=$isPen")
         return session
     }
@@ -283,16 +329,35 @@ internal class SelectionTransforms(private val board: BoardInteractionController
             cardRects, inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardViewport.scale * board.density, cards.map { !it.colored }, grayBridges, ink = previewInk,
         )
         hideFromTiles(sel.cardIds, sel.strokeIds)
-        board.presentation.acquire(BoardPresentation.Reason.TRANSFORM)
-        val liftZ = if (board.selection.isSingleCardSelection(sel)) BoardGeometry.nextZIndex(BoardEngine.cards.values) else null
+        board.presentation.acquire(if (cards.isNotEmpty()) BoardPresentation.Reason.CARD_ADJUST else BoardPresentation.Reason.TRANSFORM)
+        val guard = if (board.selection.isSingleCardSelection(sel)) cards.singleOrNull()?.let {
+            ConnectedCardConstraints.capture(it).takeUnless { bounds -> bounds.isEmpty }
+        } else null
+        val liftZ = if (board.selection.isSingleCardSelection(sel) && guard == null) BoardGeometry.nextZIndex(BoardEngine.cards.values) else null
         Log.i(LogTags.LASSO, "move begin cards=${cards.size} strokes=${strokes.size} pen=$isPen singleCard=${liftZ != null}")
-        return MoveSession.Selection(isPen, pointerId, wx, wy, sel, cards, strokes, liftZ)
+        return MoveSession.Selection(isPen, pointerId, wx, wy, sel, cards, strokes, liftZ).also {
+            it.connectionGuard = guard
+            cards.singleOrNull()?.let { card -> updateConnectionPreview(guard, card.rect()) }
+        }
+    }
+
+    fun beginConnectedCardMove(isPen: Boolean, pointerId: Int, wx: Float, wy: Float, card: BoardEngine.CardRec): MoveSession.Selection =
+        beginSelectionMove(isPen, pointerId, wx, wy, LassoSelection(card.rect(), listOf(card.id), emptyList()))
+
+    private fun updateSelectionDelta(m: MoveSession.Selection, wx: Float, wy: Float) {
+        val dx = wx - m.startWorldX
+        val dy = wy - m.startWorldY
+        val card = m.cards.singleOrNull()
+        val guard = m.connectionGuard
+        if (guard == null || card == null) { m.dx = dx; m.dy = dy; return }
+        val previous = card.rect().apply { offset(m.dx, m.dy) }
+        val requested = card.rect().apply { offset(dx, dy) }
+        logConnectionLimit(m, guard.constrain(previous, requested, requested))
+        m.dx = requested.left - card.x
+        m.dy = requested.top - card.y
     }
 
     fun updateMoveSession(m: MoveSession, wx: Float, wy: Float) {
-        recordCardCleanupPosition(m)
-        val dx = wx - m.startWorldX
-        val dy = wy - m.startWorldY
         when (m) {
             is MoveSession.CardResize -> {
                 computeResizePreview(m, wx, wy)
@@ -301,11 +366,20 @@ internal class SelectionTransforms(private val board: BoardInteractionController
                     (m.preview.top - m.startRect.top) * BoardViewport.scale * board.density,
                 )
                 board.overlay.showCardPreview(board.worldRectToPx(m.preview, RectF()), m.card.kind, m.card.colored)
+                updateConnectionPreview(m.connectionGuard, m.preview)
             }
             is MoveSession.Selection -> {
-                m.dx = dx
-                m.dy = dy
-                board.overlay.updateMovePreview(dx * BoardViewport.scale * board.density, dy * BoardViewport.scale * board.density)
+                val beforeX = m.dx
+                val beforeY = m.dy
+                updateSelectionDelta(m, wx, wy)
+                if (m.cards.isNotEmpty() && !m.autoMoveStarted && (m.dx != beforeX || m.dy != beforeY)) {
+                    m.autoMoveStarted = true
+                    board.presentation.acquire(BoardPresentation.Reason.CARD_MOVE)
+                    board.presentation.release(BoardPresentation.Reason.CARD_ADJUST, linger = false)
+                    Log.i(LogTags.INTERACTION, "card drag AUTO started; release returns to held lasso A2")
+                }
+                board.overlay.updateMovePreview(m.dx * BoardViewport.scale * board.density, m.dy * BoardViewport.scale * board.density)
+                m.cards.singleOrNull()?.let { updateConnectionPreview(m.connectionGuard, it.rect().apply { offset(m.dx, m.dy) }) }
             }
             is MoveSession.SelectionResize -> {
                 computeSelectionResizePreview(m, wx, wy)
@@ -321,9 +395,9 @@ internal class SelectionTransforms(private val board: BoardInteractionController
     }
 
     fun endMoveSession(m: MoveSession, wx: Float, wy: Float) {
-        recordCardCleanupPosition(m)
-        val dx = wx - m.startWorldX
-        val dy = wy - m.startWorldY
+        if (m is MoveSession.Selection) updateSelectionDelta(m, wx, wy)
+        val dx = if (m is MoveSession.Selection) m.dx else wx - m.startWorldX
+        val dy = if (m is MoveSession.Selection) m.dy else wy - m.startWorldY
         val elapsed = SystemClock.uptimeMillis() - m.startedAt
         when (m) {
             is MoveSession.CardResize -> {
@@ -341,7 +415,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
                     val change = BoardHistory.Change("resize").card(m.card, moved)
                     board.applyChange(change, record = true)
                 }
-                board.selection.refreshSingleCardFrame()
+                board.selection.refreshAfterCardResize()
                 Log.i(LogTags.INTERACTION, "[CardPerf] kind=resize input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed handle=${m.handle}")
             }
             is MoveSession.Selection -> {
@@ -349,7 +423,15 @@ internal class SelectionTransforms(private val board: BoardInteractionController
                 unhideFromTiles()
                 board.host.drawPath.setSuspended(false, "lasso-selection-move-end")
                 val single = m.liftZ?.let { z -> m.cards.singleOrNull()?.let { it to z } }
-                if (single != null && (abs(dx) > 0.01f || abs(dy) > 0.01f)) {
+                if (m.connectionGuard != null) {
+                    val card = m.cards.single()
+                    if (abs(dx) > 0.01f || abs(dy) > 0.01f) {
+                        board.applyChange(BoardHistory.Change("connected-card-move").card(card, card.moved(card.x + dx, card.y + dy)), record = true)
+                    }
+                    // The group selection remains intact; bridge ink stays in world coordinates.
+                    board.selection.refreshAfterCardResize()
+                    Log.i(LogTags.INTERACTION, "[CardPerf] kind=connected-move card=${card.id} dx=$dx dy=$dy limited=${m.connectionLimited}")
+                } else if (single != null && (abs(dx) > 0.01f || abs(dy) > 0.01f)) {
                     val (card, z) = single
                     settleCardDrop(card, card.x + dx, card.y + dy, z)
                     board.selection.refreshSingleCardFrame()
@@ -447,35 +529,11 @@ internal class SelectionTransforms(private val board: BoardInteractionController
                 Log.i(LogTags.INTERACTION, "[LassoPerf] kind=selection-rotate input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed deg=${Math.toDegrees(m.angle.toDouble())}")
             }
         }
-        board.presentation.release(BoardPresentation.Reason.TRANSFORM)
-        board.trailCleanup.schedule(m.cleanupTrail, "card-transform")
-    }
-
-    private fun recordCardCleanupPosition(m: MoveSession) {
-        fun add(rect: RectF) {
-            val px = board.worldRectToPx(rect, RectF())
-            val bounds = Rect(); px.roundOut(bounds)
-            if (!bounds.intersect(0, 0, board.content.width, board.content.height)) return
-            if (!bounds.isEmpty) m.cleanupTrail.op(bounds, Region.Op.UNION)
-        }
-        when (m) {
-            is MoveSession.CardResize -> if (!m.card.colored) add(RectF(m.preview).apply { inset(-16f, -16f) })
-            is MoveSession.Selection -> m.cards.filter { !it.colored }.forEach {
-                add(BoardEngine.cardDirtyBounds(it).apply { offset(m.dx, m.dy) })
-            }
-            is MoveSession.SelectionResize -> {
-                val fx = m.preview.width() / m.startRect.width()
-                val fy = m.preview.height() / m.startRect.height()
-                val pivotX = if (m.handle.movesLeft) m.startRect.right else m.startRect.left
-                val pivotY = if (m.handle.movesTop) m.startRect.bottom else m.startRect.top
-                for (card in m.cards.filter { !it.colored }) {
-                    val r = card.rect()
-                    add(RectF(pivotX + (r.left - pivotX) * fx, pivotY + (r.top - pivotY) * fy,
-                        pivotX + (r.right - pivotX) * fx, pivotY + (r.bottom - pivotY) * fy).apply { inset(-16f, -16f) })
-                }
-            }
-            is MoveSession.SelectionRotate -> Unit
-        }
+        val reason = presentationReason(m)
+        // Restore the static appearance now; the independent lasso request keeps A2
+        // active after card dragging or resizing, until the user chooses another tool.
+        board.presentation.release(reason, linger = reason == BoardPresentation.Reason.TRANSFORM)
+        board.trailCleanup.schedule("card-transform")
     }
 
     fun cancelMoveSession(m: MoveSession) {
@@ -490,7 +548,8 @@ internal class SelectionTransforms(private val board: BoardInteractionController
             is MoveSession.SelectionResize -> { board.overlay.endMovePreview(); unhideFromTiles(); board.host.drawPath.setSuspended(false, "lasso-selection-resize-cancel"); board.selection.updateLassoOverlay() }
             is MoveSession.SelectionRotate -> { board.overlay.endMovePreview(); unhideFromTiles(); board.host.drawPath.setSuspended(false, "lasso-selection-rotate-cancel"); board.selection.updateLassoOverlay() }
         }
-        board.presentation.release(BoardPresentation.Reason.TRANSFORM)
+        val reason = presentationReason(m)
+        board.presentation.release(reason, linger = reason == BoardPresentation.Reason.TRANSFORM)
     }
 
     // 拖动时原位置不留东西：卡片连同桥和线、选中的笔迹都从内容层拿掉，只看叠加层的预览。
@@ -530,9 +589,9 @@ internal class SelectionTransforms(private val board: BoardInteractionController
 
 /** A drag on the selection in progress; the board is changed only when it ends. */
 internal sealed class MoveSession(val isPen: Boolean, val pointerId: Int, val startWorldX: Float, val startWorldY: Float) {
+    var connectionLimited = false
     var rawMoves = 0
     val startedAt = SystemClock.uptimeMillis()
-    val cleanupTrail = Region()
 
     class CardResize(isPen: Boolean, pointerId: Int, sx: Float, sy: Float, val card: BoardEngine.CardRec, val handle: BoardGeometry.Handle) : MoveSession(isPen, pointerId, sx, sy) {
         val preview = RectF()
@@ -540,11 +599,15 @@ internal sealed class MoveSession(val isPen: Boolean, val pointerId: Int, val st
         val startRect = RectF()
 
         var inkBounds: RectF? = null
+        var inkLocalBounds: RectF? = null
+        var connectionGuard: ConnectedCardConstraints? = null
         // A corner drag on a text card scales its text with the card; this is the scale it would get.
         var fontScale = card.fontScale
     }
 
     class Selection(isPen: Boolean, pointerId: Int, sx: Float, sy: Float, val selection: LassoSelection, val cards: List<BoardEngine.CardRec>, val strokes: List<BoardEngine.StrokeRec>, val liftZ: Int?) : MoveSession(isPen, pointerId, sx, sy) {
+        var autoMoveStarted = false
+        var connectionGuard: ConnectedCardConstraints? = null
         var dx = 0f
         var dy = 0f
     }

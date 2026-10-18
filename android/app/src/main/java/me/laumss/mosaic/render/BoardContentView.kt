@@ -638,6 +638,9 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
 
     var onContentSettled: (() -> Unit)? = null
 
+    /** Runs in the final draw before this frame is handed to the compositor. */
+    var onSettledFrameDrawing: (() -> Unit)? = null
+
     @Volatile
     var suspendTranslucent = false
         private set
@@ -853,6 +856,10 @@ class BoardContentView(context: Context) : View(context), BoardEngine.Listener {
             val ready = ArrayList(gestureFrameWaiters)
             gestureFrameWaiters.clear()
             post { for (callback in ready) callback.run() }
+        }
+
+        if (!lookPending && missing == 0 && stale == 0 && !deferRefresh) {
+            onSettledFrameDrawing?.invoke()
         }
 
         if (settleRequested && missing == 0 && stale == 0 && !deferRefresh) {

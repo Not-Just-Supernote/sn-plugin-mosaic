@@ -209,7 +209,9 @@ internal class CardStrokeGestures(private val board: BoardInteractionController)
     private fun completeCardStroke(s: PenSession.Write): Boolean {
         val sourceId = s.cardId ?: return false
         if (s.points.size < 4) return false
-        if (s.continuousWrite) return false
+        // Timing alone must not turn a deliberate pull-out line into automatic card growth.
+        // Brackets have already been consumed above; curved continuous handwriting stays ink.
+        if (s.continuousWrite && !CardLinkGesture.isStraightLine(s.points.toArray(), BoardViewport.scale)) return false
         val source = BoardEngine.cards[sourceId] ?: return false
         val fx = s.points[0]; val fy = s.points[1]
         val lx = s.points[s.points.size - 2]; val ly = s.points[s.points.size - 1]

@@ -289,7 +289,19 @@ internal class TouchInput(private val board: BoardInteractionController) {
                 fingerGesture = FingerGesture.Idle
                 return
             }
-            if (board.selection.selectionHit(currentLasso, wx, wy) || board.overlay.moveHandleHit(x, y, BoardInteractionController.LASSO_ACTION_TAP_SLOP_DP * board.density)) {
+            board.selection.connectedCardResizeTarget(currentLasso, wx, wy)?.let { (card, handle) ->
+                fingerMoveSession = board.transforms.beginResize(false, id, wx, wy, card, handle)
+                fingerGesture = FingerGesture.Move(id)
+                return
+            }
+            val groupMoveHandle = board.overlay.moveHandleHit(x, y, BoardInteractionController.LASSO_ACTION_TAP_SLOP_DP * board.density)
+            val member = if (groupMoveHandle) null else board.selection.connectedCardMoveTarget(currentLasso, wx, wy)
+            if (member != null) {
+                fingerMoveSession = board.transforms.beginConnectedCardMove(false, id, wx, wy, member)
+                fingerGesture = FingerGesture.Move(id)
+                return
+            }
+            if (board.selection.selectionHit(currentLasso, wx, wy) || groupMoveHandle) {
                 fingerMoveSession = board.transforms.beginSelectionMove(false, id, wx, wy, currentLasso)
                 fingerGesture = FingerGesture.Move(id)
                 return
@@ -326,7 +338,9 @@ internal class TouchInput(private val board: BoardInteractionController) {
 
             board.selection.selectConnectedComponent(current)
             val sel = board.selection.lasso ?: return@Runnable
-            fingerMoveSession = board.transforms.beginSelectionMove(false, id, board.worldX(f.x), board.worldY(f.y), sel)
+            fingerMoveSession = if (sel.cardIds.size > 1)
+                board.transforms.beginConnectedCardMove(false, id, board.worldX(f.x), board.worldY(f.y), current)
+            else board.transforms.beginSelectionMove(false, id, board.worldX(f.x), board.worldY(f.y), sel)
             fingerGesture = FingerGesture.Move(id)
             Log.i(TAG_FINGER, "card hold → lasso move id=${current.id} holdMs=$holdMs")
         }

@@ -247,15 +247,16 @@ object BoardGeometry {
     }
 
     fun cardFromStrokeRect(source: BoardEngine.CardRec, endX: Float, endY: Float): RectF {
-        val w = source.width
-        val h = if (source.kind == "note") w * 0.61803398875f else source.height
-        val dx = endX - (source.x + w / 2f)
+        val dx = endX - (source.x + source.width / 2f)
         val dy = endY - (source.y + source.height / 2f)
+        val horizontal = if (source.kind == "note") abs(dx) / source.width >= abs(dy) / source.height else abs(dx) >= abs(dy)
+        // A horizontal pull copies the source card's height into the new card's width.
+        val w = if (horizontal) source.height else source.width
+        val h = if (source.kind == "note") w * 0.61803398875f else source.height
         val x: Float
         val y: Float
-        val horizontal = if (source.kind == "note") abs(dx) / w >= abs(dy) / source.height else abs(dx) >= abs(dy)
         if (horizontal) {
-            x = if (dx >= 0f) source.x + w + CARD_STROKE_GAP else source.x - w - CARD_STROKE_GAP
+            x = if (dx >= 0f) source.x + source.width + CARD_STROKE_GAP else source.x - w - CARD_STROKE_GAP
             val ov = min(CARD_STROKE_MIN_OVERLAP, min(h, source.height))
             y = max(source.y + ov - h, min(source.y + source.height - ov, endY - h / 2f))
         } else {

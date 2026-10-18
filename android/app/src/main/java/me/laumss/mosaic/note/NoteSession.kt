@@ -29,6 +29,7 @@ internal class NoteSession(private val board: BoardInteractionController) {
 
     val noteController = NoteController()
 
+    @set:JvmName("setNotesDirectoryValue")
     var notesDirectory: String = ""
 
     var suspendedBoard: SuspendedBoard? = null

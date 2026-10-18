@@ -67,6 +67,14 @@ class InteractionOverlayView(context: Context) : View(context) {
 
     private var lassoFrame: RectF? = null
 
+    data class CardResizeFrame(val rect: RectF, val handles: List<BoardGeometry.Handle>, val onDark: Boolean)
+    private var connectedCardResizeFrames: List<CardResizeFrame> = emptyList()
+
+    fun setConnectedCardResizeFrames(frames: List<CardResizeFrame>) {
+        connectedCardResizeFrames = frames
+        invalidate()
+    }
+
     private val lassoActionRects = ArrayList<RectF>()
 
     private val lassoActionTypes = ArrayList<String>()
@@ -86,6 +94,15 @@ class InteractionOverlayView(context: Context) : View(context) {
 
     data class PreviewInk(val path: Path, val color: Int, val width: Float, val filled: Boolean)
     private val moveInk = ArrayList<PreviewInk>()
+    private var connectionPreview: List<Pair<Path, Boolean>> = emptyList()
+    private var connectionPreviewInk: List<PreviewInk> = emptyList()
+
+    /** These bridges and their ink stay in screen coordinates while one card moves. */
+    fun setConnectionPreview(bridges: List<Pair<Path, Boolean>>, ink: List<PreviewInk>) {
+        connectionPreview = bridges
+        connectionPreviewInk = ink
+        invalidate()
+    }
     private var moveStrokeWidth = 1f
     private val blackCardFill = Paint().apply { style = Paint.Style.FILL; color = Color.BLACK }
     private var shapeOnDark = false
@@ -309,6 +326,8 @@ class InteractionOverlayView(context: Context) : View(context) {
     }
 
     fun beginMovePreview(framePx: RectF?, cardsPx: List<RectF>, inkPx: Path, strokeWidthPx: Float, grayCards: List<Boolean> = emptyList(), grayBridges: List<Path> = emptyList(), ink: List<PreviewInk> = emptyList()) {
+        connectionPreview = emptyList()
+        connectionPreviewInk = emptyList()
         moveInk.clear()
         moveInk.addAll(ink)
         moveActive = true
@@ -362,6 +381,8 @@ class InteractionOverlayView(context: Context) : View(context) {
     }
 
     fun endMovePreview() {
+        connectionPreview = emptyList()
+        connectionPreviewInk = emptyList()
         if (!moveActive) return
         moveActive = false
         moveAngleDeg = 0f
@@ -488,6 +509,23 @@ class InteractionOverlayView(context: Context) : View(context) {
             canvas.drawPath(shapePreview, shapePaint)
         }
 
+        for ((path, dark) in connectionPreview) {
+            if (dark) canvas.drawPath(path, blackCardFill) else {
+                movingCardFill.color = CardGrayRecipe.MOVING.low
+                movingCardFill.shader = CardGrayPattern.shader(canvas, CardGrayRecipe.MOVING)
+                canvas.drawPath(path, movingCardFill)
+                movingCardFill.shader = null
+            }
+        }
+        for (run in connectionPreviewInk) {
+            inkPaint.color = run.color
+            inkPaint.style = if (run.filled) Paint.Style.FILL else Paint.Style.STROKE
+            inkPaint.strokeWidth = run.width
+            canvas.drawPath(run.path, inkPaint)
+        }
+        inkPaint.color = INK
+        inkPaint.style = Paint.Style.STROKE
+
         cardPreview?.let { r ->
             if (cardPreviewGray) drawMovingCardFill(canvas, r)
             else canvas.drawRect(r, blackCardFill)
@@ -496,6 +534,11 @@ class InteractionOverlayView(context: Context) : View(context) {
         }
 
         if (lassoVisible && cardPreview == null) {
+            if (!moveActive) for (member in connectedCardResizeFrames) {
+                if (member.onDark) setLassoInk(Color.WHITE, INK)
+                drawHandles(canvas, member.rect, d, member.handles)
+                if (member.onDark) setLassoInk(INK, Color.WHITE)
+            }
             lassoFrame?.let { frame ->
 
                 if (lassoOnDark) setLassoInk(Color.WHITE, INK)

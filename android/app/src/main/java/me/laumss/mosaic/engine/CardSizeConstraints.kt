@@ -39,11 +39,14 @@ object CardSizeConstraints {
         return PointF(ceil(size.x), ceil(size.y))
     }
 
-    fun fit(card: BoardEngine.CardRec, width: Float, height: Float, proportional: Boolean = false): PointF {
+    fun fit(card: BoardEngine.CardRec, width: Float, height: Float, proportional: Boolean = false, inkBounds: RectF? = null): PointF {
         if (card.kind == "note") return PointF(width, height)
         val floor = minimum(card)
-        var w = max(width, floor.x)
-        var h = max(height, if (card.kind == "image") floor.y else measureText(card, w).y)
+        // Ink stays in card-local coordinates when an edge moves. Width/height
+        // must cover its right/bottom even when dragging the left or top edge.
+        var w = max(width, max(floor.x, inkBounds?.right ?: 0f))
+        var h = max(height, max(if (card.kind == "image") floor.y else measureText(card, w).y,
+            inkBounds?.bottom ?: 0f))
         if (proportional) {
             val factor = max(w / max(width, 0.001f), h / max(height, 0.001f))
             w = width * factor
@@ -59,8 +62,8 @@ object CardSizeConstraints {
         return PointF(w, h)
     }
 
-    fun constrainRect(card: BoardEngine.CardRec, rect: RectF, handle: BoardGeometry.Handle, proportional: Boolean) {
-        val size = fit(card, rect.width(), rect.height(), proportional)
+    fun constrainRect(card: BoardEngine.CardRec, rect: RectF, handle: BoardGeometry.Handle, proportional: Boolean, inkBounds: RectF? = null) {
+        val size = fit(card, rect.width(), rect.height(), proportional, inkBounds)
         val x = if (handle.movesLeft) rect.right - size.x else rect.left
         val y = if (handle.movesTop) rect.bottom - size.y else rect.top
         rect.set(x, y, x + size.x, y + size.y)

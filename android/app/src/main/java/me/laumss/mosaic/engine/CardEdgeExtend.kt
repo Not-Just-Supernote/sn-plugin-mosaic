@@ -85,7 +85,9 @@ object CardEdgeExtend {
         var closestNote: String? = null
         val r = RectF()
         for (card in cards) {
-            if (card.kind == "image" || card.kind == "note") continue
+            // Image cards share the same writable frame and pull-out gestures as text cards.
+            // A note preview still represents a separate document, so its frame is not extended here.
+            if (card.kind == "note") continue
             card.rect(r)
             val reach = INSIDE_MAX_DP / s + outTol + alongTol
             if (!near(r, sx, sy, reach) || !near(r, ex, ey, reach)) continue

@@ -27,7 +27,7 @@ class MosaicBoardView(
 ) : FrameLayout(reactContext) {
     companion object {
         private const val TAG = LogTags.BOARD_VIEW
-        private const val NATIVE_BUILD_TAG = "pressure-clock-20260928a"
+        private const val NATIVE_BUILD_TAG = "card-a2-regal-final-20261018"
 
         const val BOARD_VISIBILITY_EVENT = "MosaicBoardVisibility"
     }
@@ -157,6 +157,7 @@ class MosaicBoardView(
             }
         }
         contentView.onContentSettled = { inkHandoff.onContentSettled() }
+        contentView.onSettledFrameDrawing = { controller.trailCleanup.onSettledFrameDrawing() }
     }
 
     override fun onAttachedToWindow() {

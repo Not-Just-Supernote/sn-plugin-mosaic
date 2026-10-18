@@ -51,6 +51,30 @@ class MosaicEinkRefreshModule(
             runOnUiImmediate { module.resetOwned(owner) }
         }
 
+        /** Movement cleanup must not override an active input owner's fast mode. */
+        fun hasFastModeRequest(): Boolean {
+            val module = instance?.get() ?: return false
+            return module.effectiveMode() in listOf(MODE_A2, MODE_DTH) ||
+                module.activeMode in listOf(MODE_A2, MODE_DTH)
+        }
+
+        /** Document HandWriteClient.setRegalStatus: UI-auto Regal, not the master switch. */
+        fun requestUiRegal(view: View, enabled: Boolean, reason: String): Boolean {
+            if (!view.isAttachedToWindow || !view.isShown || !view.hasWindowFocus() ||
+                view.windowVisibility != View.VISIBLE) return false
+            return try {
+                val manager = view.context.getSystemService("eink") ?: return false
+                manager.javaClass.getMethod(
+                    "sendHwcCmd", Int::class.javaPrimitiveType, IntArray::class.java,
+                ).invoke(manager, 1020, intArrayOf(9, if (enabled) 1 else 0))
+                Log.i(TAG, "UI Regal requested enabled=$enabled reason=$reason cmd=1020 args=9,${if (enabled) 1 else 0}")
+                true
+            } catch (error: Exception) {
+                Log.w(TAG, "UI Regal request failed reason=$reason", error)
+                false
+            }
+        }
+
         private fun runOnUiImmediate(block: () -> Unit) {
             if (UiThreadUtil.isOnUiThread()) block() else UiThreadUtil.runOnUiThread(block)
         }
@@ -193,7 +217,7 @@ class MosaicEinkRefreshModule(
                 modeView = null
             }
             activeMode = mode
-            Log.i(TAG, "refreshMode=${mode ?: "reset"} reassert=$reassert view=${target.javaClass.simpleName}")
+            Log.i(TAG, "refreshMode=${mode ?: "reset"} reassert=$reassert view=${target.javaClass.simpleName} owners=$requests")
             true
         } catch (e: Exception) {
             Log.w(TAG, "eink call failed mode=${mode ?: "reset"}: ${e.message}")

@@ -196,9 +196,16 @@ internal class PenInput(private val board: BoardInteractionController) {
         trailCause = "none"
         if (board.penStyle == PenStyle.MARKER) return false
         val top = BoardGeometry.topCardAt(BoardEngine.cardsByZ, wx, wy)
+        val connection = if (top == null) BoardEngine.connectionAt(wx, wy) else null
+        // Use the same bridge ownership as pen-down/committed ink. A separate Path hit
+        // can disagree at curved edges and leave a black bridge's live trail black.
+        if (connection != null && BoardEngine.necks[connection.id]?.dark == true) {
+            trailCause = "bridge:${connection.id}"
+            return true
+        }
         val space = when {
             top != null -> "card:${top.id}"
-            else -> BoardEngine.connectionAt(wx, wy)?.let { "connection:${it.id}" } ?: "canvas"
+            else -> connection?.let { "connection:${it.id}" } ?: "canvas"
         }
         val layerDark = InkBackdrop.layerDarkAt(space, wx - (top?.x ?: 0f), wy - (top?.y ?: 0f), board.penWidth * 0.5f)
         if (layerDark) { trailCause = "layer"; return true }
@@ -263,7 +270,9 @@ internal class PenInput(private val board: BoardInteractionController) {
         val currentLasso = board.selection.lasso
 
         val hadSelection = currentLasso != null
-        if (currentLasso != null && BoardEngine.connectionAt(wx, wy) == null) {
+        val memberResize = currentLasso?.let { board.selection.connectedCardResizeTarget(it, wx, wy) }
+        val memberMove = currentLasso?.let { board.selection.connectedCardMoveTarget(it, wx, wy) }
+        if (currentLasso != null && (BoardEngine.connectionAt(wx, wy) == null || memberResize != null || memberMove != null)) {
             val single = if (board.selection.isSingleCardSelection(currentLasso)) BoardEngine.cards[currentLasso.cardIds[0]] else null
             if (single != null) {
                 val handle = board.selection.singleCardFrameHandle(currentLasso, wx, wy)
@@ -294,7 +303,19 @@ internal class PenInput(private val board: BoardInteractionController) {
                 return
             }
 
-            if (board.selection.selectionHit(currentLasso, wx, wy) || board.overlay.moveHandleHit(x, y, BoardInteractionController.LASSO_ACTION_TAP_SLOP_DP * board.density)) {
+            if (memberResize != null) {
+                penMoveSession = board.transforms.beginResize(true, e.getPointerId(0), wx, wy, memberResize.first, memberResize.second)
+                penSession = PenSession.Consumed
+                return
+            }
+
+            val groupMoveHandle = board.overlay.moveHandleHit(x, y, BoardInteractionController.LASSO_ACTION_TAP_SLOP_DP * board.density)
+            if (!groupMoveHandle && memberMove != null) {
+                penMoveSession = board.transforms.beginConnectedCardMove(true, e.getPointerId(0), wx, wy, memberMove)
+                penSession = PenSession.Consumed
+                return
+            }
+            if (board.selection.selectionHit(currentLasso, wx, wy) || groupMoveHandle) {
                 penMoveSession = board.transforms.beginSelectionMove(true, e.getPointerId(0), wx, wy, currentLasso)
                 penSession = PenSession.Consumed
                 return

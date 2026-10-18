@@ -45,6 +45,9 @@ internal class InkHandoff(private val view: MosaicBoardView) {
 
     private var inkHandoffPending = false
 
+    /** Includes the whole 3s handoff window, not just the interval before scene commit. */
+    val holdsSystemInk: Boolean get() = stylusContact || awaitingStrokeCommit || inkHandoffPending
+
     var plainStrokeCommit = false
 
     private var plainStrokeCommitted = false
@@ -135,13 +138,13 @@ internal class InkHandoff(private val view: MosaicBoardView) {
                 MosaicEinkRefreshModule.resetNative("pen")
             }
         }
-        if (hoverRearmDeferred && !stylusContact && !awaitingStrokeCommit) {
+        if (hoverRearmDeferred && !holdsSystemInk) {
             hoverRearmDeferred = false
             view.drawPath.lastHoverRearmAt = System.currentTimeMillis()
             view.drawPath.rearmDrawPath("hoverEnter:settled")
         }
 
-        if (backgroundSyncUrgency == SyncUrgency.NONE || (stylusContact && view.drawPath.drawPathActive)) return
+        if (backgroundSyncUrgency == SyncUrgency.NONE || (holdsSystemInk && view.drawPath.drawPathActive)) return
         if (discardSyncPending) {
             cancelBackgroundSync()
             sendBackgroundSync()
@@ -177,7 +180,7 @@ internal class InkHandoff(private val view: MosaicBoardView) {
     }
 
     private fun sendBackgroundSync(force: Boolean = false) {
-        if (!view.attached || !view.drawPath.configured || (!force && stylusContact && view.drawPath.drawPathActive)) return
+        if (!view.attached || !view.drawPath.configured || (!force && holdsSystemInk && view.drawPath.drawPathActive)) return
         val held = syncHoldUntil - SystemClock.uptimeMillis()
         if (held > 0) {
             if (backgroundSyncUrgency == SyncUrgency.NONE) backgroundSyncUrgency = SyncUrgency.PROMPT

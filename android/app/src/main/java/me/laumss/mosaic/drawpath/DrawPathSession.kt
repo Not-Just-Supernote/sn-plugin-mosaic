@@ -161,7 +161,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
         val now = System.currentTimeMillis()
         when (action) {
             MotionEvent.ACTION_HOVER_ENTER -> {
-                if (handoff.awaitingStrokeCommit) {
+                if (handoff.holdsSystemInk) {
                     handoff.hoverRearmDeferred = true
                 } else {
                     lastHoverRearmAt = now
@@ -170,7 +170,7 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
             }
             MotionEvent.ACTION_HOVER_MOVE -> {
                 if (now - lastHoverRearmAt > HOVER_REARM_MIN_INTERVAL_MS || penConfigDirty) {
-                    if (handoff.awaitingStrokeCommit) {
+                    if (handoff.holdsSystemInk) {
                         handoff.hoverRearmDeferred = true
                     } else {
                         lastHoverRearmAt = now
@@ -306,9 +306,9 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
             Log.i(LogTags.BOARD_VIEW, "[MosaicTrail] color=$color stored reason=$reason configured=$configured active=$drawPathActive")
             return
         }
-        if (view.inkHandoff.stylusContact || view.inkHandoff.awaitingStrokeCommit) {
+        if (view.inkHandoff.holdsSystemInk) {
             view.inkHandoff.hoverRearmDeferred = true
-            Log.i(LogTags.BOARD_VIEW, "[MosaicTrail] color=$color deferred reason=$reason contact=${view.inkHandoff.stylusContact} awaitingCommit=${view.inkHandoff.awaitingStrokeCommit}")
+            Log.i(LogTags.BOARD_VIEW, "[MosaicTrail] color=$color deferred reason=$reason until ink handoff")
             return
         }
         val binder = drawPathBinder ?: return
@@ -571,6 +571,11 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
     }
 
     fun scheduleConfigure(reason: String) {
+        if (configured && drawPathActive && view.inkHandoff.holdsSystemInk) {
+            view.inkHandoff.hoverRearmDeferred = true
+            Log.i(LogTags.BOARD_VIEW, "drawPath configure deferred: reason=$reason until ink handoff")
+            return
+        }
         configured = false
         val generation = ++configureGeneration
         Log.i(
@@ -651,6 +656,11 @@ internal class DrawPathSession(private val view: MosaicBoardView) {
 
     fun rearmDrawPath(reason: String) {
         if (!configured) return
+        if (drawPathActive && view.inkHandoff.holdsSystemInk) {
+            view.inkHandoff.hoverRearmDeferred = true
+            Log.i(LogTags.BOARD_VIEW, "drawPath rearm deferred: reason=$reason until ink handoff")
+            return
+        }
         val binder = drawPathBinder ?: return
         try {
             configureDrawPath(binder, drawPathActive, reason)

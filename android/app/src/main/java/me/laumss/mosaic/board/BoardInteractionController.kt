@@ -462,13 +462,27 @@ class BoardInteractionController(
     internal fun applyTransition(t: ToolArbiter.Transition?, source: String) {
         if (t == null) return
         Log.i(TAG_TOOL, "$source ${t.reason} ${t.before}->${t.after} keepSelection=${t.keepSelection} ${arbiter.describe()}")
-        if (!t.changed) return
+        if (!t.changed) {
+            updateManualToolRefresh(t.after, source)
+            return
+        }
 
         val previous = pen.penSession
         val discardedWrite = pen.endSessionForToolChange()
         if (!t.after.lasso && !t.after.shape && !t.keepSelection) selection.setLasso(null)
         syncToolViews()
         pen.resumeAfterToolChange(previous, discardedWrite, t.after, source)
+        updateManualToolRefresh(t.after, source)
+    }
+
+    private fun updateManualToolRefresh(state: ToolArbiter.State, source: String) {
+        val manual = (source.startsWith("toolbar-") && source != "toolbar-leave-shape") ||
+            source == "slider-toggle" || source == "manual-refresh"
+        if (!manual) return
+        // Also handle clearBase() with unchanged state: long-press selection can show
+        // lasso while the arbiter's base is still the pen.
+        presentation.set(BoardPresentation.Reason.LASSO, state.lasso, linger = false)
+        Log.i(TAG_TOOL, "manual refresh selection source=$source lassoA2=${state.lasso}")
     }
 
     /**
@@ -486,8 +500,9 @@ class BoardInteractionController(
         host.shapeDrag = state.shape
         host.lassoEnabled = (state.lasso || state.shape) && selectionFree
         presentation.set(BoardPresentation.Reason.TOOL, state.eraser)
-        // 只在套索工具下用 auto；选中后静止时交还宿主刷新，长按拖卡片和拖边改尺寸都只在拖动时切一次。
-        presentation.set(BoardPresentation.Reason.LASSO, state.lasso)
+        // Long-press selection shows lasso without changing the arbiter base. Hold its
+        // A2 until an explicit tool choice; selection changes and gesture UP do not release it.
+        if (state.lasso || showLasso) presentation.acquire(BoardPresentation.Reason.LASSO)
     }
 
     internal fun gestureToolOf(tool: GestureSettings.GestureTool): ToolArbiter.Tool? = when (tool) {
