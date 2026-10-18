@@ -90,11 +90,22 @@ internal class ConnectedCardConstraints(start: RectF, specs: List<Link>) {
         return true
     }
 
+    // The last rectangle constrain() returned. It is legal by construction, so the next
+    // call starting from it does not rasterize the bridge again just to re-check it.
+    private val lastLegal = RectF(start)
+
     /** Walk from the previous legal preview, then stop at the first invalid point. */
     fun constrain(previous: RectF, requested: RectF, out: RectF): Boolean {
         val target = RectF(requested)
         if (isEmpty) { out.set(target); return false }
-        val from = if (isValid(previous)) RectF(previous) else RectF(initial)
+        val from = if (previous == lastLegal || isValid(previous)) RectF(previous) else RectF(initial)
+        if (target == from) { out.set(from); lastLegal.set(from); return false }
+        val limited = walk(from, target, out)
+        lastLegal.set(out)
+        return limited
+    }
+
+    private fun walk(from: RectF, target: RectF, out: RectF): Boolean {
         val distance = max(max(abs(target.left - from.left), abs(target.right - from.right)),
             max(abs(target.top - from.top), abs(target.bottom - from.bottom)))
         if (!distance.isFinite()) { out.set(from); return true }

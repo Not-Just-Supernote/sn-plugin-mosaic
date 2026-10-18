@@ -56,6 +56,9 @@ class BoardPresentation(
         val suspendFog: Boolean,
         val einkMode: Int?,
         val movingCards: Boolean = false,
+        // 卡片用黑白网点配方。运动时开启；运动结束后若仍处于 A2（套索持有），继续保持，
+        // 直到 A2 释放后才换回静态灰色，不在 A2 下画静态灰色（A2 只有黑白，灰色会被画错）。
+        val bwCards: Boolean = movingCards,
     ) {
         companion object { val IDLE = State(false, false, false, null) }
     }
@@ -125,7 +128,8 @@ class BoardPresentation(
         // global change to refresh priority. All other operations retain A2 priority.
         if (Reason.CARD_MOVE in active) eink = MosaicEinkRefreshModule.MODE_DEFAULT
         val moving = isBoardSurface() && (active + lingering).any { it.motion || it == Reason.INKLING_DRAG }
-        return State(flat, flat && isBoardSurface(), fog, eink, moving)
+        val bw = moving || (applied.bwCards && eink == MosaicEinkRefreshModule.MODE_A2 && isBoardSurface())
+        return State(flat, flat && isBoardSurface(), fog, eink, moving, bw)
     }
 
     private fun commit(why: String, force: Boolean = false) {
@@ -134,24 +138,25 @@ class BoardPresentation(
         if (next == prev && !force) return
         applied = next
         val looksChanged = force || next.flatCards != prev.flatCards ||
-            next.hideTemplate != prev.hideTemplate || next.movingCards != prev.movingCards
+            next.hideTemplate != prev.hideTemplate || next.bwCards != prev.bwCards
         val einkChanged = force || next.einkMode != prev.einkMode
 
         val mode = next.einkMode
-        if (einkChanged || next.movingCards != prev.movingCards) resetGen++
-        val leavingMotion = prev.movingCards && !next.movingCards
+        if (einkChanged || next.bwCards != prev.bwCards) resetGen++
+        val leavingBw = prev.bwCards && !next.bwCards
         // Release A2 while the BW frame is still displayed; the next static
-        // DD/E0 frame is then drawn with the host's restored mode.
-        if (leavingMotion) {
+        // gray frame is then drawn with the restored mode. Ending a card drag
+        // while lasso still holds A2 keeps the BW recipe (see bwCards).
+        if (leavingBw) {
             if (mode == null) resetEink() else MosaicEinkRefreshModule.applyNative(mode, einkOwner)
         }
-        if (looksChanged) content.setGesturePresentation(next.flatCards, next.hideTemplate, next.movingCards)
-        if (einkChanged && !leavingMotion) {
-            if (mode != null && next.movingCards && !prev.movingCards) {
+        if (looksChanged) content.setGesturePresentation(next.flatCards, next.hideTemplate, next.bwCards)
+        if (einkChanged && !leavingBw) {
+            if (mode != null && next.bwCards && !prev.bwCards) {
                 // First present the BW recipe under the host mode, then enter A2.
                 val gen = resetGen
                 content.runWhenGestureFrameDrawn(Runnable {
-                    if (gen == resetGen && applied.einkMode == mode && applied.movingCards) {
+                    if (gen == resetGen && applied.einkMode == mode && applied.bwCards) {
                         MosaicEinkRefreshModule.applyNative(mode, einkOwner)
                         Log.i(TAG, "mode=$mode after moving recipe ready")
                     }

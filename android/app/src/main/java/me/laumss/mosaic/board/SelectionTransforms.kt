@@ -104,6 +104,11 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         m.connectionLimited = limited
     }
 
+    // Bridge ink stays put in world coordinates during the drag, and the viewport does not move,
+    // so its screen paths and colors are built once per gesture instead of on every MOVE.
+    private var bridgeInkGuard: ConnectedCardConstraints? = null
+    private var bridgeInk: List<InteractionOverlayView.PreviewInk> = emptyList()
+
     private fun updateConnectionPreview(guard: ConnectedCardConstraints?, rect: RectF) {
         if (guard == null) return
         val scale = BoardViewport.scale * board.density
@@ -114,14 +119,49 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         val bridges = guard.previewPaths(rect).map { (path, dark) ->
             Path().also { path.transform(matrix, it) } to dark
         }
-        val ink = guard.bridgeStrokes.flatMap { stroke ->
-            stroke.runs.map { run ->
-                InteractionOverlayView.PreviewInk(Path().also { run.path.transform(matrix, it) },
-                    InkBackdrop.resolve(stroke), run.width * scale, run.filled ||
-                        (stroke.isShape && stroke.penStyle == PenStyle.FILLED_SHAPE.objType))
+        if (bridgeInkGuard !== guard) {
+            bridgeInkGuard = guard
+            bridgeInk = synchronized(BoardEngine.lock) {
+                guard.bridgeStrokes.flatMap { stroke ->
+                    val color = InkBackdrop.resolve(stroke)
+                    stroke.runs.map { run ->
+                        InteractionOverlayView.PreviewInk(Path().also { run.path.transform(matrix, it) },
+                            color, run.width * scale, run.filled ||
+                                (stroke.isShape && stroke.penStyle == PenStyle.FILLED_SHAPE.objType))
+                    }
+                }
             }
         }
-        board.overlay.setConnectionPreview(bridges, ink)
+        board.overlay.setConnectionPreview(bridges, bridgeInk)
+    }
+
+    private fun clearConnectionPreviewCache() {
+        bridgeInkGuard = null
+        bridgeInk = emptyList()
+    }
+
+    // A connected card checks its bridges on every move, which is far slower than moving a lone
+    // card. Touch frames arrive faster than the screen redraws, so those moves are folded into
+    // one check per frame; the overlay only draws once per frame anyway.
+    private var pendingMove: MoveSession? = null
+    private var pendingX = 0f
+    private var pendingY = 0f
+    private val flushPendingMove = Runnable {
+        val m = pendingMove ?: return@Runnable
+        pendingMove = null
+        applyMove(m, pendingX, pendingY)
+    }
+
+    fun dropPendingMove() {
+        if (pendingMove == null) return
+        pendingMove = null
+        board.overlay.removeCallbacks(flushPendingMove)
+    }
+
+    private fun isConnected(m: MoveSession): Boolean = when (m) {
+        is MoveSession.CardResize -> m.connectionGuard != null
+        is MoveSession.Selection -> m.connectionGuard != null
+        else -> false
     }
 
     private fun isTextCard(card: BoardEngine.CardRec): Boolean = card.kind != "image" && card.kind != "note"
@@ -358,6 +398,16 @@ internal class SelectionTransforms(private val board: BoardInteractionController
     }
 
     fun updateMoveSession(m: MoveSession, wx: Float, wy: Float) {
+        if (!isConnected(m)) { applyMove(m, wx, wy); return }
+        pendingX = wx
+        pendingY = wy
+        if (pendingMove === m) return
+        dropPendingMove()
+        pendingMove = m
+        board.overlay.postOnAnimation(flushPendingMove)
+    }
+
+    private fun applyMove(m: MoveSession, wx: Float, wy: Float) {
         when (m) {
             is MoveSession.CardResize -> {
                 computeResizePreview(m, wx, wy)
@@ -395,6 +445,9 @@ internal class SelectionTransforms(private val board: BoardInteractionController
     }
 
     fun endMoveSession(m: MoveSession, wx: Float, wy: Float) {
+        // The release position below supersedes any move still waiting for its frame.
+        dropPendingMove()
+        clearConnectionPreviewCache()
         if (m is MoveSession.Selection) updateSelectionDelta(m, wx, wy)
         val dx = if (m is MoveSession.Selection) m.dx else wx - m.startWorldX
         val dy = if (m is MoveSession.Selection) m.dy else wy - m.startWorldY
@@ -537,6 +590,8 @@ internal class SelectionTransforms(private val board: BoardInteractionController
     }
 
     fun cancelMoveSession(m: MoveSession) {
+        dropPendingMove()
+        clearConnectionPreviewCache()
         when (m) {
             is MoveSession.CardResize -> {
                 board.overlay.hideCardPreview()

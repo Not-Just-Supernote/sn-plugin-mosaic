@@ -235,6 +235,7 @@ class BoardInteractionController(
         touch.cancelCardLongPress()
         cardGestures.cancelFrameHold()
         pen.reset()
+        transforms.dropPendingMove()
         touch.fingerMoveSession = null
         BoardEngine.hiddenCardIds = emptySet()
         BoardEngine.hiddenStrokeIds = emptySet()

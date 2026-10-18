@@ -68,7 +68,7 @@ JS 依赖的 `React/src/` 只有 `boardFormat.ts` 在仓库里，其余文件不
 
 卡片长按但未发生位移时使用 CARD_ADJUST / A2；实际拖动时启用 CARD_MOVE / AUTO（7），在 BoardPresentation 内临时优先于套索 A2。松手或取消立即释放 CARD_MOVE 并恢复持有的 A2，不回到宿主刷新。卡片宽高调整、旋转、纯笔迹变换、画布与笔记内部双指平移缩放、浮窗和滑条仍按原 A2 流程执行。卡片拖动与宽高调整保留当前的无延迟最终帧提交。
 
-本次只使用 setEinkUpdateMode/resetEinkUpdateMode；不恢复 FullUiAuto/Regal DOWN-MOVE 控制、首帧等待或换指试验。静态加深灰色配方保留。CardTrailCleanup 与宿主全刷后的 EinkGrayRestore 保留原有实现；A2 持有期间不强行执行稳定帧 Regal 请求。
+本次只使用 setEinkUpdateMode/resetEinkUpdateMode；不恢复 FullUiAuto/Regal DOWN-MOVE 控制、首帧等待或换指试验。静态加深灰色配方保留，但只在 A2 之外显示：卡片运动时换成黑白网点配方，运动结束后如果套索仍持有 A2，就继续用网点配方，A2 释放时先恢复模式再画静态灰色（`BoardPresentation.State.bwCards`）。CardTrailCleanup 与宿主全刷后的 EinkGrayRestore 保留原有实现；A2 持有期间不强行执行稳定帧 Regal 请求。
 
 ## 笔刷
 
@@ -110,7 +110,7 @@ JS 依赖的 `React/src/` 只有 `boardFormat.ts` 在仓库里，其余文件不
 
 在连接上写字会锁定它，锁定成员仍一起选中。选中组合后，拖子卡片的边手柄独立调宽高，拖子卡片内部或长按它独立移动；浮动移动手柄和组合空白区域仍移动整组。`ConnectedCardConstraints` 同时约束所有当前可见的相邻桥：预览和提交都停在断桥距离之前，桥上已有的可见笔迹保持原位并完整留在桥的可用区域内，卡片边缘不能吞掉这些笔迹。尺寸到达内容极限后可通过受同样约束的单卡移动调整布局。桥在拖动中实时预览。子卡自身的文字/本地手写最小尺寸约束继续生效，笔记卡保留左右调宽并维持比例的规则。
 
-连接笔迹限制用局部坐标下四倍分辨率的 Region 遮罩，不能在主线程用 Path.op 合并压感笔迹；设备上真实书法笔轮廓曾使 Skia 曲线合并卡死并触发 ANR。场景锁只用于捕获引用，遮罩计算在锁外进行。
+连接子卡片的拖动和调宽高每帧只做一次约束检查（触摸帧合并到 `postOnAnimation`），桥上笔迹的预览路径每次手势只建一次。连接笔迹限制用局部坐标下四倍分辨率的 Region 遮罩，不能在主线程用 Path.op 合并压感笔迹；设备上真实书法笔轮廓曾使 Skia 曲线合并卡死并触发 ANR。场景锁只用于捕获引用，遮罩计算在锁外进行。
 
 ## 线
 
