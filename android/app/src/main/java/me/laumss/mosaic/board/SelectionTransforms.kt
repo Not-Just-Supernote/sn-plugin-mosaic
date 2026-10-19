@@ -26,11 +26,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
 
     private fun presentationReason(m: MoveSession): BoardPresentation.Reason = when (m) {
         is MoveSession.CardResize -> BoardPresentation.Reason.CARD_ADJUST
-        is MoveSession.Selection -> when {
-            m.cards.isEmpty() -> BoardPresentation.Reason.TRANSFORM
-            m.autoMoveStarted -> BoardPresentation.Reason.CARD_MOVE
-            else -> BoardPresentation.Reason.CARD_ADJUST
-        }
+        is MoveSession.Selection -> if (m.cards.isEmpty()) BoardPresentation.Reason.TRANSFORM else BoardPresentation.Reason.CARD_ADJUST
         is MoveSession.SelectionResize -> if (m.cards.isNotEmpty()) BoardPresentation.Reason.CARD_ADJUST else BoardPresentation.Reason.TRANSFORM
         is MoveSession.SelectionRotate -> BoardPresentation.Reason.TRANSFORM
     }
@@ -54,6 +50,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         board.overlay.beginMovePreview(null, emptyList(), inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardViewport.scale * board.density, ink = previewInk)
         hideFromTiles(listOf(card.id))
         board.overlay.showCardPreview(board.worldRectToPx(session.preview, RectF()), card.kind, card.colored)
+        board.lassoAuto.pressed("card-resize")
         board.presentation.acquire(presentationReason(session))
         updateConnectionPreview(session.connectionGuard, session.preview)
         Log.i(LogTags.INTERACTION, "[CardAdjust] resize begin card=${card.id} handle=$handle corner=${handle.isCorner} pen=$isPen")
@@ -214,6 +211,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         collectSelectionPreview(previewSelection, ArrayList(), ArrayList(), cardRects, inkPath, grayBridges, previewInk)
         board.overlay.beginMovePreview(board.worldRectToPx(sel.rect, RectF()), cardRects, inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardViewport.scale * board.density, cards.map { !it.colored }, grayBridges, ink = previewInk)
         hideFromTiles(sel.cardIds, sel.strokeIds)
+        board.lassoAuto.pressed("selection-resize")
         board.presentation.acquire(presentationReason(session))
         Log.i(LogTags.LASSO, "resize begin cards=${cards.size} strokes=${strokes.size} handle=$handle pen=$isPen")
         return session
@@ -292,6 +290,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         board.overlay.beginMovePreview(framePx, emptyList(), inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardViewport.scale * board.density, ink = previewInk)
         board.overlay.updateRotatePreview(0f, framePx.centerX(), framePx.centerY())
         hideFromTiles(sel.cardIds, sel.strokeIds)
+        board.lassoAuto.pressed("selection-rotate")
         board.presentation.acquire(BoardPresentation.Reason.TRANSFORM)
         Log.i(LogTags.LASSO, "rotate begin strokes=${strokes.size} pen=$isPen")
         return MoveSession.SelectionRotate(isPen, pointerId, wx, wy, sel, strokes, sel.rect.centerX(), sel.rect.centerY())
@@ -369,6 +368,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
             cardRects, inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardViewport.scale * board.density, cards.map { !it.colored }, grayBridges, ink = previewInk,
         )
         hideFromTiles(sel.cardIds, sel.strokeIds)
+        board.lassoAuto.pressed("selection-move")
         board.presentation.acquire(if (cards.isNotEmpty()) BoardPresentation.Reason.CARD_ADJUST else BoardPresentation.Reason.TRANSFORM)
         val guard = if (board.selection.isSingleCardSelection(sel)) cards.singleOrNull()?.let {
             ConnectedCardConstraints.capture(it).takeUnless { bounds -> bounds.isEmpty }
@@ -407,7 +407,15 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         board.overlay.postOnAnimation(flushPendingMove)
     }
 
+    // Regal stays on from the press until the selection first changes position, then goes off while it moves.
+    private fun motionStarted(m: MoveSession) {
+        if (m.motionStarted) return
+        m.motionStarted = true
+        board.lassoAuto.moved("${m::class.simpleName}")
+    }
+
     private fun applyMove(m: MoveSession, wx: Float, wy: Float) {
+        if (m !is MoveSession.Selection && (wx != m.startWorldX || wy != m.startWorldY)) motionStarted(m)
         when (m) {
             is MoveSession.CardResize -> {
                 computeResizePreview(m, wx, wy)
@@ -422,12 +430,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
                 val beforeX = m.dx
                 val beforeY = m.dy
                 updateSelectionDelta(m, wx, wy)
-                if (m.cards.isNotEmpty() && !m.autoMoveStarted && (m.dx != beforeX || m.dy != beforeY)) {
-                    m.autoMoveStarted = true
-                    board.presentation.acquire(BoardPresentation.Reason.CARD_MOVE)
-                    board.presentation.release(BoardPresentation.Reason.CARD_ADJUST, linger = false)
-                    Log.i(LogTags.INTERACTION, "card drag AUTO started; release returns to held lasso A2")
-                }
+                if (m.dx != beforeX || m.dy != beforeY) motionStarted(m)
                 board.overlay.updateMovePreview(m.dx * BoardViewport.scale * board.density, m.dy * BoardViewport.scale * board.density)
                 m.cards.singleOrNull()?.let { updateConnectionPreview(m.connectionGuard, it.rect().apply { offset(m.dx, m.dy) }) }
             }
@@ -583,8 +586,8 @@ internal class SelectionTransforms(private val board: BoardInteractionController
             }
         }
         val reason = presentationReason(m)
-        // Restore the static appearance now; the independent lasso request keeps A2
-        // active after card dragging or resizing, until the user chooses another tool.
+        // Restore the static appearance now; the lasso keeps its FullUiAuto until the user
+        // chooses another tool. Regal comes back on in the final frame (CardTrailCleanup).
         board.presentation.release(reason, linger = reason == BoardPresentation.Reason.TRANSFORM)
         board.trailCleanup.schedule("card-transform")
     }
@@ -645,6 +648,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
 /** A drag on the selection in progress; the board is changed only when it ends. */
 internal sealed class MoveSession(val isPen: Boolean, val pointerId: Int, val startWorldX: Float, val startWorldY: Float) {
     var connectionLimited = false
+    var motionStarted = false
     var rawMoves = 0
     val startedAt = SystemClock.uptimeMillis()
 
@@ -661,7 +665,6 @@ internal sealed class MoveSession(val isPen: Boolean, val pointerId: Int, val st
     }
 
     class Selection(isPen: Boolean, pointerId: Int, sx: Float, sy: Float, val selection: LassoSelection, val cards: List<BoardEngine.CardRec>, val strokes: List<BoardEngine.StrokeRec>, val liftZ: Int?) : MoveSession(isPen, pointerId, sx, sy) {
-        var autoMoveStarted = false
         var connectionGuard: ConnectedCardConstraints? = null
         var dx = 0f
         var dy = 0f

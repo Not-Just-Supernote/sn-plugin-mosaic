@@ -273,10 +273,12 @@ class MosaicBoardView(
         Log.i(TAG, "window focus changed: hasFocus=$hasWindowFocus rotation=${display?.rotation}")
         if (attached && !hasWindowFocus) {
             controller.trailCleanup.cancel("focus-lost")
+            controller.lassoAuto.suspend("focus-lost")
             drawPath.restoreDrawPathPressureCurve()
         }
         if (!attached || !hasWindowFocus) return
         controller.trailCleanup.resume("focus-gained")
+        if (windowVisibility == VISIBLE) controller.lassoAuto.resume("focus-gained")
         mainHandler.postDelayed({
             if (attached && hasWindowFocus) {
                 drawPath.requestRotationReconfigure("windowFocusGained")
@@ -289,6 +291,8 @@ class MosaicBoardView(
         if (!attached) return
         if (visibility != VISIBLE) controller.trailCleanup.cancel("hidden")
         else controller.trailCleanup.resume("visible")
+        if (visibility != VISIBLE) controller.lassoAuto.suspend("hidden")
+        else if (hasWindowFocus()) controller.lassoAuto.resume("visible")
         if (visibility != VISIBLE) drawPath.restoreDrawPathPressureCurve()
         else if (hasWindowFocus()) drawPath.scheduleConfigure("window-visible")
     }

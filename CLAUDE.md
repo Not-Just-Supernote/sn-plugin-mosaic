@@ -10,7 +10,7 @@ Kotlin 代码在 `android/app/src/main/java/me/laumss/mosaic/`，按职责分包
 - `engine/`：场景数据和几何。`BoardEngine`（场景）、`BoardViewport`（视口）、`BoardHistory`（撤销）、`BoardGeometry`、`NeckGeometry`、`Shapes` 等，不依赖视图。
 - `render/`：四层视图和绘制，见下。
 - `drawpath/`：系统笔迹服务。连接和配置在 `DrawPathSession`，抬笔后的交接、背景同步和清轨迹的整屏刷新在 `InkHandoff`。
-- `eink/`：刷新模式 `BoardPresentation`，卡片/画布移动后的最终帧与 UI Regal 控制 `CardTrailCleanup`；`EinkRegionDriver` 只读屏幕忙碌状态（JNI 在 `cpp/eink_region.c`，函数名带包名，换包要一起改）。
+- `eink/`：刷新模式 `BoardPresentation`，套索的 FullUiAuto/Regal `LassoAutoRefresh`，移动后的清理 `CardTrailCleanup`（卡片：最终帧 UI Regal；画布平移缩放：`EinkTrailCleanup` 黑白清理）；`EinkRegionDriver` 读屏幕忙碌状态并提交黑白清理（JNI 在 `cpp/eink_region.c`，函数名带包名，换包要一起改）。
 - `note/`：笔记卡片。打开关闭和页面状态在 `NoteSession`，文件读写在 `NoteController`、`TchFile`，插入 Note 的截图和链接在 `NoteShots`。
 - `inkling/`：Notipal 协同。广播在 `InklingLink`，剪贴板、调色盘和导入在 `InklingBridge`，回调在 `InklingCallbacks`。
 
@@ -64,11 +64,13 @@ JS 依赖的 `React/src/` 只有 `boardFormat.ts` 在仓库里，其余文件不
 
 ## 刷新模式
 
-进入套索工具或显示套索选区（包括长按卡片）后，LASSO 持有 A2（4）。取消选区、结束拖动、调整宽高或自动工具回退不释放；手动选择其他工具时立即按新工具更新。显式选笔时，即使 ToolArbiter.clearBase 的状态没有变化，也会释放该请求。插件 detach 仍清空全部模式。
+进入套索工具或显示套索选区（包括长按卡片）后，LASSO 不设视图刷新模式，而是照系统 Note 套索（`AreaSelectionView`、`HandWriteClient.setFullAuto/setRegalStatus`）整段开启 FullUiAuto：`enableFullUiAuto(true, false)`，开关时都把 UI Regal（HWC 1020 `[9,1]`）打开。取消选区、结束拖动或自动工具回退不释放；手动选择其他工具时延迟 200ms 关闭；窗口失焦或隐藏时立即交还宿主，回来后重新打开；插件 detach 和手动全刷立即关闭。代码在 `LassoAutoRefresh`。
 
-卡片长按但未发生位移时使用 CARD_ADJUST / A2；实际拖动时启用 CARD_MOVE / AUTO（7），在 BoardPresentation 内临时优先于套索 A2。松手或取消立即释放 CARD_MOVE 并恢复持有的 A2，不回到宿主刷新。卡片宽高调整、旋转、纯笔迹变换、画布与笔记内部双指平移缩放、浮窗和滑条仍按原 A2 流程执行。卡片拖动与宽高调整保留当前的无延迟最终帧提交。
+套索下的卡片拖动、改尺寸、旋转和纯笔迹变换（CARD_ADJUST、TRANSFORM）都不切换刷新模式：按下（开始拖动）时开 Regal，第一次真正移动时关 Regal，最终帧由 `CardTrailCleanup` 再请求一次 UI Regal。运动中卡片用黑白网点配方，松手恢复静态灰色。
 
-本次只使用 setEinkUpdateMode/resetEinkUpdateMode；不恢复 FullUiAuto/Regal DOWN-MOVE 控制、首帧等待或换指试验。静态加深灰色配方保留，但只在 A2 之外显示：卡片运动时换成黑白网点配方，运动结束后如果套索仍持有 A2，就继续用网点配方，A2 释放时先恢复模式再画静态灰色（`BoardPresentation.State.bwCards`）。CardTrailCleanup 与宿主全刷后的 EinkGrayRestore 保留原有实现；A2 持有期间不强行执行稳定帧 Regal 请求。
+画布双指平移缩放与 3154694 相同：PAN_ZOOM 用 A2 和扁平配方，结束后由 `CardTrailCleanup.schedule(region, …)` 在场景稳定后对旧位置露出的白色区域做黑白清理（`EinkTrailCleanup`、`CardCleanupBacklog`，JNI 在 `cpp/eink_region.c`）。笔记内部平移缩放、浮窗和滑条仍是 A2。
+
+静态加深灰色配方只在 A2 之外显示；A2 期间卡片保持黑白网点，A2 释放时先恢复模式再画静态灰色（`BoardPresentation.State.bwCards`）。宿主全刷后的 EinkGrayRestore 保留原有实现。
 
 ## 笔刷
 

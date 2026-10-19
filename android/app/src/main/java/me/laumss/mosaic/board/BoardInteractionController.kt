@@ -159,8 +159,10 @@ class BoardInteractionController(
     private var regions: List<SparseNavigation.Region> = emptyList()
     private var chromeUpdatePosted = false
 
+    internal val lassoAuto by lazy { LassoAutoRefresh(content) }
+
     internal val presentation by lazy {
-        BoardPresentation(handler, content, { surface.showsBoardChrome }, EINK_OWNER, GESTURE_SETTLE_MS).also {
+        BoardPresentation(handler, content, { surface.showsBoardChrome }, EINK_OWNER, GESTURE_SETTLE_MS, lassoAuto).also {
             it.onStateChanged = { if (pen.penHovering && !pen.penContact) pen.reevaluateTrailColor("presentation") }
         }
     }
@@ -483,7 +485,7 @@ class BoardInteractionController(
         // Also handle clearBase() with unchanged state: long-press selection can show
         // lasso while the arbiter's base is still the pen.
         presentation.set(BoardPresentation.Reason.LASSO, state.lasso, linger = false)
-        Log.i(TAG_TOOL, "manual refresh selection source=$source lassoA2=${state.lasso}")
+        Log.i(TAG_TOOL, "manual refresh selection source=$source lassoAuto=${state.lasso}")
     }
 
     /**
@@ -501,8 +503,8 @@ class BoardInteractionController(
         host.shapeDrag = state.shape
         host.lassoEnabled = (state.lasso || state.shape) && selectionFree
         presentation.set(BoardPresentation.Reason.TOOL, state.eraser)
-        // Long-press selection shows lasso without changing the arbiter base. Hold its
-        // A2 until an explicit tool choice; selection changes and gesture UP do not release it.
+        // Long-press selection shows lasso without changing the arbiter base. Hold the lasso
+        // FullUiAuto until an explicit tool choice; selection changes and gesture UP do not release it.
         if (state.lasso || showLasso) presentation.acquire(BoardPresentation.Reason.LASSO)
     }
 

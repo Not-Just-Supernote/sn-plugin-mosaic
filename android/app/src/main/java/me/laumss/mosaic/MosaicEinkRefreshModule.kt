@@ -75,6 +75,47 @@ class MosaicEinkRefreshModule(
             }
         }
 
+        /**
+         * Document HandWriteClient.setFullAuto: whole-UI auto waveform. Like the Note lasso
+         * (tags containing "lasso"), the two-argument form passes false; enabling and disabling
+         * both leave UI Regal on.
+         */
+        fun setFullUiAuto(view: View, enabled: Boolean, reason: String): Boolean {
+            val manager = view.context.getSystemService("eink") ?: return false
+            return try {
+                val methods = manager.javaClass.methods
+                val twoArg = methods.firstOrNull {
+                    it.name == "enableFullUiAuto" && it.parameterTypes.contentEquals(
+                        arrayOf(Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType))
+                }
+                if (twoArg != null) twoArg.invoke(manager, enabled, false)
+                else methods.first {
+                    it.name == "enableFullUiAuto" && it.parameterTypes.contentEquals(arrayOf(Boolean::class.javaPrimitiveType))
+                }.invoke(manager, enabled)
+                Log.i(TAG, "FullUiAuto enabled=$enabled reason=$reason args=${if (twoArg != null) 2 else 1}")
+                setUiRegal(view, true, "fullAuto:$reason")
+                true
+            } catch (error: Exception) {
+                Log.w(TAG, "FullUiAuto request failed enabled=$enabled reason=$reason", error)
+                false
+            }
+        }
+
+        /** HWC 1020 [9,x] without the visibility checks of requestUiRegal; FullUiAuto state changes use it. */
+        fun setUiRegal(view: View, enabled: Boolean, reason: String): Boolean = try {
+            val manager = view.context.getSystemService("eink")
+            if (manager == null) false else {
+                manager.javaClass.getMethod(
+                    "sendHwcCmd", Int::class.javaPrimitiveType, IntArray::class.java,
+                ).invoke(manager, 1020, intArrayOf(9, if (enabled) 1 else 0))
+                Log.i(TAG, "UI Regal set enabled=$enabled reason=$reason cmd=1020 args=9,${if (enabled) 1 else 0}")
+                true
+            }
+        } catch (error: Exception) {
+            Log.w(TAG, "UI Regal set failed reason=$reason", error)
+            false
+        }
+
         private fun runOnUiImmediate(block: () -> Unit) {
             if (UiThreadUtil.isOnUiThread()) block() else UiThreadUtil.runOnUiThread(block)
         }
