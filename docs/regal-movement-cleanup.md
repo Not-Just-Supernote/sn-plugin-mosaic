@@ -1,10 +1,10 @@
 # 按操作开启 Regal（v3）
 
-2026-10-18，构建标记 `regal-operation-gate-20261018c`。
+2026-10-19 恢复修复，构建标记 `nonauto-a2-regal-window-20261019`。历史 v3 构建标记为 `regal-operation-gate-20261018c`。
 
 ## 策略
 
-- Mosaic 可见且持有窗口焦点时，默认关闭 Regal 总开关与 UI Auto Regal。普通绘制、书写和菜单操作不主动开启。
+- Mosaic 可见且持有窗口焦点、并且 FullUiAuto 未生效时，默认关闭 Regal 总开关与 UI Auto Regal。普通绘制、书写和菜单操作不主动开启。
 - 平移/缩放画布或笔记，以及卡片/选区移动、改尺寸、旋转结束后，等待原有 A2 释放和可见 tile 完成；在同一次最终稳定帧的 onDraw 中临时开启 Regal。A2 和运动配方参数不变。
 - 使用这一帧原有重绘，不再额外补帧。
 - 提交后等待屏幕空闲，再关闭 Regal；普通状态回到关闭。
@@ -32,6 +32,23 @@
 
 隐藏、失焦或分离时取消轮询/超时并恢复宿主已实测的“总开关开、UI 开”基线；重新回到 Mosaic 时重新应用默认关。固件没有对应 getter，这不是精确快照恢复任意旧状态。手动全刷的灰阶恢复继续由 `EinkGrayRestore` 负责。
 
+## 与 FullUiAuto 的交接
+
+`65a5c65` 曾把画布平移重新接回旧黑白批次。本次移除该分支以及旧位置区域/积压队列、可写 JNI；原有 A2 和运动配方不改动。
+
+- `LassoAutoRefresh` 开启 auto 前调用交还回调：取消操作窗口、递增 generation、恢复宿主“总开关开/UI 开”的基线，然后才执行原有 FullUiAuto 启用。
+- auto 生效期间，`canOwn=false`，非 auto 的默认关闭、输入中断、过期 worker 和期限任务均不能关闭 auto。套索按下开/移动关 UI Regal 和最终帧 UI Regal 继续走原逻辑。
+- auto 成功关闭后才重新取得非 auto 默认关闭状态。自动开关调用失败时不伪造 applied 状态，避免错误交接。
+- detach、隐藏、失焦有独立 foreground 门控，防止 detach 内的 auto 关闭回调重新取得已交还的窗口。
+
+## 本地回归检查
+
+```sh
+bash tools/check-regal-window.sh
+```
+
+该检查执行实际编译出的 `RegalRefreshWindow`，用模拟 Android 调度器和面板状态验证 750ms 等待、busy 后连续三次 idle、3 秒期限、失败回退，以及 auto 交接/新窗口之后的旧 worker 不再写开关。模拟检查不代表设备物理残影效果。
+
 ## 构建与交付
 
 ```sh
@@ -57,10 +74,21 @@ v1 只增加灰阶帧；v2 在最终帧明确发 UI Regal 开启。两者实测�
 
 原始逆向证据：`/Volumes/Lunar/SN/reverse/highlight-cleanup-analysis.md`；v1 实机记录：`/Volumes/Lunar/SN/reverse/mosaic-regal-execution-check.md`。
 
-## v3 交付记录
+## 原 v3 交付记录（2026-10-18）
 
 - `buildPlugin.sh --with-logs` 构建成功；ZIP、内层 NPK、bundle 来源和编译后的操作入口校验通过。
 - 本地包：`build/outputs/plugin_mosaic_regal_v3.snplg`，6,632,215 字节。
 - 已推送到 `/sdcard/mystyle/plugin_mosaic_regal_v3.snplg`。
 - 主机/设备 SHA-256 一致：`58a3d37b2fbbf1a5fe92d47067dbab0bc43cd661f256234758faf13a5904f517`。
 - 尚待用户安装后验证开关时序与物理残影效果。
+
+## 本次恢复交付（2026-10-19）
+
+- 基于当前 `9ccb199` 修复，不回退连接卡片、手写交接或 auto 的刷新模式。
+- 构建标记：`nonauto-a2-regal-window-20261019`。
+- `buildPlugin.sh --with-logs` 构建成功；模拟窗口的 15 项等待、超时、失败回退和旧异步结果/auto 交接检查通过。
+- 包和内层 NPK ZIP 校验通过；包含新窗口与 auto 分支标记，不含旧黑白批次类/入口；JS bundle 哈希仍与记录一致。
+- 本地包：`build/outputs/plugin_mosaic_nonauto_a2_regal_v3.snplg`，6,647,249 字节。
+- 已推送：`/sdcard/mystyle/plugin_mosaic_nonauto_a2_regal_v3.snplg`。
+- 主机/设备 SHA-256 一致：`3bbc954cf2f8580d16db3097943ae605167230cfd1e48d504107ecd6eddd526e`。
+- 仅推送，由用户安装测试；本次未声称已验证设备上的物理残影效果。

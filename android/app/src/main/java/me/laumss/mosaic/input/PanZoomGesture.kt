@@ -8,9 +8,6 @@ import me.laumss.mosaic.engine.*
 import me.laumss.mosaic.inkling.*
 import me.laumss.mosaic.note.*
 import me.laumss.mosaic.render.*
-import android.graphics.Rect
-import android.graphics.RectF
-import android.graphics.Region
 import android.util.Log
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -36,31 +33,6 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
     fun resetNoteScrollMode() {
         board.handler.removeCallbacks(noteScrollResetTask)
         MosaicEinkRefreshModule.resetNative(NOTE_SCROLL_EINK_OWNER)
-    }
-
-    private fun recordCleanupPosition(g: FingerGesture.PanZoom) {
-        if (!board.surface.showsBoardChrome) return
-        val bounds = Rect()
-        val px = RectF()
-        val strokes = ArrayList<BoardEngine.StrokeRec>()
-        synchronized(BoardEngine.lock) {
-            for (card in BoardEngine.cards.values) {
-                if (card.colored) continue
-                board.worldRectToPx(BoardEngine.cardDirtyBounds(card), px).roundOut(bounds)
-                if (bounds.intersect(0, 0, board.content.width, board.content.height)) g.cleanupTrail.op(bounds, Region.Op.UNION)
-            }
-            // Capture ink at the old viewport before each pan/zoom step, including
-            // boards containing only handwriting. The driver selects settled white
-            // pixels after the final frame, preserving ink at its new position.
-            BoardEngine.queryCanvasStrokes(board.viewWorld(), strokes)
-            for (stroke in strokes) {
-                if (stroke.connectionId?.let { BoardEngine.necks[it]?.dark } == true) continue
-                val ends = stroke.threadEnds
-                if (ends != null && BoardEngine.cards[ends.first]?.colored == true && BoardEngine.cards[ends.second]?.colored == true) continue
-                board.worldRectToPx(BoardEngine.strokeWorldBounds(stroke), px).roundOut(bounds)
-                if (bounds.intersect(0, 0, board.content.width, board.content.height)) g.cleanupTrail.op(bounds, Region.Op.UNION)
-            }
-        }
     }
 
     fun begin(a: Finger, b: Finger) {
@@ -154,7 +126,7 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
 
         g.overscroll = null
         if (panX != BoardViewport.panX || panY != BoardViewport.panY || nextScale != BoardViewport.scale) {
-            recordCleanupPosition(g)
+            g.cleanupNeeded = true
         }
         g.frames++
         BoardViewport.set(panX, panY, nextScale)
@@ -171,7 +143,6 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
     }
 
     fun end(g: FingerGesture.PanZoom, cleanOldPositions: Boolean = true) {
-        if (cleanOldPositions && !g.cleanupTrail.isEmpty) recordCleanupPosition(g)
         var panX = BoardViewport.panX
         var panY = BoardViewport.panY
         var scale = BoardViewport.scale
@@ -217,7 +188,7 @@ internal class PanZoomGesture(private val board: BoardInteractionController) {
         board.selection.updateLassoOverlay()
         armed = false
         board.presentation.release(BoardPresentation.Reason.PAN_ZOOM)
-        if (cleanOldPositions) board.trailCleanup.schedule(g.cleanupTrail, "pan-zoom")
+        if (cleanOldPositions && g.cleanupNeeded) board.trailCleanup.schedule("pan-zoom")
         if (!board.surface.showsBoardChrome) {
             board.handler.removeCallbacks(noteScrollResetTask)
             board.handler.postDelayed(noteScrollResetTask, BoardInteractionController.NOTE_SCROLL_SETTLE_MS)

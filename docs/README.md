@@ -11,7 +11,7 @@
 - **卡片手势**：连续书写中的直线可识别为拉出/连接手势，横向拉出新卡使用源卡高度作为新卡宽度，图片卡允许方括号扩边。
 - **构建与检查**：新增 Unix `buildPlugin.sh`、独立 Android 进程的尺寸/连接/交接/刷新模式检查，以及交付记录；修正 NoteSession 属性 setter 与方法的 JVM 命名冲突。
 
-当前刷新策略以 CLAUDE.md 的“刷新模式”和源码为准（套索整段 FullUiAuto、拖动按 Regal 开关；画布平移缩放恢复 3154694 的 A2 与黑白清理），[卡片拖动 AUTO、套索保持 A2](card-auto-lasso-a2.md) 已被取代；连接约束及交接修复见 [连接卡片安全修复](connected-card-safe.md)。其他模式切换文档为历史记录。
+当前刷新策略以 CLAUDE.md 的“刷新模式”和源码为准（套索整段 FullUiAuto、拖动按 UI Regal 开关；非 auto 的 A2 移动恢复 v3 操作窗口：默认关闭、最终帧开启、空闲后关闭），[卡片拖动 AUTO、套索保持 A2](card-auto-lasso-a2.md) 已被取代；连接约束及交接修复见 [连接卡片安全修复](connected-card-safe.md)。其他模式切换文档为历史记录。
 
 ## 当前已知问题
 

@@ -9,10 +9,15 @@ import me.laumss.mosaic.MosaicEinkRefreshModule
  * whole time the lasso is in use; a drag opens Regal when pressed and closes it at its first move.
  * There is no mode change when a drag starts, only the Regal flag.
  */
-internal class LassoAutoRefresh(private val view: View) {
+internal class LassoAutoRefresh(
+    private val view: View,
+    private val beforeEnable: () -> Unit = {},
+    private val afterDisable: () -> Unit = {},
+) {
     private var wanted = false
     private var suspended = false
     private var applied = false
+    val isApplied: Boolean get() = applied
     // Mirrors HandWriteClient.regalStatus. Turning FullUiAuto on or off leaves Regal on.
     private var regal = true
 
@@ -61,8 +66,14 @@ internal class LassoAutoRefresh(private val view: View) {
 
     private fun apply(on: Boolean, reason: String) {
         if (applied == on) return
-        if (MosaicEinkRefreshModule.setFullUiAuto(view, on, "lasso:$reason")) regal = true
+        if (on) beforeEnable()
+        if (!MosaicEinkRefreshModule.setFullUiAuto(view, on, "lasso:$reason")) {
+            Log.w(TAG, "fullAuto request failed on=$on reason=$reason; ownership unchanged")
+            return
+        }
+        regal = true
         applied = on
+        if (!on) afterDisable()
         Log.i(TAG, "fullAuto=$on reason=$reason")
     }
 

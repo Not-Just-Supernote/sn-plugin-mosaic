@@ -8,6 +8,7 @@ import me.laumss.mosaic.inkling.*
 import me.laumss.mosaic.input.*
 import me.laumss.mosaic.note.*
 import me.laumss.mosaic.render.*
+import android.content.Context
 import android.util.Log
 import android.graphics.Rect
 import android.view.View
@@ -73,6 +74,35 @@ class MosaicEinkRefreshModule(
                 Log.w(TAG, "UI Regal request failed reason=$reason", error)
                 false
             }
+        }
+
+        /** v3 gate: master and UI-auto must both be controlled, in the original firmware order. */
+        fun requestRegalState(context: Context, enabled: Boolean, reason: String): Boolean = try {
+            val manager = context.getSystemService("eink")
+            if (manager == null) false else {
+                val method = manager.javaClass.getMethod("sendHwcCmd", Int::class.javaPrimitiveType, IntArray::class.java)
+                fun send(args: IntArray): Boolean = try {
+                    method.invoke(manager, 1020, args)
+                    true
+                } catch (error: Exception) {
+                    Log.w("MosaicRegalGate", "request failed reason=$reason args=${args.contentToString()}", error)
+                    false
+                }
+                val masterOk: Boolean
+                val uiOk: Boolean
+                if (enabled) {
+                    masterOk = send(intArrayOf(1, 0, 0, 0))
+                    uiOk = send(intArrayOf(9, 1))
+                } else {
+                    uiOk = send(intArrayOf(9, 0))
+                    masterOk = send(intArrayOf(0, 0, 0, 0))
+                }
+                Log.i("MosaicRegalGate", "requested enabled=$enabled reason=$reason masterOk=$masterOk uiOk=$uiOk")
+                masterOk && uiOk
+            }
+        } catch (error: Exception) {
+            Log.w("MosaicRegalGate", "request failed enabled=$enabled reason=$reason", error)
+            false
         }
 
         /**

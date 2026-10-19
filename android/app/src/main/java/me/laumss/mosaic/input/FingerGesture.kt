@@ -8,7 +8,6 @@ import me.laumss.mosaic.engine.*
 import me.laumss.mosaic.inkling.*
 import me.laumss.mosaic.note.*
 import me.laumss.mosaic.render.*
-import android.graphics.Region
 
 internal class Finger(val id: Int, val downX: Float, val downY: Float, val downAt: Long, val penPriority: Boolean) {
     var x = downX
@@ -36,7 +35,7 @@ internal sealed class FingerGesture {
         val region: SparseNavigation.Region?,
         val neighbors: SparseNavigation.Neighbors,
     ) : FingerGesture() {
-        val cleanupTrail = Region()
+        var cleanupNeeded = false
         var frames = 0
         var overscroll: SparseNavigation.Overscroll? = null
 

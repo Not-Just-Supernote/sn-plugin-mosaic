@@ -11,7 +11,7 @@ import me.laumss.mosaic.render.*
 import android.os.Handler
 import android.util.Log
 
-class BoardPresentation(
+class BoardPresentation internal constructor(
     private val handler: Handler,
     private val content: BoardContentView,
 
@@ -71,6 +71,7 @@ class BoardPresentation(
     private var resetGen = 0
 
     var onStateChanged: ((State) -> Unit)? = null
+    var onA2MotionSettled: (() -> Unit)? = null
 
     val state: State get() = applied
 
@@ -150,6 +151,7 @@ class BoardPresentation(
         if (leavingBw) {
             if (mode == null) resetEink() else MosaicEinkRefreshModule.applyNative(mode, einkOwner)
         }
+        if (prev.einkMode == MosaicEinkRefreshModule.MODE_A2 && leavingBw) onA2MotionSettled?.invoke()
         if (looksChanged) content.setGesturePresentation(next.flatCards, next.hideTemplate, next.bwCards)
         if (einkChanged && !leavingBw) {
             if (mode != null && next.bwCards && !prev.bwCards) {

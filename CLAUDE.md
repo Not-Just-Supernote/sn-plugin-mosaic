@@ -10,7 +10,7 @@ Kotlin 代码在 `android/app/src/main/java/me/laumss/mosaic/`，按职责分包
 - `engine/`：场景数据和几何。`BoardEngine`（场景）、`BoardViewport`（视口）、`BoardHistory`（撤销）、`BoardGeometry`、`NeckGeometry`、`Shapes` 等，不依赖视图。
 - `render/`：四层视图和绘制，见下。
 - `drawpath/`：系统笔迹服务。连接和配置在 `DrawPathSession`，抬笔后的交接、背景同步和清轨迹的整屏刷新在 `InkHandoff`。
-- `eink/`：刷新模式 `BoardPresentation`，套索的 FullUiAuto/Regal `LassoAutoRefresh`，移动后的清理 `CardTrailCleanup`（卡片：最终帧 UI Regal；画布平移缩放：`EinkTrailCleanup` 黑白清理）；`EinkRegionDriver` 读屏幕忙碌状态并提交黑白清理（JNI 在 `cpp/eink_region.c`，函数名带包名，换包要一起改）。
+- `eink/`：刷新模式 `BoardPresentation`，套索的 FullUiAuto/Regal `LassoAutoRefresh`，移动后的清理 `CardTrailCleanup`（非 auto：`RegalRefreshWindow` 操作窗口；FullUiAuto：现有最终帧 UI Regal）；`EinkRegionDriver` 只读屏幕忙碌状态（JNI 在 `cpp/eink_region.c`，函数名带包名，换包要一起改）。
 - `note/`：笔记卡片。打开关闭和页面状态在 `NoteSession`，文件读写在 `NoteController`、`TchFile`，插入 Note 的截图和链接在 `NoteShots`。
 - `inkling/`：Notipal 协同。广播在 `InklingLink`，剪贴板、调色盘和导入在 `InklingBridge`，回调在 `InklingCallbacks`。
 
@@ -68,7 +68,7 @@ JS 依赖的 `React/src/` 只有 `boardFormat.ts` 在仓库里，其余文件不
 
 套索下的卡片拖动、改尺寸、旋转和纯笔迹变换（CARD_ADJUST、TRANSFORM）都不切换刷新模式：按下（开始拖动）时开 Regal，第一次真正移动时关 Regal，最终帧由 `CardTrailCleanup` 再请求一次 UI Regal。运动中卡片用黑白网点配方，松手恢复静态灰色。
 
-画布双指平移缩放与 3154694 相同：PAN_ZOOM 用 A2 和扁平配方，结束后由 `CardTrailCleanup.schedule(region, …)` 在场景稳定后对旧位置露出的白色区域做黑白清理（`EinkTrailCleanup`、`CardCleanupBacklog`，JNI 在 `cpp/eink_region.c`）。笔记内部平移缩放、浮窗和滑条仍是 A2。
+非 FullUiAuto 时默认关闭 Regal 总开关和 UI 开关。画布/笔记平移缩放及其他 A2 运动结束后，等待原有 A2 释放和可见 tile 完成，在自然最终帧里由 `RegalRefreshWindow` 临时打开总开关、再打开 UI Regal；等待屏幕空闲后关闭。新输入取消活动窗口；失焦、隐藏、分离时交还宿主。进入 FullUiAuto 前先取消窗口和旧异步结果、恢复宿主开启基线；auto 持有期间非 auto 窗口不写开关；auto 退出后才恢复默认关闭。`LassoAutoRefresh` 的按下开/移动关 UI Regal 时序保留。黑白清理批次及旧位置队列已移除，JNI 只读 busy。运动时 A2/配方和原有释放时机保持原样。
 
 静态加深灰色配方只在 A2 之外显示；A2 期间卡片保持黑白网点，A2 释放时先恢复模式再画静态灰色（`BoardPresentation.State.bwCards`）。宿主全刷后的 EinkGrayRestore 保留原有实现。
 

@@ -159,10 +159,15 @@ class BoardInteractionController(
     private var regions: List<SparseNavigation.Region> = emptyList()
     private var chromeUpdatePosted = false
 
-    internal val lassoAuto by lazy { LassoAutoRefresh(content) }
+    internal val lassoAuto by lazy {
+        LassoAutoRefresh(content,
+            beforeEnable = { trailCleanup.onAutoStarting() },
+            afterDisable = { trailCleanup.onAutoStopped() })
+    }
 
     internal val presentation by lazy {
         BoardPresentation(handler, content, { surface.showsBoardChrome }, EINK_OWNER, GESTURE_SETTLE_MS, lassoAuto).also {
+            it.onA2MotionSettled = { trailCleanup.onA2MotionSettled() }
             it.onStateChanged = { if (pen.penHovering && !pen.penContact) pen.reevaluateTrailColor("presentation") }
         }
     }

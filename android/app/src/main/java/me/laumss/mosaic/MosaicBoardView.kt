@@ -27,7 +27,7 @@ class MosaicBoardView(
 ) : FrameLayout(reactContext) {
     companion object {
         private const val TAG = LogTags.BOARD_VIEW
-        private const val NATIVE_BUILD_TAG = "card-a2-regal-final-20261018"
+        private const val NATIVE_BUILD_TAG = "nonauto-a2-regal-window-20261019"
 
         const val BOARD_VISIBILITY_EVENT = "MosaicBoardVisibility"
     }
@@ -178,6 +178,7 @@ class MosaicBoardView(
             Log.i(TAG, "viewport restored pan=(${it.panX},${it.panY}) scale=${it.scale}")
         }
         controller.attach()
+        controller.trailCleanup.resume("attach")
 
         contentView.requestInitialRaster()
         mainHandler.postDelayed({
@@ -277,8 +278,8 @@ class MosaicBoardView(
             drawPath.restoreDrawPathPressureCurve()
         }
         if (!attached || !hasWindowFocus) return
-        controller.trailCleanup.resume("focus-gained")
         if (windowVisibility == VISIBLE) controller.lassoAuto.resume("focus-gained")
+        controller.trailCleanup.resume("focus-gained")
         mainHandler.postDelayed({
             if (attached && hasWindowFocus) {
                 drawPath.requestRotationReconfigure("windowFocusGained")
@@ -289,10 +290,13 @@ class MosaicBoardView(
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
         if (!attached) return
-        if (visibility != VISIBLE) controller.trailCleanup.cancel("hidden")
-        else controller.trailCleanup.resume("visible")
-        if (visibility != VISIBLE) controller.lassoAuto.suspend("hidden")
-        else if (hasWindowFocus()) controller.lassoAuto.resume("visible")
+        if (visibility != VISIBLE) {
+            controller.trailCleanup.cancel("hidden")
+            controller.lassoAuto.suspend("hidden")
+        } else {
+            if (hasWindowFocus()) controller.lassoAuto.resume("visible")
+            controller.trailCleanup.resume("visible")
+        }
         if (visibility != VISIBLE) drawPath.restoreDrawPathPressureCurve()
         else if (hasWindowFocus()) drawPath.scheduleConfigure("window-visible")
     }
