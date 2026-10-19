@@ -10,7 +10,7 @@ Kotlin 代码在 `android/app/src/main/java/me/laumss/mosaic/`，按职责分包
 - `engine/`：场景数据和几何。`BoardEngine`（场景）、`BoardViewport`（视口）、`BoardHistory`（撤销）、`BoardGeometry`、`NeckGeometry`、`Shapes` 等，不依赖视图。
 - `render/`：四层视图和绘制，见下。
 - `drawpath/`：系统笔迹服务。连接和配置在 `DrawPathSession`，抬笔后的交接、背景同步和清轨迹的整屏刷新在 `InkHandoff`。
-- `eink/`：刷新模式 `BoardPresentation`，套索的 FullUiAuto/Regal `LassoAutoRefresh`，移动后的清理 `CardTrailCleanup`（非 auto：`RegalRefreshWindow` 操作窗口；FullUiAuto：现有最终帧 UI Regal）；`EinkRegionDriver` 只读屏幕忙碌状态（JNI 在 `cpp/eink_region.c`，函数名带包名，换包要一起改）。
+- `eink/`：刷新模式 `BoardPresentation`，套索的 FullUiAuto/Regal `LassoAutoRefresh`，移动后的清理 `CardTrailCleanup`（非 auto：`RegalRefreshWindow` 操作窗口；FullUiAuto：`PanelIdleWait` 等最终帧上屏后开 UI Regal）；`EinkRegionDriver` 只读屏幕忙碌状态（JNI 在 `cpp/eink_region.c`，函数名带包名，换包要一起改）。
 - `note/`：笔记卡片。打开关闭和页面状态在 `NoteSession`，文件读写在 `NoteController`、`TchFile`，插入 Note 的截图和链接在 `NoteShots`。
 - `inkling/`：Notipal 协同。广播在 `InklingLink`，剪贴板、调色盘和导入在 `InklingBridge`，回调在 `InklingCallbacks`。
 
@@ -66,7 +66,7 @@ JS 依赖的 `React/src/` 只有 `boardFormat.ts` 在仓库里，其余文件不
 
 进入套索工具或显示套索选区（包括长按卡片）后，LASSO 不设视图刷新模式，而是照系统 Note 套索（`AreaSelectionView`、`HandWriteClient.setFullAuto/setRegalStatus`）整段开启 FullUiAuto：`enableFullUiAuto(true, false)`，开关时都把 UI Regal（HWC 1020 `[9,1]`）打开。取消选区、结束拖动或自动工具回退不释放；手动选择其他工具时延迟 200ms 关闭；窗口失焦或隐藏时立即交还宿主，回来后重新打开；插件 detach 和手动全刷立即关闭。代码在 `LassoAutoRefresh`。
 
-套索下的卡片拖动、改尺寸、旋转和纯笔迹变换（CARD_ADJUST、TRANSFORM）都不切换刷新模式：按下（开始拖动）时开 Regal，第一次真正移动时关 Regal，最终帧由 `CardTrailCleanup` 再请求一次 UI Regal。运动中卡片用黑白网点配方，松手恢复静态灰色。
+套索下的卡片拖动、改尺寸、旋转和纯笔迹变换（CARD_ADJUST、TRANSFORM）都不切换刷新模式：按下（开始拖动）时开 Regal，第一次真正移动时关 Regal。松手后不在最终帧的 onDraw 里开 Regal（HWC 命令立即生效，比这一帧先到屏幕，会把 Regal 刷在调整前的画面上，最终位置留下残影），而是由 `CardTrailCleanup` 用 `PanelIdleWait` 等最终帧上屏、屏幕空闲后，经 `LassoAutoRefresh.settled` 打开 Regal，保持到下次移动。运动中卡片用黑白网点配方，松手恢复静态灰色。
 
 非 FullUiAuto 时默认关闭 Regal 总开关和 UI 开关。画布/笔记平移缩放及其他 A2 运动结束后，等待原有 A2 释放和可见 tile 完成，在自然最终帧里由 `RegalRefreshWindow` 临时打开总开关、再打开 UI Regal；等待屏幕空闲后关闭。新输入取消活动窗口；失焦、隐藏、分离时交还宿主。进入 FullUiAuto 前先取消窗口和旧异步结果、恢复宿主开启基线；auto 持有期间非 auto 窗口不写开关；auto 退出后才恢复默认关闭。`LassoAutoRefresh` 的按下开/移动关 UI Regal 时序保留。黑白清理批次及旧位置队列已移除，JNI 只读 busy。运动时 A2/配方和原有释放时机保持原样。
 

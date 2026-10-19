@@ -11,9 +11,18 @@ internal class CardTrailCleanup(private val board: BoardInteractionController) {
     private var pendingRegal = true
     private var foreground = true
     private val window = RegalRefreshWindow(board.content, canOwn = { foreground && !board.lassoAuto.isApplied })
+    // FullUiAuto: Regal goes back on only once the final frame is on the panel.
+    private val autoSettle = PanelIdleWait(board.content)
 
     fun cancel(reason: String) {
         board.host.cancelGrayRestore(reason)
+        if (autoSettle.isWaiting) {
+            autoSettle.cancel()
+            if (reason !in FORGET_REASONS && pendingReason == null) {
+                pendingReason = "interrupted:$reason"
+                pendingRegal = true
+            }
+        }
         if (reason in RELEASE_REASONS) foreground = false
         if (window.isActive && reason !in FORGET_REASONS && pendingReason == null) {
             pendingReason = "interrupted:$reason"
@@ -33,12 +42,16 @@ internal class CardTrailCleanup(private val board: BoardInteractionController) {
 
     /** FullUiAuto is about to take control; invalidate all outstanding window completions first. */
     fun onAutoStarting() {
+        autoSettle.cancel()
         if (window.isActive && pendingReason == null) pendingReason = "interrupted:full-auto"
         window.release("full-auto")
     }
 
     /** FullUiAuto has released control; restore the non-auto idle baseline when visible. */
-    fun onAutoStopped() = resume("full-auto-stopped")
+    fun onAutoStopped() {
+        autoSettle.cancel()
+        resume("full-auto-stopped")
+    }
 
     fun schedule(reason: String, requestRegal: Boolean = true) {
         pendingReason = reason
@@ -62,8 +75,17 @@ internal class CardTrailCleanup(private val board: BoardInteractionController) {
         if (!pendingRegal) {
             Log.i(TAG, "final frame owner=board-card reason=$reason redrawOnly=true")
         } else if (board.lassoAuto.isApplied) {
-            val requested = MosaicEinkRefreshModule.requestUiRegal(board.content, true, "board-card:$reason")
-            Log.i(TAG, "final frame owner=board-card reason=$reason mode=auto uiRegalRequested=$requested extraFrame=false")
+            // Sent from here, the command reached the panel before this frame did: the Regal pass
+            // landed on the frame before the adjustment and the final frame kept the motion ghosting.
+            autoSettle.start { how ->
+                if (!ready()) {
+                    Log.i(TAG, "auto regal skipped owner=board-card reason=$reason after=$how: new input or not visible")
+                    return@start
+                }
+                val sent = board.lassoAuto.settled("board-card:$reason")
+                Log.i(TAG, "auto regal owner=board-card reason=$reason after=$how uiRegalSent=$sent")
+            }
+            Log.i(TAG, "final frame owner=board-card reason=$reason mode=auto uiRegal=after-panel-idle extraFrame=false")
         } else {
             val opened = window.begin(reason)
             Log.i(TAG, "final frame owner=board-card reason=$reason mode=non-auto regalWindowOpened=$opened extraFrame=false")
