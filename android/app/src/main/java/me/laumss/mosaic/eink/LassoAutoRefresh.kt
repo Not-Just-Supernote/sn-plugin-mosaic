@@ -64,13 +64,6 @@ internal class LassoAutoRefresh(
         if (applied) setRegal(false, reason)
     }
 
-    /** The moved selection's final frame is on the panel: Regal back on, the resting state. */
-    fun settled(reason: String): Boolean {
-        if (!applied || regal) return false
-        setRegal(true, reason)
-        return true
-    }
-
     private fun apply(on: Boolean, reason: String) {
         if (applied == on) return
         if (on) beforeEnable()

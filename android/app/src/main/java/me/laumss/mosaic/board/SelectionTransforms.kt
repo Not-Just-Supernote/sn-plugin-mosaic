@@ -22,6 +22,8 @@ import kotlin.math.min
 internal class SelectionTransforms(private val board: BoardInteractionController) {
     companion object {
         private const val ROTATE_SNAP_DEG = 3f
+        // Frame stroke and handles drawn outside the selection rectangle.
+        private const val SWEEP_PAD_DP = 24f
     }
 
     private fun presentationReason(m: MoveSession): BoardPresentation.Reason = when (m) {
@@ -50,6 +52,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         board.overlay.beginMovePreview(null, emptyList(), inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardViewport.scale * board.density, ink = previewInk)
         hideFromTiles(listOf(card.id))
         board.overlay.showCardPreview(board.worldRectToPx(session.preview, RectF()), card.kind, card.colored)
+        startSweep(session, session.connectionGuard)
         board.lassoAuto.pressed("card-resize")
         board.presentation.acquire(presentationReason(session))
         updateConnectionPreview(session.connectionGuard, session.preview)
@@ -211,6 +214,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         collectSelectionPreview(previewSelection, ArrayList(), ArrayList(), cardRects, inkPath, grayBridges, previewInk)
         board.overlay.beginMovePreview(board.worldRectToPx(sel.rect, RectF()), cardRects, inkPath, BoardInteractionController.PEN_WIDTH_DP * BoardViewport.scale * board.density, cards.map { !it.colored }, grayBridges, ink = previewInk)
         hideFromTiles(sel.cardIds, sel.strokeIds)
+        startSweep(session)
         board.lassoAuto.pressed("selection-resize")
         board.presentation.acquire(presentationReason(session))
         Log.i(LogTags.LASSO, "resize begin cards=${cards.size} strokes=${strokes.size} handle=$handle pen=$isPen")
@@ -294,6 +298,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         board.presentation.acquire(BoardPresentation.Reason.TRANSFORM)
         Log.i(LogTags.LASSO, "rotate begin strokes=${strokes.size} pen=$isPen")
         return MoveSession.SelectionRotate(isPen, pointerId, wx, wy, sel, strokes, sel.rect.centerX(), sel.rect.centerY())
+            .also { startSweep(it) }
     }
 
     private fun rotateAngle(m: MoveSession.SelectionRotate, wx: Float, wy: Float): Float {
@@ -377,6 +382,7 @@ internal class SelectionTransforms(private val board: BoardInteractionController
         Log.i(LogTags.LASSO, "move begin cards=${cards.size} strokes=${strokes.size} pen=$isPen singleCard=${liftZ != null}")
         return MoveSession.Selection(isPen, pointerId, wx, wy, sel, cards, strokes, liftZ).also {
             it.connectionGuard = guard
+            startSweep(it, guard)
             cards.singleOrNull()?.let { card -> updateConnectionPreview(guard, card.rect()) }
         }
     }
@@ -416,6 +422,48 @@ internal class SelectionTransforms(private val board: BoardInteractionController
 
     private fun applyMove(m: MoveSession, wx: Float, wy: Float) {
         if (m !is MoveSession.Selection && (wx != m.startWorldX || wy != m.startWorldY)) motionStarted(m)
+        applyPreview(m, wx, wy)
+        sweepCurrent(m)
+    }
+
+    // Screen area the drag has drawn over: the start, every preview position and the end, with the
+    // selection frame and its buttons. The Note app's lasso keeps the same union (AreaSelectionView.refreshRect)
+    // and refreshes it after the drag; Regal alone leaves ghosting where the final frame did not change.
+    private fun startSweep(m: MoveSession, guard: ConnectedCardConstraints? = null) {
+        m.sweptPx.setEmpty()
+        sweepCurrent(m)
+        // Bridges to the neighbours are previewed and move with the card.
+        guard?.neighbours?.forEach { sweepWorld(m, it) }
+        sweepOverlay(m)
+    }
+
+    private fun sweepCurrent(m: MoveSession) {
+        val world = when (m) {
+            is MoveSession.CardResize -> RectF(m.preview)
+            is MoveSession.Selection -> RectF(m.selection.rect).apply { offset(m.dx, m.dy) }
+            is MoveSession.SelectionResize -> RectF(m.preview)
+            is MoveSession.SelectionRotate -> RectF().also {
+                Matrix().apply { setRotate(Math.toDegrees(m.angle.toDouble()).toFloat(), m.pivotX, m.pivotY) }
+                    .mapRect(it, m.selection.rect)
+            }
+        }
+        sweepWorld(m, world)
+    }
+
+    private fun sweepWorld(m: MoveSession, world: RectF) {
+        val px = board.worldRectToPx(world, RectF())
+        val pad = SWEEP_PAD_DP * board.density
+        px.inset(-pad, -pad)
+        m.sweptPx.union(px)
+    }
+
+    private fun sweepOverlay(m: MoveSession) {
+        // The selection frame where it is drawn now, e.g. after a dropped card snapped to a neighbour.
+        board.selection.lasso?.let { sweepWorld(m, it.rect) }
+        board.overlay.cleanupExclusionBounds().forEach { m.sweptPx.union(it) }
+    }
+
+    private fun applyPreview(m: MoveSession, wx: Float, wy: Float) {
         when (m) {
             is MoveSession.CardResize -> {
                 computeResizePreview(m, wx, wy)
@@ -585,11 +633,13 @@ internal class SelectionTransforms(private val board: BoardInteractionController
                 Log.i(LogTags.INTERACTION, "[LassoPerf] kind=selection-rotate input=${if (m.isPen) "pen" else "touch"} rawMoves=${m.rawMoves} durationMs=$elapsed deg=${Math.toDegrees(m.angle.toDouble())}")
             }
         }
+        sweepCurrent(m)
+        sweepOverlay(m)
         val reason = presentationReason(m)
         // Restore the static appearance now; the lasso keeps its FullUiAuto until the user
-        // chooses another tool. Regal comes back on in the final frame (CardTrailCleanup).
+        // chooses another tool. CardTrailCleanup refreshes the swept area once the final frame is drawn.
         board.presentation.release(reason, linger = reason == BoardPresentation.Reason.TRANSFORM)
-        board.trailCleanup.schedule("card-transform")
+        board.trailCleanup.schedule("card-transform", sweptPx = m.sweptPx)
     }
 
     fun cancelMoveSession(m: MoveSession) {
@@ -606,8 +656,11 @@ internal class SelectionTransforms(private val board: BoardInteractionController
             is MoveSession.SelectionResize -> { board.overlay.endMovePreview(); unhideFromTiles(); board.host.drawPath.setSuspended(false, "lasso-selection-resize-cancel"); board.selection.updateLassoOverlay() }
             is MoveSession.SelectionRotate -> { board.overlay.endMovePreview(); unhideFromTiles(); board.host.drawPath.setSuspended(false, "lasso-selection-rotate-cancel"); board.selection.updateLassoOverlay() }
         }
+        sweepOverlay(m)
         val reason = presentationReason(m)
         board.presentation.release(reason, linger = reason == BoardPresentation.Reason.TRANSFORM)
+        // The preview moved even though nothing is committed: clear what it left behind.
+        if (m.motionStarted) board.trailCleanup.scheduleRegion("card-transform-cancel", m.sweptPx)
     }
 
     // 拖动时原位置不留东西：卡片连同桥和线、选中的笔迹都从内容层拿掉，只看叠加层的预览。
@@ -650,6 +703,8 @@ internal sealed class MoveSession(val isPen: Boolean, val pointerId: Int, val st
     var connectionLimited = false
     var motionStarted = false
     var rawMoves = 0
+    // Screen pixels the drag has drawn over (SelectionTransforms.sweepCurrent).
+    val sweptPx = RectF()
     val startedAt = SystemClock.uptimeMillis()
 
     class CardResize(isPen: Boolean, pointerId: Int, sx: Float, sy: Float, val card: BoardEngine.CardRec, val handle: BoardGeometry.Handle) : MoveSession(isPen, pointerId, sx, sy) {

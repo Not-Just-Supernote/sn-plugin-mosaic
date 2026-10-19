@@ -31,6 +31,9 @@ class MosaicEinkRefreshModule(
 
         const val MODE_A2 = 4
 
+        // NoteInsidePagesActivity.autoRefreshInvalidate passes 10 to View.invalidate(l, t, r, b, mode).
+        const val REGION_REFRESH_MODE = 10
+
         @Volatile private var instance: WeakReference<MosaicEinkRefreshModule>? = null
 
         @JvmStatic
@@ -168,6 +171,30 @@ class MosaicEinkRefreshModule(
             root.postInvalidateOnAnimation()
             Log.i(TAG, "full refresh requested reason=$reason via=root.forceEinkFullUpdate")
             return true
+        }
+
+        /**
+         * The Note app's lasso refresh (NoteInsidePagesActivity.autoRefreshInvalidate): Ratta's hidden
+         * View.invalidate(left, top, right, bottom, mode) with mode 10 redraws the area with a refresh that
+         * drives every pixel, so it clears ghosting that a Regal update leaves where nothing changed.
+         * Without that method Note refreshes the whole screen, and so does this.
+         */
+        fun refreshRegion(view: View, rect: Rect, reason: String): Boolean {
+            val method = try {
+                View::class.java.getDeclaredMethod("invalidate", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+                    Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            } catch (_: NoSuchMethodException) {
+                Log.w(TAG, "region refresh unavailable reason=$reason: no View.invalidate(l,t,r,b,mode); full refresh instead")
+                return requestFullRefresh(view, "region-fallback:$reason")
+            }
+            return try {
+                method.invoke(view, rect.left, rect.top, rect.right, rect.bottom, REGION_REFRESH_MODE)
+                Log.i(TAG, "region refresh requested reason=$reason rect=$rect mode=$REGION_REFRESH_MODE")
+                true
+            } catch (error: Exception) {
+                Log.w(TAG, "region refresh failed reason=$reason rect=$rect", error)
+                false
+            }
         }
 
         /** One submission with explicit gray conversion, leaving gesture ownership intact. */

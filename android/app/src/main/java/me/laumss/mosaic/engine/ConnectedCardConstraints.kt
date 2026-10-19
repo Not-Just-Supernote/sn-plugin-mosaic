@@ -75,6 +75,7 @@ internal class ConnectedCardConstraints(start: RectF, specs: List<Link>) {
     // Only bridges carrying ink limit the edit.
     private val guarded = links.filter { it.link.strokes.isNotEmpty() }
     val isEmpty: Boolean get() = links.isEmpty()
+    val neighbours: List<RectF> = specs.map { RectF(it.other) }
     val bridgeStrokes: List<BoardEngine.StrokeRec> = specs.flatMap { it.strokes }.distinctBy { it.id }
 
     fun isValid(rect: RectF): Boolean {
