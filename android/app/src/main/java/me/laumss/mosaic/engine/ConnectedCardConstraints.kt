@@ -9,7 +9,11 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
 
-/** Keep every active incident bridge and its currently visible ink during a single-card edit. */
+/**
+ * Single-card edit of a connected card. Bridges with ink on them stay intact: the edit stops before
+ * the break distance or before clipping that ink. Bridges without ink only preview; the card may pull
+ * past the break distance, the bridge disappears and the connection stays, as for an unconnected move.
+ */
 internal class ConnectedCardConstraints(start: RectF, specs: List<Link>) {
     class Link(
         val id: String,
@@ -68,13 +72,15 @@ internal class ConnectedCardConstraints(start: RectF, specs: List<Link>) {
         }
         BoundLink(spec, mask, protected)
     }
+    // Only bridges carrying ink limit the edit.
+    private val guarded = links.filter { it.link.strokes.isNotEmpty() }
     val isEmpty: Boolean get() = links.isEmpty()
     val bridgeStrokes: List<BoardEngine.StrokeRec> = specs.flatMap { it.strokes }.distinctBy { it.id }
 
     fun isValid(rect: RectF): Boolean {
         if (rect.isEmpty || !rect.left.isFinite() || !rect.top.isFinite() ||
             !rect.right.isFinite() || !rect.bottom.isFinite()) return false
-        for (bound in links) {
+        for (bound in guarded) {
             val mask = bound.mask ?: return false
             val link = bound.link
             val protected = bound.protectedInk
@@ -97,7 +103,7 @@ internal class ConnectedCardConstraints(start: RectF, specs: List<Link>) {
     /** Walk from the previous legal preview, then stop at the first invalid point. */
     fun constrain(previous: RectF, requested: RectF, out: RectF): Boolean {
         val target = RectF(requested)
-        if (isEmpty) { out.set(target); return false }
+        if (guarded.isEmpty()) { out.set(target); lastLegal.set(target); return false }
         val from = if (previous == lastLegal || isValid(previous)) RectF(previous) else RectF(initial)
         if (target == from) { out.set(from); lastLegal.set(from); return false }
         val limited = walk(from, target, out)
@@ -136,8 +142,10 @@ internal class ConnectedCardConstraints(start: RectF, specs: List<Link>) {
         links.mapNotNull { bound -> bridge(bound.link, rect)?.let { it to bound.link.dark } }
 
     private fun bridge(link: Link, rect: RectF): Path? {
-        // Stay just inside the break distance after CardRec's width/height round trip.
-        val limit = max(NeckGeometry.MAX_DISTANCE - 0.25f, max(0f, NeckGeometry.signedEdgeDistance(initial, link.other)))
+        // Inked bridges stay just inside the break distance after CardRec's width/height round trip.
+        // Bare bridges break at the same distance as the committed neck.
+        val limit = if (link.strokes.isEmpty()) NeckGeometry.MAX_DISTANCE
+            else max(NeckGeometry.MAX_DISTANCE - 0.25f, max(0f, NeckGeometry.signedEdgeDistance(initial, link.other)))
         return if (link.movingIsFrom) NeckGeometry.build(rect, link.other, limit)
             else NeckGeometry.build(link.other, rect, limit)
     }

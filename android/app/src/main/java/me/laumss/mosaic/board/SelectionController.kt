@@ -368,7 +368,8 @@ internal class SelectionController(private val board: BoardInteractionController
             else -> listOf("trash")
         }
 
-        val actions = baseTypes + "copy"
+        // A group of connected cards cannot be copied.
+        val actions = if (hasConnectedCards(current)) baseTypes else baseTypes + "copy"
         val types = if (board.noteShots.canInsert(current)) actions + "shot" else actions
 
         val onDark = singleCard &&
@@ -398,6 +399,14 @@ internal class SelectionController(private val board: BoardInteractionController
             Shapes.Kind.ELLIPSE -> listOf("circle", fillAction)
             Shapes.Kind.TRIANGLE -> listOf("iso", "equi", "right", fillAction)
             Shapes.Kind.LINE -> emptyList()
+        }
+    }
+
+    private fun hasConnectedCards(sel: LassoSelection): Boolean {
+        if (sel.cardIds.size < 2) return false
+        val selected = sel.cardIds.toHashSet()
+        return synchronized(BoardEngine.lock) {
+            BoardEngine.connections.values.any { it.fromId in selected && it.toId in selected }
         }
     }
 
@@ -513,7 +522,7 @@ internal class SelectionController(private val board: BoardInteractionController
 
     private fun copyLassoSelection() {
         val sel = lasso ?: return
-        if (selectionCopyBusy || board.surfaceSwitching) return
+        if (selectionCopyBusy || board.surfaceSwitching || hasConnectedCards(sel)) return
         val offset = 24f / BoardViewport.scale.coerceAtLeast(0.01f)
         val plan = SelectionCopy.build(sel.cardIds, sel.strokeIds, BoardEngine.snapshotScene(), offset, board.notes.notesDirectory, board::newId)
         if (plan.change.isEmpty) return
